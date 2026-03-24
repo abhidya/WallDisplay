@@ -20,7 +20,6 @@ import aiohttp
 
 from discovery.base import CastingSession
 from discovery.discovery_manager import DiscoveryManager
-from core.device_manager import get_device_manager
 
 logger = logging.getLogger(__name__)
 RELAY_IDLE_TIMEOUT_SECONDS = 15
@@ -158,7 +157,7 @@ class OverlayCastService:
 
     def __init__(self):
         self.discovery_manager = DiscoveryManager.get_instance()
-        self.legacy_device_manager = get_device_manager()
+        self.legacy_device_manager = None
         self.sessions: Dict[str, OverlayCastSession] = {}
         self.device_sessions: Dict[str, str] = {}
         self.session_history: list[dict] = []
@@ -481,6 +480,10 @@ class OverlayCastService:
         return f"{base}/backend-static/overlay_window.html?{urlencode(params)}"
 
     def _resolve_dlna_device(self, device_id: str):
+        if self.legacy_device_manager is None:
+            from core.device_manager import get_device_manager
+            self.legacy_device_manager = get_device_manager()
+
         device = self.discovery_manager.get_device_by_id(device_id)
         if device and device.action_url:
             return device

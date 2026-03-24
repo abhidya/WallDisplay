@@ -826,6 +826,31 @@
                     }
                 };
 
+                const handleVideoEnded = () => {
+                    const state = mappingMediaState.get(group.id);
+                    if (!state || state.sources.length <= 1) return;
+                    if (state.holdUntil && Date.now() < state.holdUntil) {
+                        const currentVideo = state.element;
+                        currentVideo.currentTime = 0;
+                        currentVideo.play().catch(() => {});
+                        return;
+                    }
+                    const nextIndex = (state.currentIndex + 1) % state.sources.length;
+                    queueNextVideo(nextIndex);
+                };
+
+                const handleVideoError = () => {
+                    if (!resolved) {
+                        resolved = true;
+                        resolve();
+                    }
+                };
+
+                const attachVideoHandlers = (targetVideo) => {
+                    targetVideo.onended = handleVideoEnded;
+                    targetVideo.onerror = handleVideoError;
+                };
+
                 const swapToLoadedVideo = (loadedVideo, nextIndex) => {
                     state.currentIndex = nextIndex;
                     state.element = loadedVideo;
@@ -847,6 +872,7 @@
                     nextVideo.playsInline = true;
                     nextVideo.preload = 'auto';
                     nextVideo.loop = state.sources.length === 1;
+                    attachVideoHandlers(nextVideo);
 
                     nextVideo.onloadeddata = () => {
                         updateVideoTimingState(nextVideo, state, nextIndex);
@@ -854,6 +880,7 @@
                     };
                     nextVideo.onerror = () => {
                         state.pendingAdvance = false;
+                        handleVideoError();
                     };
 
                     nextVideo.src = state.sources[nextIndex];
@@ -887,24 +914,7 @@
                         resolve();
                     }
                 };
-                video.onended = () => {
-                    const state = mappingMediaState.get(group.id);
-                    if (!state || state.sources.length <= 1) return;
-                    if (state.holdUntil && Date.now() < state.holdUntil) {
-                        const currentVideo = state.element;
-                        currentVideo.currentTime = 0;
-                        currentVideo.play().catch(() => {});
-                        return;
-                    }
-                    const nextIndex = (state.currentIndex + 1) % state.sources.length;
-                    queueNextVideo(nextIndex);
-                };
-                video.onerror = () => {
-                    if (!resolved) {
-                        resolved = true;
-                        resolve();
-                    }
-                };
+                attachVideoHandlers(video);
                 applyVideoSource(currentIndex);
             });
         }
