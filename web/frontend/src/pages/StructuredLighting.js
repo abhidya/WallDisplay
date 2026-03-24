@@ -713,7 +713,6 @@ function StructuredLighting() {
                         <Stack direction="row" spacing={1} alignItems="flex-start">
                           <Checkbox
                             checked={selectedSessionIds.includes(session.session_id)}
-                            indeterminate={someVisibleSelected && !selectedSessionIds.includes(session.session_id) ? false : undefined}
                             onClick={(event) => event.stopPropagation()}
                             onChange={() => toggleSessionSelection(session.session_id)}
                             size="small"

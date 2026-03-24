@@ -77,6 +77,10 @@ These are the cheapest fixes with immediate product value and low architectural 
   - explicit `accepted` vs `needs_recapture` verdicts
   - export gated on accepted review state
   - reviewer metadata, acceptance timestamp, and active/archive queue split
+- added structured-lighting batch triage controls in the session queue:
+  - visible-session multi-select
+  - bulk accept / recapture / delete actions
+  - quick queue counters for pending, recapture, and accepted sessions
 - added direct polygon mask authoring in `Mappings`, allowing operators to click points on the stage and save new blackout masks as white-on-black scene PNGs without leaving the site
 - worklog expanded into a more opinionated design brief
 
@@ -84,7 +88,7 @@ These are the cheapest fixes with immediate product value and low architectural 
 
 1. Push derived availability into more backend endpoints so it becomes the default status language.
 2. Add device-scoped cleanup actions in streaming diagnostics rather than only per-session controls.
-3. Add structured-lighting artifact quality thresholds and batch actions so operators can process multiple recapture sessions faster.
+3. Add structured-lighting artifact quality thresholds so review warnings are based on stronger heuristics than coverage alone.
 
 ## Current Problems
 
@@ -240,7 +244,6 @@ Implemented pieces include:
 
 Current remaining gaps:
 
-- batch actions for multiple recapture sessions
 - explicit quality thresholds and warnings beyond simple coverage heuristics
 - richer search/history for accepted calibration sessions
 
