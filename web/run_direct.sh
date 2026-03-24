@@ -29,6 +29,11 @@ fi
 
 "$NANODLNA_PYTHON_BIN" -m pip install -r requirements.txt
 
+if [ "$NANODLNA_INSTALL_PLAYWRIGHT" = "1" ] && "$NANODLNA_PYTHON_BIN" -c "import playwright" >/dev/null 2>&1; then
+    echo "Installing Playwright Chromium runtime..."
+    "$NANODLNA_PYTHON_BIN" -m playwright install chromium
+fi
+
 echo "Checking for import errors..."
 PYTHONPATH="$NANODLNA_BACKEND_DIR" "$NANODLNA_PYTHON_BIN" -c "import sys; sys.path.insert(0, '.'); import main" 2>/tmp/import_check.log
 

@@ -40,6 +40,11 @@ ensure_backend_dependencies() {
 
     log "Installing backend dependencies"
     "$NANODLNA_PYTHON_BIN" -m pip install -r requirements.txt >> "$NANODLNA_LOG_DIR/backend.stdout.log" 2>> "$NANODLNA_LOG_DIR/backend.stderr.log"
+
+    if [ "$NANODLNA_INSTALL_PLAYWRIGHT" = "1" ] && "$NANODLNA_PYTHON_BIN" -c "import playwright" >/dev/null 2>&1; then
+        log "Installing Playwright Chromium runtime"
+        "$NANODLNA_PYTHON_BIN" -m playwright install chromium >> "$NANODLNA_LOG_DIR/backend.stdout.log" 2>> "$NANODLNA_LOG_DIR/backend.stderr.log"
+    fi
 }
 
 ensure_frontend_dependencies() {

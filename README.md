@@ -181,6 +181,7 @@ Both templates assume:
 - `my_device_config.json` is the active device config
 - `NANODLNA_MEDIA_ROOT` points at the machine's `Movies` folder
 - the Python venv lives in repo-local `.venv`
+- Playwright Chromium is auto-installed on startup when `NANODLNA_INSTALL_PLAYWRIGHT=1`
 
 If your media lives elsewhere, change `NANODLNA_MEDIA_ROOT` in the copied `.env`.
 
