@@ -27,10 +27,7 @@ if [ -x "$NANODLNA_VENV_DIR/bin/python" ]; then
     NANODLNA_PYTHON_BIN="$NANODLNA_VENV_DIR/bin/python"
 fi
 
-if [ ! -f .deps_backend.stamp ] || [ requirements.txt -nt .deps_backend.stamp ]; then
-    "$NANODLNA_PYTHON_BIN" -m pip install -r requirements.txt
-    touch .deps_backend.stamp
-fi
+"$NANODLNA_PYTHON_BIN" -m pip install -r requirements.txt
 
 echo "Checking for import errors..."
 PYTHONPATH="$NANODLNA_BACKEND_DIR" "$NANODLNA_PYTHON_BIN" -c "import sys; sys.path.insert(0, '.'); import main" 2>/tmp/import_check.log
@@ -64,11 +61,8 @@ FRONTEND_PID=""
 
 if [ "$NANODLNA_FRONTEND_ENABLED" = "1" ]; then
     cd "$NANODLNA_FRONTEND_DIR"
-    if [ ! -f .deps_frontend.stamp ] || [ package-lock.json -nt .deps_frontend.stamp ] || [ package.json -nt .deps_frontend.stamp ]; then
-        echo "Installing frontend dependencies..."
-        "$NANODLNA_NPM_BIN" install
-        touch .deps_frontend.stamp
-    fi
+    echo "Installing frontend dependencies..."
+    "$NANODLNA_NPM_BIN" install
 
     echo "Starting frontend server..."
     PORT="$NANODLNA_FRONTEND_PORT" BROWSER=none "$NANODLNA_NPM_BIN" start >> "$NANODLNA_LOG_DIR/frontend.stdout.log" 2>> "$NANODLNA_LOG_DIR/frontend.stderr.log" &

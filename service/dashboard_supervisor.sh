@@ -38,11 +38,8 @@ ensure_backend_dependencies() {
         NANODLNA_PYTHON_BIN="$NANODLNA_VENV_DIR/bin/python"
     fi
 
-    if [ ! -f .deps_backend.stamp ] || [ requirements.txt -nt .deps_backend.stamp ]; then
-        log "Installing backend dependencies"
-        "$NANODLNA_PYTHON_BIN" -m pip install -r requirements.txt >> "$NANODLNA_LOG_DIR/backend.stdout.log" 2>> "$NANODLNA_LOG_DIR/backend.stderr.log"
-        touch .deps_backend.stamp
-    fi
+    log "Installing backend dependencies"
+    "$NANODLNA_PYTHON_BIN" -m pip install -r requirements.txt >> "$NANODLNA_LOG_DIR/backend.stdout.log" 2>> "$NANODLNA_LOG_DIR/backend.stderr.log"
 }
 
 ensure_frontend_dependencies() {
@@ -51,11 +48,8 @@ ensure_frontend_dependencies() {
     fi
 
     cd "$NANODLNA_FRONTEND_DIR"
-    if [ ! -f .deps_frontend.stamp ] || [ package-lock.json -nt .deps_frontend.stamp ] || [ package.json -nt .deps_frontend.stamp ]; then
-        log "Installing frontend dependencies"
-        "$NANODLNA_NPM_BIN" install >> "$NANODLNA_LOG_DIR/frontend.stdout.log" 2>> "$NANODLNA_LOG_DIR/frontend.stderr.log"
-        touch .deps_frontend.stamp
-    fi
+    log "Installing frontend dependencies"
+    "$NANODLNA_NPM_BIN" install >> "$NANODLNA_LOG_DIR/frontend.stdout.log" 2>> "$NANODLNA_LOG_DIR/frontend.stderr.log"
 }
 
 start_children() {
