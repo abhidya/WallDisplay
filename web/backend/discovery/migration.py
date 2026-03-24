@@ -5,6 +5,7 @@ Provides backward compatibility while transitioning to the new architecture.
 
 import logging
 import asyncio
+from urllib.parse import urlparse
 from typing import Dict, List, Optional, Any
 import threading
 
@@ -166,6 +167,17 @@ class DiscoveryMigrationAdapter:
     def _convert_old_to_new_device(self, old_device) -> Optional[Device]:
         """Convert old device instance to new unified Device."""
         try:
+            port = getattr(old_device, "port", None)
+            if port is None:
+                action_url = getattr(old_device, "action_url", None)
+                if action_url:
+                    parsed = urlparse(action_url)
+                    port = parsed.port
+                    if port is None and parsed.scheme == "https":
+                        port = 443
+                if port is None:
+                    port = 80
+
             # Determine casting method
             if isinstance(old_device, DLNADevice):
                 casting_method = CastingMethod.DLNA
@@ -187,12 +199,12 @@ class DiscoveryMigrationAdapter:
                 
             # Create new device
             new_device = Device(
-                id=f"{casting_method.value}_{old_device.hostname}_{old_device.port}",
+                id=f"{casting_method.value}_{old_device.hostname}_{port}",
                 name=old_device.name,
                 friendly_name=old_device.friendly_name or old_device.name,
                 casting_method=casting_method,
                 hostname=old_device.hostname,
-                port=old_device.port,
+                port=port,
                 capabilities=capabilities,
                 metadata={
                     "legacy_device": True,
