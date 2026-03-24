@@ -201,7 +201,7 @@ class DiscoveryMigrationAdapter:
             new_device = Device(
                 id=f"{casting_method.value}_{old_device.hostname}_{port}",
                 name=old_device.name,
-                friendly_name=old_device.friendly_name or old_device.name,
+                friendly_name=getattr(old_device, "friendly_name", None) or old_device.name,
                 casting_method=casting_method,
                 hostname=old_device.hostname,
                 port=port,
