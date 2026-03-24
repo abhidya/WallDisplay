@@ -1,0 +1,50 @@
+#!/bin/bash
+
+COMMON_ENV_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$COMMON_ENV_DIR/.." && pwd)"
+
+if [ -f "$ROOT_DIR/.env" ]; then
+    set -a
+    # shellcheck disable=SC1091
+    source "$ROOT_DIR/.env"
+    set +a
+fi
+
+export NANODLNA_ROOT_DIR="${NANODLNA_ROOT_DIR:-$ROOT_DIR}"
+export NANODLNA_HOST="${NANODLNA_HOST:-0.0.0.0}"
+export NANODLNA_BACKEND_PORT="${NANODLNA_BACKEND_PORT:-8000}"
+export NANODLNA_FRONTEND_PORT="${NANODLNA_FRONTEND_PORT:-3000}"
+export NANODLNA_FRONTEND_ENABLED="${NANODLNA_FRONTEND_ENABLED:-1}"
+export NANODLNA_SERVICE_LABEL="${NANODLNA_SERVICE_LABEL:-com.nanodlna.dashboard}"
+export NANODLNA_GIT_BRANCH="${NANODLNA_GIT_BRANCH:-main}"
+export NANODLNA_GIT_REMOTE="${NANODLNA_GIT_REMOTE:-origin}"
+export NANODLNA_GIT_AUTO_UPDATE="${NANODLNA_GIT_AUTO_UPDATE:-0}"
+export NANODLNA_SERVICE_RESTART_DELAY="${NANODLNA_SERVICE_RESTART_DELAY:-5}"
+
+if [ -z "${NANODLNA_VENV_DIR:-}" ]; then
+    if [ -d "$NANODLNA_ROOT_DIR/.venv" ]; then
+        NANODLNA_VENV_DIR="$NANODLNA_ROOT_DIR/.venv"
+    else
+        NANODLNA_VENV_DIR="$NANODLNA_ROOT_DIR/web/backend/venv"
+    fi
+fi
+export NANODLNA_VENV_DIR
+
+if [ -z "${NANODLNA_PYTHON_BIN:-}" ]; then
+    if [ -x "$NANODLNA_VENV_DIR/bin/python" ]; then
+        NANODLNA_PYTHON_BIN="$NANODLNA_VENV_DIR/bin/python"
+    else
+        NANODLNA_PYTHON_BIN="${PYTHON:-python3}"
+    fi
+fi
+export NANODLNA_PYTHON_BIN
+
+export NANODLNA_NPM_BIN="${NANODLNA_NPM_BIN:-npm}"
+export NANODLNA_LOG_DIR="${NANODLNA_LOG_DIR:-$NANODLNA_ROOT_DIR/logs}"
+export NANODLNA_BACKEND_DIR="$NANODLNA_ROOT_DIR/web/backend"
+export NANODLNA_FRONTEND_DIR="$NANODLNA_ROOT_DIR/web/frontend"
+export NANODLNA_DB_PATH="${NANODLNA_DB_PATH:-$NANODLNA_BACKEND_DIR/nanodlna.db}"
+
+if [ -n "${NANODLNA_CONFIG_FILE:-}" ] && [[ "$NANODLNA_CONFIG_FILE" != /* ]]; then
+    export NANODLNA_CONFIG_FILE="$NANODLNA_ROOT_DIR/$NANODLNA_CONFIG_FILE"
+fi
