@@ -14,11 +14,13 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Dict, Optional
 from urllib.parse import urlencode
+from urllib.parse import urlparse
 
 import aiohttp
 
 from discovery.base import CastingSession
 from discovery.discovery_manager import DiscoveryManager
+from core.device_manager import get_device_manager
 
 logger = logging.getLogger(__name__)
 RELAY_IDLE_TIMEOUT_SECONDS = 15
@@ -156,6 +158,7 @@ class OverlayCastService:
 
     def __init__(self):
         self.discovery_manager = DiscoveryManager.get_instance()
+        self.legacy_device_manager = get_device_manager()
         self.sessions: Dict[str, OverlayCastSession] = {}
         self.device_sessions: Dict[str, str] = {}
         self.session_history: list[dict] = []
@@ -477,6 +480,54 @@ class OverlayCastService:
             params["controls"] = "hidden"
         return f"{base}/backend-static/overlay_window.html?{urlencode(params)}"
 
+    def _resolve_dlna_device(self, device_id: str):
+        device = self.discovery_manager.get_device_by_id(device_id)
+        if device and device.action_url:
+            return device
+
+        host = None
+        port = None
+        if device_id.startswith("dlna_"):
+            parts = device_id.split("_")
+            if len(parts) >= 3:
+                host = parts[1]
+                try:
+                    port = int(parts[2])
+                except ValueError:
+                    port = None
+
+        for candidate in self.discovery_manager.get_all_devices():
+            if candidate.casting_method.value != "dlna":
+                continue
+            if host and candidate.hostname != host:
+                continue
+            if port is not None and candidate.port != port:
+                continue
+            if candidate.action_url:
+                return candidate
+
+        for legacy_device in self.legacy_device_manager.get_devices():
+            if host and getattr(legacy_device, "hostname", None) != host:
+                continue
+            action_url = getattr(legacy_device, "action_url", None)
+            if not action_url:
+                continue
+            parsed = urlparse(action_url)
+            action_port = parsed.port or (443 if parsed.scheme == "https" else 80)
+            if port is not None and action_port != port:
+                continue
+
+            return type("ResolvedDevice", (), {
+                "id": device_id,
+                "name": getattr(legacy_device, "name", host or device_id),
+                "friendly_name": getattr(legacy_device, "friendly_name", getattr(legacy_device, "name", device_id)),
+                "hostname": getattr(legacy_device, "hostname", host),
+                "port": action_port,
+                "action_url": action_url,
+            })()
+
+        return device
+
     def _get_local_ip(self) -> str:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
@@ -578,7 +629,7 @@ class OverlayCastService:
         return encoder, ffmpeg_cmd
 
     async def _direct_dlna_handshake(self, session: OverlayCastSession) -> CastingSession:
-        device = self.discovery_manager.get_device_by_id(session.device_id)
+        device = self._resolve_dlna_device(session.device_id)
         if not device or not device.action_url:
             raise RuntimeError("DLNA device action URL not available")
 
@@ -650,7 +701,7 @@ class OverlayCastService:
         )
 
     async def _direct_dlna_stop(self, session: OverlayCastSession):
-        device = self.discovery_manager.get_device_by_id(session.device_id)
+        device = self._resolve_dlna_device(session.device_id)
         if not device or not device.action_url:
             return
 
