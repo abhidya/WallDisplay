@@ -40,11 +40,11 @@ pkill -f "TwistedStreamingServer" 2>/dev/null || true
 
 # Clean up the database
 echo "Cleaning up the database..."
-python3 clean_videos.py
+python clean_videos.py
 
 # Add videos from the configuration to the database
 echo "Adding videos from configuration to the database..."
-python3 add_config_videos.py
+python add_config_videos.py
 
 # Reset the dashboard log file to ensure fresh logs
 echo "Resetting dashboard log file..."

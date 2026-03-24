@@ -65,6 +65,17 @@ class StreamingRequestHandler(SimpleHTTPRequestHandler):
         now = time.time()
         
         logger.debug(f"Received GET request for {path}")
+
+        # First, honor the active stream's explicit file map. This allows
+        # streamed files to live outside the backend uploads directory.
+        mapped_file = self.file_map.get(path)
+        if not mapped_file and path.startswith('uploads/'):
+            mapped_file = self.file_map.get(path[len('uploads/'):])
+        if mapped_file and os.path.exists(mapped_file) and os.path.isfile(mapped_file):
+            logger.debug(f"Serving mapped file for {path}: {mapped_file}")
+            self._serve_file_with_mime(mapped_file)
+            self.files_served[clean_path] = (now, mapped_file)
+            return
         
         # Get the requested filename regardless of path differences
         normalized_path = None
@@ -296,8 +307,16 @@ class StreamingService:
             logger.error(f"Error getting serve IP: {e}")
             return '127.0.0.1'
     
-    def start_server(self, files: Dict[str, str], serve_ip: str, serve_port: Optional[int] = None, 
-                     port_range: Optional[Tuple[int, int]] = None, device_name: Optional[str] = None) -> Tuple[Dict[str, str], Any]:
+    def start_server(
+        self,
+        files: Dict[str, str],
+        serve_ip: str,
+        serve_port: Optional[int] = None,
+        port_range: Optional[Tuple[int, int]] = None,
+        device_name: Optional[str] = None,
+        stream_type: str = "device_stream",
+        consumer_id: Optional[str] = None,
+    ) -> Tuple[Dict[str, str], Any]:
         """
         Start an HTTP server to serve media files
         
@@ -320,7 +339,7 @@ class StreamingService:
             logger.debug(f"Starting streaming server on {serve_ip} starting at port {serve_port}")
         else:
             # Default port range if nothing specified
-            min_port, max_port = 9000, 9100
+            min_port, max_port = 9010, 9100
             logger.debug(f"Starting streaming server on {serve_ip} with default port range {min_port}-{max_port}")
         
         # Create a temporary directory for serving files
@@ -328,6 +347,7 @@ class StreamingService:
         
         # Create symbolic links to the files in the temporary directory
         normalized_files = {}
+        served_files = {}
         for file_key, file_path in files.items():
             # Check if file_key contains path separators (indicating full path preservation is needed)
             if '/' in file_key and not file_key.startswith('file_'):
@@ -343,6 +363,7 @@ class StreamingService:
                 
                 os.symlink(os.path.abspath(file_path), symlink_path)
                 normalized_files[file_key] = file_key  # Keep full path
+                served_files[file_key] = os.path.abspath(file_path)
                 logger.debug(f"Created symlink with path for {file_key}: {file_path} -> {symlink_path}")
             else:
                 # Standard behavior for backward compatibility
@@ -350,6 +371,7 @@ class StreamingService:
                 file_name = self.normalize_file_name(os.path.basename(file_path))
                 os.symlink(os.path.abspath(file_path), os.path.join(temp_dir.name, file_name))
                 normalized_files[file_key] = file_name
+                served_files[file_name] = os.path.abspath(file_path)
                 logger.debug(f"Created symlink for {file_key}: {file_path} -> {file_name}")
         
         # Try ports in the specified range
@@ -366,7 +388,9 @@ class StreamingService:
                             device_name=device_name,
                             video_path=file_path,
                             server_ip=serve_ip,
-                            server_port=port
+                            server_port=port,
+                            stream_type=stream_type,
+                            consumer_id=consumer_id,
                         )
                         sessions[normalized_files[file_key]] = session.session_id
                 
@@ -384,7 +408,7 @@ class StreamingService:
                             # Use the first session ID if available, better than failing
                             streaming_session_id = next(iter(sessions.values())) if sessions else None
                             return StreamingRequestHandler(*args, streaming_session_id=streaming_session_id, 
-                                                         file_map=normalized_files, **kwargs)
+                                                         file_map=served_files, **kwargs)
                     
                     if path.startswith('/'):
                         path = path[1:]
@@ -392,7 +416,7 @@ class StreamingService:
                     streaming_session_id = sessions.get(path)
                     logger.debug(f"Created handler for path: {path}, session ID: {streaming_session_id}")
                     return StreamingRequestHandler(*args, streaming_session_id=streaming_session_id, 
-                                                 file_map=normalized_files, **kwargs)
+                                                 file_map=served_files, **kwargs)
                 
                 # Create the HTTP server with our handler
                 httpd = HTTPServer((serve_ip, port), handler_factory)
@@ -515,8 +539,11 @@ class StreamingService:
         Args:
             session: The streaming session that appears stalled
         """
-        logger.warning(f"Handling stalled session {session.session_id} for device {session.device_name}")
-        
+        is_internal_overlay_session = (
+            session.stream_type in {"projection_stream", "overlay_mapping_stream"}
+            or session.device_name in {"overlay", "overlay-mapping"}
+        )
+
         # Check if we've exceeded reconnection attempts
         if session.has_exceeded_reconnection_limit():
             logger.error(f"Session {session.session_id} has exceeded max reconnection attempts ({session.max_reconnection_attempts})")
@@ -532,17 +559,19 @@ class StreamingService:
         
         # Check if we should attempt reconnection (respects cooldown period)
         if not session.should_attempt_reconnection():
-            logger.info(f"Skipping reconnection for session {session.session_id} (cooldown period)")
+            logger.debug(f"Skipping reconnection for session {session.session_id} (cooldown period)")
             return
         
-        # Special handling for overlay sessions - they don't have a device in device_manager
-        if session.device_name == "overlay":
-            logger.info(f"Overlay session {session.session_id} is stalled, marking for cleanup")
+        # Internal overlay sessions are not real renderer devices and should not enter device recovery.
+        if is_internal_overlay_session:
+            logger.debug(f"Internal overlay session {session.session_id} is stalled, marking for cleanup")
             # Mark session as error state to prevent repeated health checks
             session.status = "error"
             session.active = False
             session.record_reconnection_attempt()
             return
+
+        logger.warning(f"Handling stalled session {session.session_id} for device {session.device_name}")
         
         # Check if this is a false positive before taking action
         if self.device_manager:
@@ -590,7 +619,13 @@ class StreamingService:
                 # Mark session as error to prevent repeated attempts
                 session.status = "error"
                 
-    def get_or_create_stream(self, video_path: str, device_name: str = "overlay") -> dict:
+    def get_or_create_stream(
+        self,
+        video_path: str,
+        device_name: str = "overlay",
+        stream_type: str = "device_stream",
+        consumer_id: Optional[str] = None,
+    ) -> dict:
         """
         Get an existing stream or create a new one for the given video path
         Implements stream reuse to prevent port exhaustion (9000-9100 range)
@@ -651,8 +686,10 @@ class StreamingService:
             files_urls, server = self.start_server(
                 files=files,
                 serve_ip=serve_ip,
-                port_range=(9000, 9100),
-                device_name=device_name
+                port_range=(9010, 9100),
+                device_name=device_name,
+                stream_type=stream_type,
+                consumer_id=consumer_id,
             )
             
             actual_port = server.server_address[1]
@@ -672,8 +709,10 @@ class StreamingService:
                 files_urls, server = self.start_server(
                     files=files,
                     serve_ip=serve_ip,
-                    port_range=(9000, 9100),
-                    device_name=device_name
+                    port_range=(9010, 9100),
+                    device_name=device_name,
+                    stream_type=stream_type,
+                    consumer_id=consumer_id,
                 )
                 actual_port = server.server_address[1]
                 return {

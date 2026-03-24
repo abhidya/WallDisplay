@@ -38,7 +38,7 @@ class BrightnessControlService:
             logger.error(f"Failed to create black video: {e}")
             # Fallback to any existing black video
             fallback_paths = [
-                "/Users/mannybhidya/PycharmProjects/nano-dlna/web/backend/static/black_video.mp4",
+                "/Users/abdulrehmanbhidya/Movies/black.mp4",
                 os.path.join(os.path.dirname(__file__), "..", "static", "black_video.mp4")
             ]
             for path in fallback_paths:
@@ -235,10 +235,10 @@ class BrightnessControlService:
                             
                             # Search for the file in common locations
                             possible_paths = [
-                                f"/Users/mannybhidya/Movies/kitchendoorjune/{filename}",
-                                f"/Users/mannybhidya/Desktop/{filename}",
-                                f"/Users/mannybhidya/PycharmProjects/nano-dlna/web/backend/uploads/{filename}",
-                                f"/Users/mannybhidya/PycharmProjects/nano-dlna/web/uploads/videos/{filename}",
+                                f"/Users/abdulrehmanbhidya/Movies/kitchendoorjune/{filename}",
+                                f"/Users/abdulrehmanbhidya/Desktop/{filename}",
+                                f"/Users/abdulrehmanbhidya/PycharmProjects/nano-dlna/web/backend/uploads/{filename}",
+                                f"/Users/abdulrehmanbhidya/PycharmProjects/nano-dlna/web/uploads/videos/{filename}",
                             ]
                             
                             found_path = None

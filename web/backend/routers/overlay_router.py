@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional, Set
@@ -14,9 +14,13 @@ from schemas.overlay import (
     OverlayConfigUpdate,
     OverlayConfigResponse,
     OverlayStreamRequest,
-    OverlayStreamResponse
+    OverlayStreamResponse,
+    OverlayWindowInitResponse,
+    OverlayCastStartRequest,
+    OverlayCastSessionResponse,
 )
 from services.overlay_service import OverlayService
+from services.overlay_cast_service import get_overlay_cast_service
 from models.overlay import OverlayConfig
 
 router = APIRouter(prefix="/api/overlay", tags=["overlay"])
@@ -67,12 +71,15 @@ async def create_overlay_config(
 @router.get("/configs", response_model=List[OverlayConfigResponse])
 async def list_overlay_configs(
     video_id: Optional[int] = Query(None, description="Filter by video ID"),
+    mapping_scene_id: Optional[int] = Query(None, description="Filter by mapping scene ID"),
     db: Session = Depends(get_db)
 ):
     """List overlay configurations, optionally filtered by video ID"""
     try:
         service = OverlayService(db)
         configs = service.list_configs(video_id=video_id)
+        if mapping_scene_id is not None:
+            configs = [config for config in configs if config.mapping_scene_id == mapping_scene_id]
         return configs
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -159,6 +166,65 @@ async def create_overlay_stream(
         return stream_info
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/window-init", response_model=OverlayWindowInitResponse)
+async def get_overlay_window_init(
+    config_id: int = Query(..., description="Overlay configuration ID"),
+    db: Session = Depends(get_db)
+):
+    """Build a self-contained payload for bootstrapping overlay_window.html via URL params."""
+    try:
+        service = OverlayService(db)
+        return service.get_window_init_payload(config_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/cast", response_model=OverlayCastSessionResponse)
+async def start_overlay_cast(
+    cast_request: OverlayCastStartRequest,
+    request: Request,
+):
+    """Render an overlay config in headless Chromium and cast the resulting MPEG-TS relay over DLNA."""
+    try:
+        service = get_overlay_cast_service()
+        overlay_base_url = cast_request.overlay_base_url or str(request.base_url).rstrip("/")
+        session = await service.start_cast(
+            device_id=cast_request.device_id,
+            config_id=cast_request.config_id,
+            overlay_base_url=overlay_base_url,
+            controls_hidden=cast_request.controls_hidden,
+            viewport_width=cast_request.viewport_width,
+            viewport_height=cast_request.viewport_height,
+            capture_width=cast_request.capture_width,
+            capture_height=cast_request.capture_height,
+            quality=cast_request.quality,
+            frame_rate=cast_request.frame_rate,
+            stream_port=cast_request.stream_port,
+        )
+        return OverlayCastSessionResponse(**session)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/cast/sessions", response_model=List[OverlayCastSessionResponse])
+async def list_overlay_cast_sessions():
+    service = get_overlay_cast_service()
+    return [OverlayCastSessionResponse(**session) for session in service.list_sessions()]
+
+
+@router.delete("/cast/sessions/{session_id}")
+async def stop_overlay_cast(session_id: str):
+    service = get_overlay_cast_service()
+    stopped = await service.stop_cast(session_id)
+    if not stopped:
+        raise HTTPException(status_code=404, detail="Overlay cast session not found")
+    return {"status": "stopped", "session_id": session_id}
 
 @router.get("/templates", response_model=List[OverlayConfigResponse])
 async def list_overlay_templates():

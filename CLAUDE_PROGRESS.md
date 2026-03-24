@@ -475,7 +475,7 @@ Users need a way to overlay live information widgets on top of projection-mapped
 *I want to select a video from the dashboard and launch an overlay projection window that I can extend to my projector via AirPlay,*  
 *So that I can display the video with live information widgets while having the ability to adjust alignments and save my configuration for future use.*
 
-**POC Analysis** (Located at `/Users/mannybhidya/PycharmProjects/overlay frontdoor/`):
+**POC Analysis** (Located at `/Users/abdulrehmanbhidya/PycharmProjects/overlay frontdoor/`):
 - **index.html**: Combined weather, time, and transit widgets with video background
 - **Video Loading**: Port scanning approach (9000-8990) matching nano-dlna's streaming server
 - **Live Data Sources**: 

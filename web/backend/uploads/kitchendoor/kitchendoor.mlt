@@ -1,0 +1,223 @@
+<?xml version="1.0" standalone="no"?>
+<mlt LC_NUMERIC="C" version="7.37.0" title="Shotcut version 26.1.30" producer="main_bin">
+  <profile description="PAL 4:3 DV or DVD" width="1920" height="1080" progressive="1" sample_aspect_num="1" sample_aspect_den="1" display_aspect_num="16" display_aspect_den="9" frame_rate_num="25" frame_rate_den="1" colorspace="709"/>
+  <playlist id="main_bin">
+    <property name="xml_retain">1</property>
+  </playlist>
+  <producer id="black" in="00:00:00.000" out="00:00:14.000">
+    <property name="length">00:00:14.040</property>
+    <property name="eof">pause</property>
+    <property name="resource">0</property>
+    <property name="aspect_ratio">1</property>
+    <property name="mlt_service">color</property>
+    <property name="mlt_image_format">rgba</property>
+    <property name="set.test_audio">0</property>
+  </producer>
+  <playlist id="background">
+    <entry producer="black" in="00:00:00.000" out="00:00:14.000"/>
+  </playlist>
+  <producer id="producer0" in="00:00:00.000" out="03:59:59.960">
+    <property name="length">04:00:00.000</property>
+    <property name="eof">pause</property>
+    <property name="resource">#FF000000</property>
+    <property name="aspect_ratio">1</property>
+    <property name="mlt_service">color</property>
+    <property name="mlt_image_format">rgba</property>
+    <property name="shotcut:caption">#FF000000</property>
+    <property name="ignore_points">0</property>
+    <property name="xml">was here</property>
+    <property name="seekable">1</property>
+  </producer>
+  <playlist id="playlist0">
+    <property name="shotcut:video">1</property>
+    <property name="shotcut:name">V1</property>
+    <entry producer="producer0" in="00:00:00.000" out="00:00:14.000"/>
+  </playlist>
+  <chain id="chain0" out="00:00:09.880">
+    <property name="length">00:00:09.920</property>
+    <property name="eof">pause</property>
+    <property name="resource">/Users/abdulrehmanbhidya/Downloads/download.MP4</property>
+    <property name="mlt_service">avformat-novalidate</property>
+    <property name="meta.media.nb_streams">2</property>
+    <property name="meta.media.0.stream.type">video</property>
+    <property name="meta.media.0.stream.frame_rate">30</property>
+    <property name="meta.media.0.stream.sample_aspect_ratio">0</property>
+    <property name="meta.media.0.codec.width">704</property>
+    <property name="meta.media.0.codec.height">1280</property>
+    <property name="meta.media.0.codec.rotate">0</property>
+    <property name="meta.media.0.codec.pix_fmt">yuv420p</property>
+    <property name="meta.media.0.codec.sample_aspect_ratio">0</property>
+    <property name="meta.media.0.codec.colorspace">709</property>
+    <property name="meta.media.0.codec.name">h264</property>
+    <property name="meta.media.0.codec.long_name">H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10</property>
+    <property name="meta.media.0.codec.bit_rate">5241903</property>
+    <property name="meta.attr.0.stream.handler_name.markup">VideoHandler</property>
+    <property name="meta.attr.0.stream.vendor_id.markup">[0][0][0][0]</property>
+    <property name="meta.attr.0.stream.encoder.markup">Lavc60.31.102 libx264</property>
+    <property name="meta.media.1.stream.type">audio</property>
+    <property name="meta.media.1.codec.sample_fmt">fltp</property>
+    <property name="meta.media.1.codec.sample_rate">96000</property>
+    <property name="meta.media.1.codec.channels">2</property>
+    <property name="meta.media.1.codec.layout">stereo</property>
+    <property name="meta.media.1.codec.name">aac</property>
+    <property name="meta.media.1.codec.long_name">AAC (Advanced Audio Coding)</property>
+    <property name="meta.media.1.codec.bit_rate">191180</property>
+    <property name="meta.attr.1.stream.handler_name.markup">SoundHandler</property>
+    <property name="meta.attr.1.stream.vendor_id.markup">[0][0][0][0]</property>
+    <property name="meta.attr.major_brand.markup">isom</property>
+    <property name="meta.attr.minor_version.markup">512</property>
+    <property name="meta.attr.compatible_brands.markup">isomiso2avc1mp41</property>
+    <property name="meta.attr.encoder.markup">Lavf60.16.100</property>
+    <property name="seekable">1</property>
+    <property name="meta.media.sample_aspect_num">1</property>
+    <property name="meta.media.sample_aspect_den">1</property>
+    <property name="audio_index">1</property>
+    <property name="video_index">0</property>
+    <property name="creation_time">2026-02-20T12:32:37</property>
+    <property name="vstream">0</property>
+    <property name="meta.media.frame_rate_num">30</property>
+    <property name="meta.media.frame_rate_den">1</property>
+    <property name="meta.media.colorspace">709</property>
+    <property name="meta.media.color_trc">2</property>
+    <property name="meta.media.has_b_frames">2</property>
+    <property name="meta.media.width">704</property>
+    <property name="meta.media.height">1280</property>
+    <property name="meta.media.aspect_ratio">1</property>
+    <property name="meta.media.color_range">mpeg</property>
+    <property name="astream">0</property>
+    <property name="shotcut:skipConvert">1</property>
+    <property name="shotcut:hash">f3c4985856af7bae694c16d0a74bf8dd</property>
+    <property name="meta.media.top_field_first">0</property>
+    <property name="meta.media.progressive">1</property>
+    <property name="shotcut:caption">download.MP4</property>
+    <property name="xml">was here</property>
+    <property name="meta.shotcut.vui">1</property>
+    <filter id="filter0" out="00:00:09.880">
+      <property name="background">color:#00000000</property>
+      <property name="mlt_service">affine</property>
+      <property name="shotcut:filter">affineSizePosition</property>
+      <property name="transition.fix_rotate_x">90</property>
+      <property name="transition.fill">1</property>
+      <property name="transition.distort">1</property>
+      <property name="transition.rect">338.168 -557 1280.66 2194 1</property>
+      <property name="transition.valign">middle</property>
+      <property name="transition.halign">center</property>
+      <property name="shotcut:animIn">00:00:00.000</property>
+      <property name="shotcut:animOut">00:00:00.000</property>
+      <property name="transition.threads">0</property>
+      <property name="disable">0</property>
+    </filter>
+  </chain>
+  <producer id="producer1" in="00:00:00.000" out="03:59:59.960">
+    <property name="length">04:00:00.000</property>
+    <property name="eof">pause</property>
+    <property name="resource">/Users/abdulrehmanbhidya/Downloads/Alagaesia-for_fan_mail.jpg</property>
+    <property name="ttl">1</property>
+    <property name="aspect_ratio">1</property>
+    <property name="meta.media.progressive">1</property>
+    <property name="seekable">1</property>
+    <property name="format">1</property>
+    <property name="meta.media.width">1420</property>
+    <property name="meta.media.height">916</property>
+    <property name="mlt_service">qimage</property>
+    <property name="creation_time">2026-02-20T12:21:32</property>
+    <property name="shotcut:skipConvert">1</property>
+    <property name="shotcut:hash">24a4c71fff9d434dfd41982b200bf593</property>
+    <property name="shotcut:caption">Alagaesia-for_fan_mail.jpg</property>
+    <property name="xml">was here</property>
+    <filter id="filter1" out="00:00:03.960">
+      <property name="start">1</property>
+      <property name="level">00:00:00.000=0;00:00:00.960=1</property>
+      <property name="mlt_service">brightness</property>
+      <property name="shotcut:filter">fadeInBrightness</property>
+      <property name="alpha">1</property>
+      <property name="shotcut:animIn">00:00:01.000</property>
+    </filter>
+    <filter id="filter2" out="00:00:03.960">
+      <property name="version">0.1</property>
+      <property name="mlt_service">frei0r.glow</property>
+      <property name="0">0.5</property>
+    </filter>
+    <filter id="filter3" out="00:00:03.960">
+      <property name="start">1</property>
+      <property name="level">0.509</property>
+      <property name="mlt_service">brightness</property>
+      <property name="rgb_only">1</property>
+    </filter>
+  </producer>
+  <playlist id="playlist1">
+    <property name="shotcut:video">1</property>
+    <property name="shotcut:name">V2</property>
+    <property name="meta.shotcut.vui">1</property>
+    <entry producer="chain0" in="00:00:00.000" out="00:00:09.880"/>
+    <entry producer="producer1" in="00:00:00.000" out="00:00:03.960"/>
+    <filter id="filter4" out="00:00:14.000">
+      <property name="transition">qtblend</property>
+      <property name="mlt_image_format">rgba</property>
+      <property name="mlt_service">mask_apply</property>
+      <property name="transition.threads">0</property>
+    </filter>
+    <filter id="filter5" out="00:00:14.000">
+      <property name="filter">shape</property>
+      <property name="mlt_service">mask_start</property>
+      <property name="shotcut:filter">maskFromFile</property>
+      <property name="filter.mix">0</property>
+      <property name="filter.softness">0</property>
+      <property name="filter.invert">1</property>
+      <property name="filter.use_luminance">0</property>
+      <property name="filter.resource">/Users/abdulrehmanbhidya/Library/Application Support/Meltytech/Shotcut/transitions/Untitled 2 copy.png</property>
+      <property name="filter.use_mix">1</property>
+      <property name="filter.audio_match">0</property>
+      <property name="filter.alpha_operation">overwrite</property>
+      <property name="filter.invert_mask">1</property>
+      <property name="filter.reverse">0</property>
+      <property name="disable">0</property>
+    </filter>
+  </playlist>
+  <tractor id="tractor0" title="Shotcut version 26.1.30" in="00:00:00.000" out="00:00:14.000">
+    <property name="shotcut">1</property>
+    <property name="shotcut:projectAudioChannels">2</property>
+    <property name="shotcut:projectFolder">1</property>
+    <property name="shotcut:scaleFactor">4.49003</property>
+    <property name="shotcut:skipConvert">0</property>
+    <property name="shotcut:trackHeaderWidth">150</property>
+    <property name="shotcut:processingMode">Native8Cpu</property>
+    <track producer="background"/>
+    <track producer="playlist0" hide="audio"/>
+    <track producer="playlist1" hide="audio"/>
+    <transition id="transition0">
+      <property name="a_track">0</property>
+      <property name="b_track">1</property>
+      <property name="mlt_service">mix</property>
+      <property name="always_active">1</property>
+      <property name="sum">1</property>
+    </transition>
+    <transition id="transition1">
+      <property name="a_track">0</property>
+      <property name="b_track">1</property>
+      <property name="compositing">0</property>
+      <property name="distort">0</property>
+      <property name="rotate_center">0</property>
+      <property name="mlt_service">qtblend</property>
+      <property name="1">normal</property>
+      <property name="disable">1</property>
+    </transition>
+    <transition id="transition2">
+      <property name="a_track">0</property>
+      <property name="b_track">2</property>
+      <property name="mlt_service">mix</property>
+      <property name="always_active">1</property>
+      <property name="sum">1</property>
+    </transition>
+    <transition id="transition3">
+      <property name="a_track">1</property>
+      <property name="b_track">2</property>
+      <property name="compositing">0</property>
+      <property name="distort">0</property>
+      <property name="rotate_center">0</property>
+      <property name="mlt_service">qtblend</property>
+      <property name="1">normal</property>
+      <property name="disable">0</property>
+    </transition>
+  </tractor>
+</mlt>

@@ -405,10 +405,10 @@ def setup_log_collectors():
     """Set up default log collectors"""
     # Backend log files
     backend_files = [
-        ('/Users/mannybhidya/PycharmProjects/nano-dlna/web/backend/dashboard_run.log', 'backend_dashboard'),
-        ('/Users/mannybhidya/PycharmProjects/nano-dlna/web/backend/errors.log', 'backend_errors'),
-        ('/Users/mannybhidya/PycharmProjects/nano-dlna/dashboard_run.log', 'root_dashboard'),
-        ('/Users/mannybhidya/PycharmProjects/nano-dlna/errors.log', 'root_errors'),
+        ('/Users/abdulrehmanbhidya/PycharmProjects/nano-dlna/web/backend/dashboard_run.log', 'backend_dashboard'),
+        ('/Users/abdulrehmanbhidya/PycharmProjects/nano-dlna/web/backend/errors.log', 'backend_errors'),
+        ('/Users/abdulrehmanbhidya/PycharmProjects/nano-dlna/dashboard_run.log', 'root_dashboard'),
+        ('/Users/abdulrehmanbhidya/PycharmProjects/nano-dlna/errors.log', 'root_errors'),
     ]
     
     for file_path, source_name in backend_files:

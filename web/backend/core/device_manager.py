@@ -11,6 +11,7 @@ import threading
 import time
 from datetime import datetime, timezone
 import traceback
+import asyncio
 
 if sys.version_info.major == 3:
     import urllib.request as urllibreq
@@ -24,6 +25,8 @@ from .dlna_device import DLNADevice
 from .transcreen_device import TranscreenDevice
 from .config_service import ConfigService
 from .streaming_registry import StreamingSessionRegistry
+from services.overlay_cast_service import get_overlay_cast_service
+from discovery.discovery_manager import DiscoveryManager
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +99,7 @@ class DeviceManager:
         # Discovery thread attributes
         self.discovery_thread = None
         self.discovery_running = False
+        self.discovery_paused = False
         self.discovery_interval = 10  # Seconds between discovery cycles
         
         # Additional attributes
@@ -141,10 +145,9 @@ class DeviceManager:
         try:
             device_name = session.device_name
             
-            # Special handling for overlay streams or other non-device streams
-            if device_name == "overlay":
-                logger.info(f"Streaming issue for overlay session {session.session_id}, skipping device-specific handling")
-                # Overlay streams don't have associated devices, so no device recovery needed
+            # Internal overlay streams are not persisted render devices, so skip device recovery.
+            if getattr(session, "stream_type", None) in {"projection_stream", "overlay_mapping_stream"} or device_name in {"overlay", "overlay-mapping"}:
+                logger.info(f"Streaming issue for internal overlay session {session.session_id}, skipping device-specific handling")
                 return
             
             device = self.get_device(device_name)
@@ -457,9 +460,16 @@ class DeviceManager:
                     self.device_status[device_name] = {
                         "status": "connected",
                         "last_updated": time.time(),
-                        "is_playing": False
+                        "is_playing": False,
+                        "last_seen_at": time.time(),
+                        "last_lost_at": None,
+                        "reconnect_count": 0,
+                        "degraded_count": 0,
+                        "offline_count": 0,
                     }
                     logger.info(f"Initialized device_status for {device_name}")
+                if device_name not in self.last_seen:
+                    self.last_seen[device_name] = time.time()
             
             return device
         except Exception as e:
@@ -624,10 +634,12 @@ class DeviceManager:
             return
 
         if self.discovery_thread and self.discovery_thread.is_alive():
-            logger.warning("Discovery already running")
+            self.discovery_paused = False
+            logger.info("Discovery loop already running, cleared paused state")
             return
         
         self.discovery_running = True
+        self.discovery_paused = False
         self.discovery_thread = threading.Thread(target=self._discovery_loop)
         self.discovery_thread.daemon = True
         self.discovery_thread.start()
@@ -653,6 +665,10 @@ class DeviceManager:
         
         while self.discovery_running:
             try:
+                if self.discovery_paused:
+                    time.sleep(0.5)
+                    continue
+
                 logger.debug("Starting DLNA device discovery cycle")
                 discovered_devices = self._discover_dlna_devices()
                 logger.debug(f"Found {len(discovered_devices)} DLNA devices")
@@ -742,7 +758,7 @@ class DeviceManager:
             
             time.sleep(self.discovery_interval)
         
-        logger.error("Discovery loop exited unexpectedly!")
+        logger.info("Discovery loop exited")
 
     def _process_device_video_assignment(self, device_name: str, is_new_device: bool, is_changed_device: bool) -> None:
         """
@@ -764,6 +780,8 @@ class DeviceManager:
                 db_device = self.device_service.get_device_by_name(device_name)
                 if db_device and db_device.user_control_mode != 'auto':
                     logger.info(f"Skipping {device_name} - under user control mode: {db_device.user_control_mode} (reason: {db_device.user_control_reason})")
+                    return
+                if db_device and self._process_device_overlay_cast(device_name, db_device):
                     return
             except Exception as e:
                 logger.warning(f"Could not check user control mode for {device_name}: {e}")
@@ -816,6 +834,61 @@ class DeviceManager:
             self.assign_video_to_device(device_name, video_path, priority=priority)
         else:
             logger.debug(f"No need to reassign video for device {device_name}")
+
+    def _process_device_overlay_cast(self, device_name: str, db_device) -> bool:
+        config = db_device.config or {}
+        if not config.get("auto_overlay_cast_enabled"):
+            return False
+
+        overlay_config_id = config.get("auto_overlay_config_id")
+        if not overlay_config_id:
+            logger.warning(f"Device {device_name} has auto overlay cast enabled without auto_overlay_config_id")
+            return False
+
+        discovery_device_id = self._resolve_discovery_device_id(device_name, db_device.hostname)
+        if not discovery_device_id:
+            logger.info(f"Device {device_name} has overlay auto-cast configured but is not available in discovery v2 yet")
+            return False
+
+        cast_service = get_overlay_cast_service()
+        existing_session = cast_service.get_session_for_device(discovery_device_id)
+        if (
+            existing_session and
+            existing_session.get("config_id") == overlay_config_id and
+            existing_session.get("status") in {"starting", "preparing", "running"}
+        ):
+            logger.debug(f"Overlay auto-cast already active for {device_name} with config {overlay_config_id}")
+            return True
+
+        logger.info(f"Ensuring overlay config {overlay_config_id} is casting to {device_name}")
+        try:
+            asyncio.run(
+                cast_service.start_cast(
+                    device_id=discovery_device_id,
+                    config_id=int(overlay_config_id),
+                    overlay_base_url="http://localhost:8000",
+                    controls_hidden=True,
+                )
+            )
+            logger.info(f"Started overlay auto-cast for {device_name} using config {overlay_config_id}")
+            return True
+        except Exception as exc:
+            logger.error(f"Failed to start overlay auto-cast for {device_name}: {exc}")
+            return True
+
+    def _resolve_discovery_device_id(self, device_name: str, hostname: Optional[str]) -> Optional[str]:
+        discovery_manager = DiscoveryManager.get_instance()
+        candidates = discovery_manager.get_all_devices(online_only=True)
+
+        for device in candidates:
+            if device.casting_method.value != "dlna":
+                continue
+            if device.name == device_name or device.friendly_name == device_name:
+                return device.id
+            if hostname and device.hostname == hostname:
+                return device.id
+
+        return None
             
     def assign_video_to_device(self, device_name: str, video_path: str, 
                               priority: int = 50, schedule_time: Optional[datetime] = None) -> bool:
@@ -1240,9 +1313,11 @@ class DeviceManager:
         with self.device_state_lock:
             for device_name in list(self.devices.keys()):
                 if device_name not in current_devices:
-                    with self.device_state_lock:
-                        last_seen = self.last_seen.get(device_name, 0)
-                        time_since_last_seen = time.time() - last_seen
+                    last_seen = self.last_seen.get(device_name)
+                    if last_seen is None:
+                        logger.debug(f"Skipping disconnect evaluation for {device_name}; missing last_seen")
+                        continue
+                    time_since_last_seen = time.time() - last_seen
                     
                     # Get device from database
                     db_device = None
@@ -1314,18 +1389,22 @@ class DeviceManager:
     
     def pause_discovery(self) -> None:
         """Pause discovery loop"""
-        self.discovery_running = False
+        self.discovery_paused = True
         logger.info("Paused DLNA device discovery")
     
     def resume_discovery(self) -> None:
         """Resume discovery loop"""
-        self.start_discovery()
+        if self.discovery_thread and self.discovery_thread.is_alive():
+            self.discovery_paused = False
+        else:
+            self.start_discovery()
         logger.info("Resumed DLNA device discovery")
     
     def get_discovery_status(self) -> dict:
         """Get current discovery status"""
         return {
-            "running": self.discovery_running,
+            "running": self.discovery_running and not self.discovery_paused,
+            "paused": self.discovery_paused,
             "interval": self.discovery_interval,
             "devices_discovered": len(self.devices),
             "devices_playing": sum(1 for d in self.devices.values() if d.is_playing)
@@ -1345,11 +1424,36 @@ class DeviceManager:
         """
         with self.device_state_lock:
             if device_name not in self.device_status:
-                self.device_status[device_name] = {}
+                self.device_status[device_name] = {
+                    "reconnect_count": 0,
+                    "degraded_count": 0,
+                    "offline_count": 0,
+                    "last_lost_at": None,
+                }
             
             status_dict = self.device_status[device_name]
+            now = time.time()
+            previous_status = status_dict.get("status")
+            previous_online = previous_status in {"connected", "playing"}
+            next_online = status in {"connected", "playing"}
+
             status_dict["status"] = status
-            status_dict["last_updated"] = time.time()
+            status_dict["last_updated"] = now
+
+            if next_online:
+                status_dict["last_seen_at"] = now
+                self.last_seen[device_name] = now
+                if not previous_online and previous_status is not None:
+                    status_dict["reconnect_count"] = int(status_dict.get("reconnect_count", 0)) + 1
+            elif status in {"disconnected", "offline"}:
+                if previous_status not in {"disconnected", "offline"}:
+                    status_dict["offline_count"] = int(status_dict.get("offline_count", 0)) + 1
+                    status_dict["last_lost_at"] = now
+            elif status in {"streaming_issue", "error"}:
+                if previous_status != status:
+                    status_dict["degraded_count"] = int(status_dict.get("degraded_count", 0)) + 1
+                if status == "error" and status_dict.get("last_lost_at") is None:
+                    status_dict["last_lost_at"] = now
             
             if is_playing is not None:
                 status_dict["is_playing"] = is_playing

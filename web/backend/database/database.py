@@ -1,5 +1,5 @@
 import os
-from sqlalchemy import create_engine, MetaData
+from sqlalchemy import create_engine, MetaData, inspect
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import logging
@@ -26,6 +26,141 @@ Base = declarative_base(metadata=metadata_obj)
 
 # Models will be imported in init_db() to avoid circular imports
 
+
+def _sqlite_column_names(connection, table_name):
+    rows = connection.exec_driver_sql(f"PRAGMA table_info({table_name})").fetchall()
+    return [row[1] for row in rows]
+
+
+def ensure_sqlite_schema_compatibility():
+    """
+    Keep older SQLite databases bootable when models add columns/tables.
+
+    This is intentionally lightweight and only handles additive compatibility
+    for the mapping/media-library upgrade. The standalone migration script is
+    still the formal path for explicit schema upgrades.
+    """
+    if not DATABASE_URL.startswith("sqlite"):
+        return
+
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+
+    with engine.begin() as connection:
+        if "videos" in tables:
+            video_columns = set(_sqlite_column_names(connection, "videos"))
+            if "category" not in video_columns:
+                connection.exec_driver_sql(
+                    "ALTER TABLE videos ADD COLUMN category VARCHAR NOT NULL DEFAULT 'background'"
+                )
+            if "source_type" not in video_columns:
+                connection.exec_driver_sql(
+                    "ALTER TABLE videos ADD COLUMN source_type VARCHAR NOT NULL DEFAULT 'upload'"
+                )
+            if "source_directory_id" not in video_columns:
+                connection.exec_driver_sql(
+                    "ALTER TABLE videos ADD COLUMN source_directory_id INTEGER"
+                )
+
+        if "overlay_configs" in tables:
+            overlay_columns = set(_sqlite_column_names(connection, "overlay_configs"))
+            if "background_type" not in overlay_columns or "mapping_scene_id" not in overlay_columns:
+                connection.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS overlay_configs_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name VARCHAR NOT NULL,
+                        background_type VARCHAR NOT NULL DEFAULT 'video',
+                        video_id INTEGER,
+                        mapping_scene_id INTEGER,
+                        video_transform JSON NOT NULL,
+                        widgets JSON NOT NULL,
+                        api_configs JSON NOT NULL,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (video_id) REFERENCES videos (id) ON DELETE CASCADE
+                    )
+                    """
+                )
+                connection.exec_driver_sql(
+                    """
+                    INSERT INTO overlay_configs_new (
+                        id, name, background_type, video_id, mapping_scene_id, video_transform, widgets, api_configs, created_at, updated_at
+                    )
+                    SELECT id, name, 'video', video_id, NULL, video_transform, widgets, api_configs, created_at, updated_at
+                    FROM overlay_configs
+                    """
+                )
+                connection.exec_driver_sql("DROP TABLE overlay_configs")
+                connection.exec_driver_sql("ALTER TABLE overlay_configs_new RENAME TO overlay_configs")
+                connection.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS idx_overlay_configs_video_id ON overlay_configs(video_id)"
+                )
+                connection.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS idx_overlay_configs_mapping_scene_id ON overlay_configs(mapping_scene_id)"
+                )
+
+        connection.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS mapping_scenes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name VARCHAR NOT NULL UNIQUE,
+                canvas_width INTEGER NOT NULL DEFAULT 1280,
+                canvas_height INTEGER NOT NULL DEFAULT 720,
+                mask_mode VARCHAR NOT NULL DEFAULT 'luminance',
+                masks JSON NOT NULL DEFAULT '[]',
+                groups JSON NOT NULL DEFAULT '[]',
+                render_settings JSON NOT NULL DEFAULT '{}',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS media_directories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name VARCHAR NOT NULL UNIQUE,
+                path VARCHAR NOT NULL UNIQUE,
+                category VARCHAR NOT NULL DEFAULT 'background',
+                enabled BOOLEAN NOT NULL DEFAULT 1,
+                scan_mode VARCHAR NOT NULL DEFAULT 'recursive',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS media_lists (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name VARCHAR NOT NULL UNIQUE,
+                category VARCHAR NOT NULL DEFAULT 'background',
+                video_ids JSON NOT NULL DEFAULT '[]',
+                playback_mode VARCHAR NOT NULL DEFAULT 'sequence',
+                shuffle VARCHAR NOT NULL DEFAULT 'false',
+                loop VARCHAR NOT NULL DEFAULT 'true',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS media_channels (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name VARCHAR NOT NULL UNIQUE,
+                media_list_id INTEGER NOT NULL,
+                current_video_id INTEGER,
+                current_index INTEGER NOT NULL DEFAULT 0,
+                playback_state JSON NOT NULL DEFAULT '{}',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (media_list_id) REFERENCES media_lists (id) ON DELETE CASCADE
+            )
+            """
+        )
+
 def get_db():
     """
     Get a database session
@@ -49,6 +184,10 @@ def init_db():
     from models.video import VideoModel
     from models.overlay import OverlayConfig
     from models.projection import ProjectionConfig
+    from models.mapping_scene import MappingScene
+    from models.media_directory import MediaDirectory
+    from models.media_list import MediaList
+    from models.media_channel import MediaChannel
     
     # When running under pytest, skip the actual Base.metadata.create_all(bind=engine) call.
     # The test fixtures will handle creating tables on the temporary test database.
@@ -58,6 +197,7 @@ def init_db():
 
     try:
         Base.metadata.create_all(bind=engine) # This uses the production engine
+        ensure_sqlite_schema_compatibility()
         logger.info("Database initialized for production/development")
     except Exception as e:
         logger.error(f"Error initializing database for production/development: {e}")

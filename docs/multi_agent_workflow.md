@@ -292,7 +292,7 @@ rm -rf uploads_agent*
 
 ## References
 
-- Project structure: `/Users/mannybhidya/PycharmProjects/nano-dlna/`
+- Project structure: `/Users/abdulrehmanbhidya/PycharmProjects/nano-dlna/`
 - Backend entry: `web/backend/app.py`
 - Frontend entry: `web/frontend/src/index.js`
 - Test suite: `tests/` and `web/backend/tests_backend/`

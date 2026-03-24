@@ -33,6 +33,74 @@ import {
 } from '@mui/icons-material';
 import { deviceApi } from '../services/api';
 
+function formatDurationSeconds(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return null;
+  }
+
+  const totalSeconds = Math.max(0, Math.floor(Number(value)));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m ${seconds}s`;
+  }
+  if (minutes > 0) {
+    return `${minutes}m ${seconds}s`;
+  }
+  return `${seconds}s`;
+}
+
+function formatLastSeen(secondsSinceSeen) {
+  if (secondsSinceSeen === null || secondsSinceSeen === undefined) {
+    return 'No discovery data';
+  }
+  if (secondsSinceSeen < 5) {
+    return 'Seen just now';
+  }
+  const duration = formatDurationSeconds(secondsSinceSeen);
+  return duration ? `Seen ${duration} ago` : 'No discovery data';
+}
+
+function formatTimestamp(value) {
+  if (value === null || value === undefined) {
+    return 'No data';
+  }
+
+  let dateValue = value;
+  if (typeof value === 'number') {
+    dateValue = new Date(value * 1000);
+  } else if (typeof value === 'string') {
+    dateValue = new Date(value);
+  }
+
+  if (!(dateValue instanceof Date) || Number.isNaN(dateValue.getTime())) {
+    return 'No data';
+  }
+
+  return dateValue.toLocaleString();
+}
+
+function getAvailabilityLabel(device) {
+  return device?.availability || device?.derived_status || device?.status || 'unknown';
+}
+
+function getAvailabilityColor(availability) {
+  switch (availability) {
+    case 'online':
+    case 'connected':
+      return 'success';
+    case 'degraded':
+      return 'warning';
+    case 'offline':
+    case 'disconnected':
+      return 'default';
+    default:
+      return 'default';
+  }
+}
+
 function DeviceDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -48,8 +116,8 @@ function DeviceDetail() {
 
   useEffect(() => {
     fetchDevice();
-    // Poll for device updates every 5 seconds
-    const interval = setInterval(fetchDevice, 5000);
+    // Poll for device updates at a moderate interval to reduce backend churn.
+    const interval = setInterval(fetchDevice, 15000);
     return () => clearInterval(interval);
   }, [id]);
 
@@ -260,8 +328,8 @@ function DeviceDetail() {
                 primary="Status" 
                 secondary={
                   <Chip 
-                    label={device.status} 
-                    color={device.status === 'connected' ? 'success' : 'default'} 
+                    label={getAvailabilityLabel(device)}
+                    color={getAvailabilityColor(getAvailabilityLabel(device))}
                     size="small" 
                   />
                 } 
@@ -282,6 +350,34 @@ function DeviceDetail() {
                 } 
               />
             </ListItem>
+            <ListItem>
+              <ListItemIcon>
+                <InfoIcon />
+              </ListItemIcon>
+              <ListItemText primary="Manager Status" secondary={device.manager_status || device.status || 'unknown'} />
+            </ListItem>
+            <ListItem>
+              <ListItemIcon>
+                <InfoIcon />
+              </ListItemIcon>
+              <ListItemText primary="Last Seen" secondary={formatLastSeen(device.seconds_since_seen)} />
+            </ListItem>
+            {(device.uptime_seconds !== null && device.uptime_seconds !== undefined) && (
+              <ListItem>
+                <ListItemIcon>
+                  <InfoIcon />
+                </ListItemIcon>
+                <ListItemText primary="Uptime" secondary={formatDurationSeconds(device.uptime_seconds)} />
+              </ListItem>
+            )}
+            {(device.downtime_seconds !== null && device.downtime_seconds !== undefined) && (
+              <ListItem>
+                <ListItemIcon>
+                  <InfoIcon />
+                </ListItemIcon>
+                <ListItemText primary="Downtime" secondary={formatDurationSeconds(device.downtime_seconds)} />
+              </ListItem>
+            )}
             <ListItem>
               <ListItemIcon>
                 <ComputerIcon />
@@ -355,6 +451,98 @@ function DeviceDetail() {
 
       {/* Device Controls */}
       <Grid item xs={12} md={6}>
+        <Paper sx={{ p: 3, mb: 3 }}>
+          <Typography variant="h6" gutterBottom>Projection Health</Typography>
+          <List>
+            <ListItem>
+              <ListItemIcon>
+                <MovieIcon />
+              </ListItemIcon>
+              <ListItemText
+                primary="Overlay Projection"
+                secondary={
+                  <Chip
+                    label={device.active_overlay_cast ? (device.overlay_cast_status || 'running') : 'stopped'}
+                    color={device.active_overlay_cast ? 'success' : 'default'}
+                    size="small"
+                  />
+                }
+              />
+            </ListItem>
+            {device.active_overlay_cast && (
+              <>
+                <ListItem>
+                  <ListItemIcon>
+                    <InfoIcon />
+                  </ListItemIcon>
+                  <ListItemText primary="Projection Uptime" secondary={formatDurationSeconds(device.overlay_cast_uptime_seconds)} />
+                </ListItem>
+                <ListItem>
+                  <ListItemIcon>
+                    <InfoIcon />
+                  </ListItemIcon>
+                  <ListItemText primary="Projection Step" secondary={device.overlay_cast_current_step || 'unknown'} />
+                </ListItem>
+                <ListItem>
+                  <ListItemIcon>
+                    <InfoIcon />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary="Encoder Health"
+                    secondary={[
+                      device.overlay_cast_ffmpeg_speed !== null && device.overlay_cast_ffmpeg_speed !== undefined ? `speed ${device.overlay_cast_ffmpeg_speed.toFixed(2)}x` : null,
+                      device.overlay_cast_ffmpeg_fps !== null && device.overlay_cast_ffmpeg_fps !== undefined ? `fps ${device.overlay_cast_ffmpeg_fps.toFixed(1)}` : null,
+                      device.overlay_cast_ffmpeg_bitrate_kbps !== null && device.overlay_cast_ffmpeg_bitrate_kbps !== undefined ? `${Math.round(device.overlay_cast_ffmpeg_bitrate_kbps)} kbps` : null,
+                    ].filter(Boolean).join(' • ') || 'No metrics'}
+                  />
+                </ListItem>
+                <ListItem>
+                  <ListItemIcon>
+                    <InfoIcon />
+                  </ListItemIcon>
+                  <ListItemText primary="Relay Clients" secondary={device.overlay_cast_active_clients ?? 0} />
+                </ListItem>
+                <ListItem>
+                  <ListItemIcon>
+                    <InfoIcon />
+                  </ListItemIcon>
+                  <ListItemText primary="Projection Started" secondary={formatTimestamp(device.overlay_cast_started_at)} />
+                </ListItem>
+              </>
+            )}
+            <ListItem>
+              <ListItemIcon>
+                <InfoIcon />
+              </ListItemIcon>
+              <ListItemText primary="Last Seen At" secondary={formatTimestamp(device.last_seen_at)} />
+            </ListItem>
+            <ListItem>
+              <ListItemIcon>
+                <InfoIcon />
+              </ListItemIcon>
+              <ListItemText primary="Last Lost At" secondary={formatTimestamp(device.last_lost_at)} />
+            </ListItem>
+            <ListItem>
+              <ListItemIcon>
+                <InfoIcon />
+              </ListItemIcon>
+              <ListItemText primary="Reconnect Count" secondary={device.reconnect_count ?? 0} />
+            </ListItem>
+            <ListItem>
+              <ListItemIcon>
+                <InfoIcon />
+              </ListItemIcon>
+              <ListItemText primary="Degraded Count" secondary={device.degraded_count ?? 0} />
+            </ListItem>
+            <ListItem>
+              <ListItemIcon>
+                <InfoIcon />
+              </ListItemIcon>
+              <ListItemText primary="Offline Count" secondary={device.offline_count ?? 0} />
+            </ListItem>
+          </List>
+        </Paper>
+
         <Paper sx={{ p: 3, mb: 3 }}>
           <Typography variant="h6" gutterBottom>Device Controls</Typography>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>

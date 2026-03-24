@@ -1,0 +1,1547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Jigsaw Mask POC</title>
+  <style>
+    :root {
+      --bg: #050505;
+      --panel: #101010;
+      --panel-2: #171717;
+      --panel-3: #202020;
+      --line: rgba(255, 255, 255, 0.1);
+      --text: #f2efe8;
+      --muted: #b7afa4;
+      --accent: #f25f4c;
+      --accent-2: #70c1b3;
+      --shadow: 0 16px 36px rgba(0, 0, 0, 0.35);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background: radial-gradient(circle at top, #1a1a1a 0%, #070707 45%, #000 100%);
+      color: var(--text);
+      font-family: "Avenir Next", "Segoe UI", sans-serif;
+    }
+
+    body.ui-hidden {
+      background: #000;
+    }
+
+    body.ui-hidden .app {
+      grid-template-columns: 1fr;
+    }
+
+    body.ui-hidden #sidebar,
+    body.ui-hidden .toolbar,
+    body.ui-hidden .stage-note,
+    body.ui-hidden .group-badge-layer {
+      display: none !important;
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      background:
+        linear-gradient(180deg, rgba(242, 95, 76, 0.08), transparent 180px),
+        linear-gradient(180deg, #111 0%, #0b0b0b 100%);
+      border-right: 1px solid var(--line);
+      padding: 18px;
+      overflow-y: auto;
+      transition: width 0.25s ease, padding 0.25s ease, opacity 0.2s ease;
+    }
+
+    .sidebar.collapsed {
+      width: 88px;
+      padding: 18px 10px;
+    }
+
+    .sidebar.collapsed .label,
+    .sidebar.collapsed .section-copy,
+    .sidebar.collapsed .group-editor,
+    .sidebar.collapsed .mask-name,
+    .sidebar.collapsed .mask-meta,
+    .sidebar.collapsed .section-title-row h2 + button,
+    .sidebar.collapsed .sidebar-actions .action-label {
+      display: none;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-size: 1.3rem;
+      line-height: 1.1;
+      letter-spacing: 0.03em;
+    }
+
+    .brand p {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+
+    .ghost-btn,
+    .solid-btn,
+    .mini-btn,
+    .toolbar button,
+    .icon-btn {
+      border: 1px solid var(--line);
+      background: var(--panel-2);
+      color: var(--text);
+      border-radius: 12px;
+      cursor: pointer;
+      transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+      background: #262626;
+      border-color: rgba(255, 255, 255, 0.18);
+    }
+
+    .icon-btn {
+      width: 40px;
+      height: 40px;
+      font-size: 1rem;
+    }
+
+    .solid-btn {
+      background: linear-gradient(135deg, var(--accent), #ff8e72);
+      color: #170704;
+      font-weight: 700;
+      padding: 10px 12px;
+    }
+
+    .ghost-btn,
+    .mini-btn,
+    .toolbar button {
+      padding: 10px 12px;
+    }
+
+    .mini-btn {
+      padding: 8px 10px;
+      font-size: 0.82rem;
+    }
+
+    .sidebar-actions {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+
+    .section {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 14px;
+      margin-bottom: 16px;
+      box-shadow: var(--shadow);
+    }
+
+    .section-title-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+    .section h2 {
+      margin: 0;
+      font-size: 0.95rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .section-copy {
+      margin: 0 0 12px;
+      color: var(--muted);
+      font-size: 0.84rem;
+      line-height: 1.45;
+    }
+
+    .mask-list,
+    .group-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .mask-item,
+    .group-item {
+      display: grid;
+      grid-template-columns: 18px 16px 1fr auto;
+      align-items: center;
+      gap: 10px;
+      background: var(--panel-2);
+      border: 1px solid transparent;
+      border-radius: 14px;
+      padding: 10px 12px;
+    }
+
+    .group-item {
+      grid-template-columns: 16px 1fr auto;
+      cursor: pointer;
+    }
+
+    .mask-item.selected,
+    .group-item.selected {
+      border-color: rgba(242, 95, 76, 0.7);
+      background: linear-gradient(135deg, rgba(242, 95, 76, 0.14), rgba(255, 255, 255, 0.04));
+    }
+
+    .swatch {
+      width: 14px;
+      height: 14px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.28);
+    }
+
+    .mask-name,
+    .group-name {
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+
+    .mask-meta,
+    .group-meta,
+    .inline-hint {
+      color: var(--muted);
+      font-size: 0.76rem;
+    }
+
+    .group-item-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .pill {
+      border-radius: 999px;
+      padding: 5px 8px;
+      font-size: 0.72rem;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--line);
+    }
+
+    .group-editor {
+      display: grid;
+      gap: 12px;
+    }
+
+    .field-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    label {
+      display: grid;
+      gap: 6px;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+
+    input[type="text"],
+    select,
+    input[type="range"] {
+      width: 100%;
+    }
+
+    input[type="text"],
+    select {
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: var(--panel-3);
+      color: var(--text);
+    }
+
+    input[type="color"] {
+      width: 100%;
+      height: 42px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--panel-3);
+      padding: 4px;
+    }
+
+    .range-value {
+      font-size: 0.78rem;
+      color: var(--text);
+    }
+
+    .group-mask-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      border-radius: 999px;
+      background: rgba(112, 193, 179, 0.12);
+      border: 1px solid rgba(112, 193, 179, 0.25);
+      font-size: 0.76rem;
+    }
+
+    .tag button {
+      background: transparent;
+      border: none;
+      color: var(--text);
+      cursor: pointer;
+      padding: 0;
+      font-size: 0.9rem;
+    }
+
+    .main {
+      position: relative;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      min-width: 0;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      padding: 16px 18px;
+      transition: opacity 0.2s ease;
+    }
+
+    .toolbar .toolbar-copy {
+      margin-right: auto;
+      min-width: 220px;
+    }
+
+    .toolbar h2 {
+      margin: 0 0 3px;
+      font-size: 1rem;
+      letter-spacing: 0.03em;
+    }
+
+    .toolbar p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.84rem;
+    }
+
+    .stage-shell {
+      padding: 0 18px 18px;
+      min-width: 0;
+    }
+
+    body.ui-hidden .stage-shell {
+      padding: 0;
+    }
+
+    .stage-frame {
+      position: relative;
+      width: min(100%, calc((100vh - 170px) * (16 / 9)));
+      aspect-ratio: 16 / 9;
+      margin: 0 auto;
+      border-radius: 28px;
+      padding: 18px;
+      background:
+        radial-gradient(circle at top left, rgba(242, 95, 76, 0.14), transparent 28%),
+        radial-gradient(circle at bottom right, rgba(112, 193, 179, 0.14), transparent 32%),
+        #0b0b0b;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 22px 70px rgba(0, 0, 0, 0.48);
+    }
+
+    body.ui-hidden .stage-frame {
+      width: 100vw;
+      height: 100vh;
+      aspect-ratio: auto;
+      border-radius: 0;
+      padding: 0;
+      background: #000;
+      border: none;
+      box-shadow: none;
+    }
+
+    .stage {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      border-radius: 18px;
+      overflow: hidden;
+      background: #000;
+      outline: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    body.ui-hidden .stage {
+      border-radius: 0;
+      outline: none;
+    }
+
+    .stage-canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      background: #000;
+    }
+
+    .stage-grid {
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+      background-size: calc(100% / 16) calc(100% / 9);
+      opacity: 0.28;
+      pointer-events: none;
+    }
+
+    body.ui-hidden .stage-grid {
+      display: none;
+    }
+
+    .group-badge-layer {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
+
+    .group-media {
+      position: absolute;
+      overflow: hidden;
+      border-radius: 8px;
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+    }
+
+    .group-media::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: var(--media-fill, #888);
+      transform: translate(var(--offset-x, 0px), var(--offset-y, 0px)) scale(var(--media-scale, 1));
+      transform-origin: center;
+    }
+
+    .group-media[data-fill-mode="solid"]::before {
+      background: var(--media-fill, #888);
+    }
+
+    .group-media[data-fill-mode="gradient"]::before {
+      background:
+        radial-gradient(circle at 24% 22%, rgba(255, 255, 255, 0.18), transparent 0 28%),
+        linear-gradient(135deg, var(--media-fill, #888), var(--media-fill-2, #333));
+    }
+
+    .group-media[data-fill-mode="stripes"]::before {
+      background:
+        repeating-linear-gradient(
+          135deg,
+          var(--media-fill, #888) 0 34px,
+          var(--media-fill-2, #333) 34px 68px
+        );
+    }
+
+    .group-media[data-fill-mode="checker"]::before {
+      background:
+        linear-gradient(45deg, var(--media-fill, #888) 25%, transparent 25%),
+        linear-gradient(-45deg, var(--media-fill, #888) 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, var(--media-fill-2, #333) 75%),
+        linear-gradient(-45deg, transparent 75%, var(--media-fill-2, #333) 75%);
+      background-size: 80px 80px;
+      background-position: 0 0, 0 40px, 40px -40px, -40px 0;
+      background-color: #111;
+    }
+
+    .group-media[data-fill-mode="animated"]::before {
+      background:
+        linear-gradient(120deg, var(--media-fill, #888), var(--media-fill-2, #333), var(--media-fill, #888));
+      background-size: 240% 240%;
+      animation: drift 8s linear infinite;
+    }
+
+    .group-badge {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 4;
+      padding: 5px 9px;
+      font-size: 0.74rem;
+      border-radius: 999px;
+      background: rgba(0, 0, 0, 0.65);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      transition: opacity 0.2s ease;
+      white-space: nowrap;
+    }
+
+    .stage-note {
+      padding: 10px 22px 18px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.8rem;
+      transition: opacity 0.2s ease;
+    }
+
+    .empty-state {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      text-align: center;
+      padding: 24px;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    @keyframes drift {
+      from {
+        background-position: 0% 50%;
+      }
+      to {
+        background-position: 200% 50%;
+      }
+    }
+
+    @media (max-width: 1200px) {
+      .app {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        border-right: none;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .stage-frame {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside id="sidebar" class="sidebar">
+      <div class="brand">
+        <div class="label">
+          <h1>Jigsaw Mapper POC</h1>
+          <p>Single-file proof of mask loading, grouping, cover sizing, and blackout UI.</p>
+        </div>
+        <button id="collapseSidebarBtn" class="icon-btn" type="button" title="Collapse sidebar">◧</button>
+      </div>
+
+      <div class="sidebar-actions">
+        <button id="createGroupBtn" class="solid-btn" type="button"><span class="action-label">New Group</span></button>
+        <button id="assignMasksBtn" class="ghost-btn" type="button"><span class="action-label">Assign Selected</span></button>
+      </div>
+
+      <section class="section">
+        <div class="section-title-row">
+          <h2>Masks</h2>
+          <button id="selectAllMasksBtn" class="mini-btn" type="button">Select All</button>
+        </div>
+        <p class="section-copy">Loads local PNG masks from this same folder. Each mask starts in its own color group.</p>
+        <div id="maskList" class="mask-list"></div>
+      </section>
+
+      <section class="section">
+        <div class="section-title-row">
+          <h2>Groups</h2>
+          <button id="resetGroupsBtn" class="mini-btn" type="button">Reset</button>
+        </div>
+        <p class="section-copy">Groups define one logical media layer. Multiple masks in one group share one cover-fitted fill area.</p>
+        <div id="groupList" class="group-list"></div>
+      </section>
+
+      <section class="section">
+        <div class="section-title-row">
+          <h2>Selected Group</h2>
+        </div>
+        <div id="groupEditor" class="group-editor"></div>
+      </section>
+    </aside>
+
+    <main class="main">
+      <div class="toolbar">
+        <div class="toolbar-copy">
+          <h2>Projection Surface</h2>
+          <p>Hotkeys: <strong>H</strong> hide UI, <strong>F</strong> fullscreen, <strong>Esc</strong> restore UI.</p>
+        </div>
+        <button id="toggleUiBtn" type="button">Hide UI</button>
+        <button id="fullscreenBtn" type="button">Fullscreen</button>
+      </div>
+
+      <div class="stage-shell">
+        <div class="stage-frame">
+          <div id="stage" class="stage">
+            <canvas id="stageCanvas" class="stage-canvas" width="1280" height="720"></canvas>
+            <div class="stage-grid"></div>
+            <div id="groupBadgeLayer" class="group-badge-layer"></div>
+            <div id="emptyState" class="empty-state hidden">
+              <div>
+                <h3>No visible groups</h3>
+                <p>Assign one or more masks to a visible group to test masking.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="stage-note">
+        This test page uses CSS masks on a black stage and approximates media with solid, gradient, checker, stripe, and animated fills.
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const MASK_COUNT = 16;
+    const STAGE_WIDTH = 1280;
+    const STAGE_HEIGHT = 720;
+    const STORAGE_KEY = 'jigsaw-mask-poc-state-v2';
+    const GROUP_COLORS = [
+      ['#ff6b6b', '#5f0f40'],
+      ['#ffd166', '#6b3f00'],
+      ['#06d6a0', '#073b4c'],
+      ['#00bbf9', '#003049'],
+      ['#c77dff', '#240046'],
+      ['#f15bb5', '#4a1942'],
+      ['#9bdeac', '#2d6a4f'],
+      ['#f9844a', '#78290f'],
+      ['#90e0ef', '#023e8a'],
+      ['#ffca3a', '#8f2d56'],
+      ['#a8dadc', '#1d3557'],
+      ['#e76f51', '#264653'],
+      ['#e9c46a', '#283618'],
+      ['#48bfe3', '#1b4965'],
+      ['#b8f2e6', '#3a506b'],
+      ['#ffafcc', '#5a189a']
+    ];
+
+    const state = {
+      uiHidden: false,
+      sidebarCollapsed: false,
+      selectedMaskIds: [],
+      selectedGroupId: null,
+      masks: [],
+      groups: [],
+      imageCache: new Map(),
+      mediaCache: new Map(),
+      animationFrameId: null
+    };
+
+    const els = {
+      body: document.body,
+      sidebar: document.getElementById('sidebar'),
+      maskList: document.getElementById('maskList'),
+      groupList: document.getElementById('groupList'),
+      groupEditor: document.getElementById('groupEditor'),
+      stage: document.getElementById('stage'),
+      stageCanvas: document.getElementById('stageCanvas'),
+      groupBadgeLayer: document.getElementById('groupBadgeLayer'),
+      emptyState: document.getElementById('emptyState'),
+      collapseSidebarBtn: document.getElementById('collapseSidebarBtn'),
+      createGroupBtn: document.getElementById('createGroupBtn'),
+      assignMasksBtn: document.getElementById('assignMasksBtn'),
+      selectAllMasksBtn: document.getElementById('selectAllMasksBtn'),
+      resetGroupsBtn: document.getElementById('resetGroupsBtn'),
+      toggleUiBtn: document.getElementById('toggleUiBtn'),
+      fullscreenBtn: document.getElementById('fullscreenBtn')
+    };
+
+    function createDefaultMasks() {
+      return Array.from({ length: MASK_COUNT }, (_, index) => {
+        const fileIndex = String(index).padStart(3, '0');
+        const colors = GROUP_COLORS[index % GROUP_COLORS.length];
+        return {
+          id: `mask_${fileIndex}`,
+          name: `mask_${fileIndex}.png`,
+          src: `./mask_${fileIndex}.png`,
+          colorA: colors[0],
+          colorB: colors[1],
+          loaded: false,
+          failed: false,
+          width: STAGE_WIDTH,
+          height: STAGE_HEIGHT,
+          alphaBounds: { x: 0, y: 0, width: STAGE_WIDTH, height: STAGE_HEIGHT }
+        };
+      });
+    }
+
+    function createGroupFromMask(mask, index) {
+      return {
+        id: `group_${index + 1}`,
+        name: `Group ${index + 1}`,
+        maskIds: [mask.id],
+        fillMode: ['solid', 'gradient', 'stripes', 'checker', 'animated'][index % 5],
+        colorA: mask.colorA,
+        colorB: mask.colorB,
+        mediaScale: 1,
+        mediaOffsetX: 0,
+        mediaOffsetY: 0,
+        visible: true,
+        mediaType: 'fill',
+        mediaUrl: '',
+        playlistUrl: '',
+        playlistText: '',
+        playlistEntries: [],
+        currentPlaylistIndex: 0,
+        autoplayPlaylist: true
+      };
+    }
+
+    function makeDefaultState() {
+      const masks = createDefaultMasks();
+      const groups = masks.map(createGroupFromMask);
+      return {
+        uiHidden: false,
+        sidebarCollapsed: false,
+        selectedMaskIds: [],
+        selectedGroupId: groups[0]?.id || null,
+        masks,
+        groups
+      };
+    }
+
+    function loadState() {
+      const defaults = makeDefaultState();
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (!saved) {
+        Object.assign(state, defaults);
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(saved);
+        Object.assign(state, defaults, parsed);
+        state.masks = defaults.masks.map((mask) => {
+          const savedMask = (parsed.masks || []).find((item) => item.id === mask.id);
+          return { ...mask, ...savedMask, loaded: false, failed: false };
+        });
+        state.groups = Array.isArray(parsed.groups) && parsed.groups.length
+          ? parsed.groups.map((group) => ({
+            mediaType: 'fill',
+            mediaUrl: '',
+            playlistUrl: '',
+            playlistText: '',
+            playlistEntries: [],
+            currentPlaylistIndex: 0,
+            autoplayPlaylist: true,
+            ...group
+          }))
+          : defaults.groups;
+        if (!state.selectedGroupId && state.groups[0]) {
+          state.selectedGroupId = state.groups[0].id;
+        }
+      } catch (error) {
+        console.error('Failed to load saved state', error);
+        Object.assign(state, defaults);
+      }
+    }
+
+    function saveState() {
+      const persistable = {
+        uiHidden: state.uiHidden,
+        sidebarCollapsed: state.sidebarCollapsed,
+        selectedMaskIds: state.selectedMaskIds,
+        selectedGroupId: state.selectedGroupId,
+        masks: state.masks.map(({ id, name, src, colorA, colorB, width, height, alphaBounds }) => ({
+          id, name, src, colorA, colorB, width, height, alphaBounds
+        })),
+        groups: state.groups
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(persistable));
+    }
+
+    async function preloadMasks() {
+      await Promise.all(state.masks.map(loadMask));
+      renderAll();
+    }
+
+    function loadMask(mask) {
+      return new Promise((resolve) => {
+        const image = new Image();
+        image.onload = () => {
+          state.imageCache.set(mask.id, image);
+          mask.loaded = true;
+          mask.width = image.naturalWidth || STAGE_WIDTH;
+          mask.height = image.naturalHeight || STAGE_HEIGHT;
+          detectMaskBounds(mask, image);
+          resolve();
+        };
+        image.onerror = () => {
+          mask.failed = true;
+          resolve();
+        };
+        image.src = mask.src;
+      });
+    }
+
+    function detectMaskBounds(mask, image) {
+      const canvas = document.createElement('canvas');
+      canvas.width = image.naturalWidth || STAGE_WIDTH;
+      canvas.height = image.naturalHeight || STAGE_HEIGHT;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(image, 0, 0);
+      const { data, width, height } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+      let minX = width;
+      let minY = height;
+      let maxX = -1;
+      let maxY = -1;
+
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const idx = (y * width + x) * 4;
+          const alpha = data[idx + 3];
+          const luminance = (data[idx] + data[idx + 1] + data[idx + 2]) / 3;
+          if (alpha > 5 && luminance > 20) {
+            if (x < minX) minX = x;
+            if (y < minY) minY = y;
+            if (x > maxX) maxX = x;
+            if (y > maxY) maxY = y;
+          }
+        }
+      }
+
+      if (maxX === -1) {
+        mask.alphaBounds = { x: 0, y: 0, width, height };
+        return;
+      }
+
+      mask.alphaBounds = {
+        x: minX,
+        y: minY,
+        width: maxX - minX + 1,
+        height: maxY - minY + 1
+      };
+    }
+
+    function renderAll() {
+      renderUiState();
+      renderMaskList();
+      renderGroupList();
+      renderGroupEditor();
+      renderStage();
+      saveState();
+    }
+
+    function renderUiState() {
+      els.body.classList.toggle('ui-hidden', state.uiHidden);
+      els.sidebar.classList.toggle('collapsed', state.sidebarCollapsed);
+      els.toggleUiBtn.textContent = state.uiHidden ? 'Show UI' : 'Hide UI';
+    }
+
+    function renderMaskList() {
+      els.maskList.innerHTML = '';
+      state.masks.forEach((mask) => {
+        const item = document.createElement('label');
+        item.className = `mask-item${state.selectedMaskIds.includes(mask.id) ? ' selected' : ''}`;
+        item.innerHTML = `
+          <input type="checkbox" ${state.selectedMaskIds.includes(mask.id) ? 'checked' : ''} />
+          <span class="swatch" style="background:${mask.colorA}"></span>
+          <span>
+            <div class="mask-name">${mask.name}</div>
+            <div class="mask-meta">${mask.failed ? 'failed to load' : mask.loaded ? `${mask.width}x${mask.height}` : 'loading...'}</div>
+          </span>
+          <span class="pill">${getMaskGroupCount(mask.id)} grp</span>
+        `;
+        item.querySelector('input').addEventListener('change', () => toggleMaskSelection(mask.id));
+        els.maskList.appendChild(item);
+      });
+    }
+
+    function renderGroupList() {
+      els.groupList.innerHTML = '';
+      state.groups.forEach((group) => {
+        const item = document.createElement('div');
+        item.className = `group-item${group.id === state.selectedGroupId ? ' selected' : ''}`;
+        item.innerHTML = `
+          <span class="swatch" style="background:${group.colorA}"></span>
+          <span>
+            <div class="group-name">${group.name}</div>
+            <div class="group-meta">${group.maskIds.length} masks • ${group.fillMode}${group.visible ? '' : ' • hidden'}</div>
+          </span>
+          <span class="group-item-right">
+            <span class="pill">${Math.round(group.mediaScale * 100)}%</span>
+            <button class="mini-btn" type="button">${group.visible ? 'Hide' : 'Show'}</button>
+          </span>
+        `;
+        item.addEventListener('click', (event) => {
+          if (event.target.closest('button')) return;
+          state.selectedGroupId = group.id;
+          renderAll();
+        });
+        item.querySelector('button').addEventListener('click', (event) => {
+          event.stopPropagation();
+          group.visible = !group.visible;
+          renderAll();
+        });
+        els.groupList.appendChild(item);
+      });
+    }
+
+    function renderGroupEditor() {
+      const group = state.groups.find((entry) => entry.id === state.selectedGroupId);
+      if (!group) {
+        els.groupEditor.innerHTML = '<div class="inline-hint">Create or select a group to edit its fill and mask assignments.</div>';
+        return;
+      }
+
+      const assignedMasks = group.maskIds
+        .map((id) => state.masks.find((mask) => mask.id === id))
+        .filter(Boolean);
+
+      const playlistPreview = group.playlistEntries?.length
+        ? `<div class="inline-hint">${group.playlistEntries.length} playlist entries loaded • current ${Math.min(group.currentPlaylistIndex + 1, group.playlistEntries.length)}</div>`
+        : '<div class="inline-hint">No playlist loaded.</div>';
+
+      els.groupEditor.innerHTML = `
+        <label>
+          Group Name
+          <input id="groupNameInput" type="text" value="${escapeHtml(group.name)}" />
+        </label>
+
+        <div class="field-grid">
+          <label>
+            Media Type
+            <select id="mediaTypeSelect">
+              ${['fill', 'video', 'image', 'playlist'].map((mode) =>
+                `<option value="${mode}" ${group.mediaType === mode ? 'selected' : ''}>${mode}</option>`
+              ).join('')}
+            </select>
+          </label>
+          <label>
+            Fill Mode
+            <select id="fillModeSelect">
+              ${['solid', 'gradient', 'stripes', 'checker', 'animated'].map((mode) =>
+                `<option value="${mode}" ${group.fillMode === mode ? 'selected' : ''}>${mode}</option>`
+              ).join('')}
+            </select>
+          </label>
+        </div>
+
+        <div class="field-grid">
+          <label>
+            Visibility
+            <select id="visibilitySelect">
+              <option value="true" ${group.visible ? 'selected' : ''}>visible</option>
+              <option value="false" ${!group.visible ? 'selected' : ''}>hidden</option>
+            </select>
+          </label>
+          <label>
+            Playlist Auto Advance
+            <select id="autoplayPlaylistSelect">
+              <option value="true" ${group.autoplayPlaylist ? 'selected' : ''}>on</option>
+              <option value="false" ${!group.autoplayPlaylist ? 'selected' : ''}>off</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="field-grid">
+          <label>
+            Color A
+            <input id="colorAInput" type="color" value="${group.colorA}" />
+          </label>
+          <label>
+            Color B
+            <input id="colorBInput" type="color" value="${group.colorB}" />
+          </label>
+        </div>
+
+        <label>
+          Media Scale <span class="range-value">${group.mediaScale.toFixed(2)}x</span>
+          <input id="mediaScaleInput" type="range" min="0.6" max="1.8" step="0.01" value="${group.mediaScale}" />
+        </label>
+
+        <label>
+          Horizontal Offset <span class="range-value">${group.mediaOffsetX}px</span>
+          <input id="mediaOffsetXInput" type="range" min="-240" max="240" step="1" value="${group.mediaOffsetX}" />
+        </label>
+
+        <label>
+          Vertical Offset <span class="range-value">${group.mediaOffsetY}px</span>
+          <input id="mediaOffsetYInput" type="range" min="-180" max="180" step="1" value="${group.mediaOffsetY}" />
+        </label>
+
+        <label>
+          Media URL
+          <input id="mediaUrlInput" type="text" placeholder="https://...mp4 or image URL" value="${escapeHtml(group.mediaUrl || '')}" />
+        </label>
+
+        <label>
+          M3U URL
+          <input id="playlistUrlInput" type="text" placeholder="https://...m3u or m3u8" value="${escapeHtml(group.playlistUrl || '')}" />
+        </label>
+
+        <label>
+          M3U Text
+          <textarea id="playlistTextInput" rows="6" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--panel-3);color:var(--text);resize:vertical;">${escapeHtml(group.playlistText || '')}</textarea>
+        </label>
+
+        <div class="field-grid">
+          <button id="loadMediaBtn" class="ghost-btn" type="button">Load Media URL</button>
+          <button id="loadPlaylistBtn" class="ghost-btn" type="button">Load Playlist</button>
+        </div>
+
+        <div class="field-grid">
+          <button id="sampleVideoBtn" class="ghost-btn" type="button">Use Sample MP4</button>
+          <button id="nextPlaylistBtn" class="ghost-btn" type="button">Next Playlist Item</button>
+        </div>
+
+        ${playlistPreview}
+
+        <div>
+          <div class="inline-hint" style="margin-bottom:8px;">Assigned masks</div>
+          <div class="group-mask-tags">
+            ${assignedMasks.length ? assignedMasks.map((mask) => `
+              <span class="tag">
+                ${mask.name}
+                <button type="button" data-remove-mask="${mask.id}" title="Remove mask">×</button>
+              </span>
+            `).join('') : '<span class="inline-hint">No masks assigned.</span>'}
+          </div>
+        </div>
+
+        <div class="field-grid">
+          <button id="assignSelectedToCurrentBtn" class="ghost-btn" type="button">Assign Selected Masks</button>
+          <button id="deleteGroupBtn" class="ghost-btn" type="button">Delete Group</button>
+        </div>
+      `;
+
+      document.getElementById('groupNameInput').addEventListener('input', (event) => {
+        group.name = event.target.value || 'Untitled Group';
+        renderAll();
+      });
+      document.getElementById('fillModeSelect').addEventListener('change', (event) => {
+        group.fillMode = event.target.value;
+        renderAll();
+      });
+      document.getElementById('mediaTypeSelect').addEventListener('change', async (event) => {
+        group.mediaType = event.target.value;
+        await ensureGroupMedia(group);
+        renderAll();
+      });
+      document.getElementById('visibilitySelect').addEventListener('change', (event) => {
+        group.visible = event.target.value === 'true';
+        renderAll();
+      });
+      document.getElementById('autoplayPlaylistSelect').addEventListener('change', (event) => {
+        group.autoplayPlaylist = event.target.value === 'true';
+        renderAll();
+      });
+      document.getElementById('colorAInput').addEventListener('input', (event) => {
+        group.colorA = event.target.value;
+        renderAll();
+      });
+      document.getElementById('colorBInput').addEventListener('input', (event) => {
+        group.colorB = event.target.value;
+        renderAll();
+      });
+      document.getElementById('mediaScaleInput').addEventListener('input', (event) => {
+        group.mediaScale = Number(event.target.value);
+        renderAll();
+      });
+      document.getElementById('mediaOffsetXInput').addEventListener('input', (event) => {
+        group.mediaOffsetX = Number(event.target.value);
+        renderAll();
+      });
+      document.getElementById('mediaOffsetYInput').addEventListener('input', (event) => {
+        group.mediaOffsetY = Number(event.target.value);
+        renderAll();
+      });
+      document.getElementById('mediaUrlInput').addEventListener('input', (event) => {
+        group.mediaUrl = event.target.value.trim();
+      });
+      document.getElementById('playlistUrlInput').addEventListener('input', (event) => {
+        group.playlistUrl = event.target.value.trim();
+      });
+      document.getElementById('playlistTextInput').addEventListener('input', (event) => {
+        group.playlistText = event.target.value;
+      });
+      document.getElementById('loadMediaBtn').addEventListener('click', async () => {
+        await ensureGroupMedia(group, true);
+        renderAll();
+      });
+      document.getElementById('loadPlaylistBtn').addEventListener('click', async () => {
+        await loadPlaylistForGroup(group);
+        renderAll();
+      });
+      document.getElementById('sampleVideoBtn').addEventListener('click', async () => {
+        group.mediaType = 'video';
+        group.mediaUrl = 'https://www.desktophut.com/files/SDaMZlT3xL-wallpaper.mp4';
+        await ensureGroupMedia(group, true);
+        renderAll();
+      });
+      document.getElementById('nextPlaylistBtn').addEventListener('click', async () => {
+        advancePlaylist(group);
+        await ensureGroupMedia(group, true);
+        renderAll();
+      });
+      document.getElementById('assignSelectedToCurrentBtn').addEventListener('click', () => {
+        assignSelectedMasksToGroup(group.id);
+      });
+      document.getElementById('deleteGroupBtn').addEventListener('click', () => {
+        deleteGroup(group.id);
+      });
+      els.groupEditor.querySelectorAll('[data-remove-mask]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          removeMaskFromGroup(group.id, btn.getAttribute('data-remove-mask'));
+        });
+      });
+    }
+
+    function renderStage() {
+      const ctx = els.stageCanvas.getContext('2d');
+      ctx.clearRect(0, 0, STAGE_WIDTH, STAGE_HEIGHT);
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, STAGE_WIDTH, STAGE_HEIGHT);
+      els.groupBadgeLayer.innerHTML = '';
+      const visibleGroups = state.groups.filter((group) => group.visible && group.maskIds.length);
+      els.emptyState.classList.toggle('hidden', visibleGroups.length > 0);
+
+      visibleGroups.forEach((group) => {
+        const bounds = computeGroupBounds(group);
+        if (!bounds) return;
+        drawGroupToCanvas(ctx, group, bounds);
+
+        const badge = document.createElement('div');
+        badge.className = 'group-badge';
+        badge.textContent = `${group.name} • ${group.maskIds.length} mask${group.maskIds.length > 1 ? 's' : ''}`;
+        badge.style.left = `${Math.max(10, bounds.x + 10)}px`;
+        badge.style.top = `${Math.max(10, bounds.y + 10)}px`;
+        els.groupBadgeLayer.appendChild(badge);
+      });
+    }
+
+    function computeGroupBounds(group) {
+      const masks = group.maskIds
+        .map((id) => state.masks.find((mask) => mask.id === id))
+        .filter(Boolean);
+
+      if (!masks.length) return null;
+
+      const minX = Math.min(...masks.map((mask) => mask.alphaBounds.x));
+      const minY = Math.min(...masks.map((mask) => mask.alphaBounds.y));
+      const maxX = Math.max(...masks.map((mask) => mask.alphaBounds.x + mask.alphaBounds.width));
+      const maxY = Math.max(...masks.map((mask) => mask.alphaBounds.y + mask.alphaBounds.height));
+
+      return {
+        x: minX,
+        y: minY,
+        width: Math.max(1, maxX - minX),
+        height: Math.max(1, maxY - minY)
+      };
+    }
+
+    function drawGroupToCanvas(targetCtx, group, bounds) {
+      const groupCanvas = document.createElement('canvas');
+      groupCanvas.width = STAGE_WIDTH;
+      groupCanvas.height = STAGE_HEIGHT;
+      const groupCtx = groupCanvas.getContext('2d');
+
+      drawMedia(groupCtx, group, bounds);
+      applyLuminanceMask(groupCtx, group.maskIds);
+
+      targetCtx.drawImage(groupCanvas, 0, 0);
+      drawGroupDebugOutline(targetCtx, group, bounds);
+    }
+
+    function drawGroupDebugOutline(ctx, group, bounds) {
+      if (state.uiHidden) return;
+      ctx.save();
+      ctx.strokeStyle = group.colorA;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([8, 6]);
+      ctx.strokeRect(bounds.x + 1, bounds.y + 1, Math.max(2, bounds.width - 2), Math.max(2, bounds.height - 2));
+      ctx.restore();
+    }
+
+    function applyLuminanceMask(groupCtx, maskIds) {
+      const maskCanvas = document.createElement('canvas');
+      maskCanvas.width = STAGE_WIDTH;
+      maskCanvas.height = STAGE_HEIGHT;
+      const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
+
+      maskIds.forEach((maskId) => {
+        const image = state.imageCache.get(maskId);
+        if (!image) return;
+        maskCtx.drawImage(image, 0, 0, STAGE_WIDTH, STAGE_HEIGHT);
+      });
+
+      const imageData = maskCtx.getImageData(0, 0, STAGE_WIDTH, STAGE_HEIGHT);
+      const pixels = imageData.data;
+
+      for (let i = 0; i < pixels.length; i += 4) {
+        const alpha = pixels[i + 3];
+        const luminance = (pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3;
+        const visible = alpha > 5 && luminance > 127;
+        pixels[i] = 255;
+        pixels[i + 1] = 255;
+        pixels[i + 2] = 255;
+        pixels[i + 3] = visible ? 255 : 0;
+      }
+
+      maskCtx.putImageData(imageData, 0, 0);
+      groupCtx.globalCompositeOperation = 'destination-in';
+      groupCtx.drawImage(maskCanvas, 0, 0);
+      groupCtx.globalCompositeOperation = 'source-over';
+    }
+
+    function drawFill(ctx, group, bounds) {
+      const scale = group.mediaScale || 1;
+      const scaledWidth = bounds.width * scale;
+      const scaledHeight = bounds.height * scale;
+      const left = bounds.x - ((scaledWidth - bounds.width) / 2) + group.mediaOffsetX;
+      const top = bounds.y - ((scaledHeight - bounds.height) / 2) + group.mediaOffsetY;
+
+      if (group.fillMode === 'solid') {
+        ctx.fillStyle = group.colorA;
+        ctx.fillRect(left, top, scaledWidth, scaledHeight);
+        return;
+      }
+
+      if (group.fillMode === 'gradient' || group.fillMode === 'animated') {
+        const gradient = ctx.createLinearGradient(left, top, left + scaledWidth, top + scaledHeight);
+        gradient.addColorStop(0, group.colorA);
+        gradient.addColorStop(1, group.colorB);
+        ctx.fillStyle = gradient;
+        ctx.fillRect(left, top, scaledWidth, scaledHeight);
+        if (group.fillMode === 'animated') {
+          const highlight = ctx.createLinearGradient(left, top, left + scaledWidth, top);
+          highlight.addColorStop(0, 'rgba(255,255,255,0)');
+          highlight.addColorStop(0.5, 'rgba(255,255,255,0.24)');
+          highlight.addColorStop(1, 'rgba(255,255,255,0)');
+          ctx.fillStyle = highlight;
+          ctx.fillRect(left, top, scaledWidth, scaledHeight);
+        }
+        return;
+      }
+
+      if (group.fillMode === 'stripes') {
+        const tile = document.createElement('canvas');
+        tile.width = 96;
+        tile.height = 96;
+        const tileCtx = tile.getContext('2d');
+        tileCtx.fillStyle = group.colorA;
+        tileCtx.fillRect(0, 0, 96, 96);
+        tileCtx.strokeStyle = group.colorB;
+        tileCtx.lineWidth = 24;
+        tileCtx.beginPath();
+        tileCtx.moveTo(-24, 96);
+        tileCtx.lineTo(96, -24);
+        tileCtx.moveTo(24, 120);
+        tileCtx.lineTo(120, 24);
+        tileCtx.stroke();
+        ctx.fillStyle = ctx.createPattern(tile, 'repeat');
+        ctx.fillRect(left, top, scaledWidth, scaledHeight);
+        return;
+      }
+
+      if (group.fillMode === 'checker') {
+        const tile = document.createElement('canvas');
+        tile.width = 80;
+        tile.height = 80;
+        const tileCtx = tile.getContext('2d');
+        tileCtx.fillStyle = group.colorA;
+        tileCtx.fillRect(0, 0, 80, 80);
+        tileCtx.fillStyle = group.colorB;
+        tileCtx.fillRect(0, 0, 40, 40);
+        tileCtx.fillRect(40, 40, 40, 40);
+        ctx.fillStyle = ctx.createPattern(tile, 'repeat');
+        ctx.fillRect(left, top, scaledWidth, scaledHeight);
+      }
+    }
+
+    function drawMedia(ctx, group, bounds) {
+      const media = getCurrentMediaForGroup(group);
+      if (!media) {
+        drawFill(ctx, group, bounds);
+        return;
+      }
+
+      if (media.kind === 'image' && media.element?.complete) {
+        drawCoverAsset(ctx, media.element, bounds, group);
+        return;
+      }
+
+      if (media.kind === 'video' && media.element && media.element.readyState >= 2) {
+        drawCoverAsset(ctx, media.element, bounds, group);
+        return;
+      }
+
+      drawFill(ctx, group, bounds);
+    }
+
+    function drawCoverAsset(ctx, asset, bounds, group) {
+      const sourceWidth = asset.videoWidth || asset.naturalWidth || bounds.width;
+      const sourceHeight = asset.videoHeight || asset.naturalHeight || bounds.height;
+      if (!sourceWidth || !sourceHeight) {
+        drawFill(ctx, group, bounds);
+        return;
+      }
+
+      const scale = Math.max(bounds.width / sourceWidth, bounds.height / sourceHeight) * (group.mediaScale || 1);
+      const destWidth = sourceWidth * scale;
+      const destHeight = sourceHeight * scale;
+      const left = bounds.x + ((bounds.width - destWidth) / 2) + group.mediaOffsetX;
+      const top = bounds.y + ((bounds.height - destHeight) / 2) + group.mediaOffsetY;
+      ctx.drawImage(asset, left, top, destWidth, destHeight);
+    }
+
+    function getCurrentMediaForGroup(group) {
+      if (group.mediaType === 'fill') return null;
+      const mediaKey = resolveGroupMediaKey(group);
+      return mediaKey ? state.mediaCache.get(mediaKey) : null;
+    }
+
+    function resolveGroupMediaKey(group) {
+      if (group.mediaType === 'playlist') {
+        if (!group.playlistEntries?.length) return '';
+        return group.playlistEntries[group.currentPlaylistIndex] || '';
+      }
+      return group.mediaUrl || '';
+    }
+
+    async function ensureGroupMedia(group, forceReload = false) {
+      const mediaKey = resolveGroupMediaKey(group);
+      if (!mediaKey) return null;
+      if (!forceReload && state.mediaCache.has(mediaKey)) return state.mediaCache.get(mediaKey);
+
+      const isImage = group.mediaType === 'image' || /\.(png|jpe?g|gif|webp|svg)(\?|$)/i.test(mediaKey);
+      const media = isImage ? await loadImageMedia(mediaKey) : await loadVideoMedia(mediaKey, group.id);
+      if (media) state.mediaCache.set(mediaKey, media);
+      return media;
+    }
+
+    function loadImageMedia(url) {
+      return new Promise((resolve) => {
+        const image = new Image();
+        image.crossOrigin = 'anonymous';
+        image.onload = () => resolve({ kind: 'image', element: image, url });
+        image.onerror = () => resolve(null);
+        image.src = url;
+      });
+    }
+
+    function loadVideoMedia(url, groupId) {
+      return new Promise((resolve) => {
+        const video = document.createElement('video');
+        video.crossOrigin = 'anonymous';
+        video.src = url;
+        video.muted = true;
+        video.loop = false;
+        video.playsInline = true;
+        video.autoplay = true;
+        video.addEventListener('loadeddata', () => {
+          video.play().catch(() => {});
+          resolve({ kind: 'video', element: video, url });
+        }, { once: true });
+        video.addEventListener('ended', () => handleVideoEnded(groupId));
+        video.addEventListener('error', () => resolve(null), { once: true });
+      });
+    }
+
+    async function loadPlaylistForGroup(group) {
+      let playlistText = (group.playlistText || '').trim();
+      if (!playlistText && group.playlistUrl) {
+        try {
+          const response = await fetch(group.playlistUrl);
+          playlistText = await response.text();
+        } catch (error) {
+          console.error('Failed to fetch playlist', error);
+        }
+      }
+
+      const entries = parseM3U(playlistText);
+      group.playlistEntries = entries;
+      group.currentPlaylistIndex = 0;
+      if (entries.length) {
+        group.mediaType = 'playlist';
+        await ensureGroupMedia(group, true);
+      }
+    }
+
+    function parseM3U(text) {
+      if (!text) return [];
+      return text
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line && !line.startsWith('#'));
+    }
+
+    function advancePlaylist(group) {
+      if (!group.playlistEntries?.length) return;
+      group.currentPlaylistIndex = (group.currentPlaylistIndex + 1) % group.playlistEntries.length;
+    }
+
+    function handleVideoEnded(groupId) {
+      const group = state.groups.find((entry) => entry.id === groupId);
+      if (!group || group.mediaType !== 'playlist' || !group.autoplayPlaylist) return;
+      advancePlaylist(group);
+      ensureGroupMedia(group, true).then(() => renderAll());
+    }
+
+    function toggleMaskSelection(maskId) {
+      if (state.selectedMaskIds.includes(maskId)) {
+        state.selectedMaskIds = state.selectedMaskIds.filter((id) => id !== maskId);
+      } else {
+        state.selectedMaskIds = [...state.selectedMaskIds, maskId];
+      }
+      renderAll();
+    }
+
+    function createGroup() {
+      const index = state.groups.length + 1;
+      const colors = GROUP_COLORS[index % GROUP_COLORS.length];
+      const group = {
+        id: `group_${Date.now()}`,
+        name: `Group ${index}`,
+        maskIds: [],
+        fillMode: 'gradient',
+        colorA: colors[0],
+        colorB: colors[1],
+        mediaScale: 1,
+        mediaOffsetX: 0,
+        mediaOffsetY: 0,
+        visible: true
+      };
+      state.groups = [...state.groups, group];
+      state.selectedGroupId = group.id;
+      renderAll();
+    }
+
+    function assignSelectedMasksToGroup(groupId) {
+      const group = state.groups.find((entry) => entry.id === groupId);
+      if (!group || !state.selectedMaskIds.length) return;
+
+      state.groups.forEach((entry) => {
+        entry.maskIds = entry.maskIds.filter((maskId) => !state.selectedMaskIds.includes(maskId));
+      });
+
+      const merged = new Set([...group.maskIds, ...state.selectedMaskIds]);
+      group.maskIds = [...merged];
+      state.selectedMaskIds = [];
+      renderAll();
+    }
+
+    function removeMaskFromGroup(groupId, maskId) {
+      const group = state.groups.find((entry) => entry.id === groupId);
+      if (!group) return;
+      group.maskIds = group.maskIds.filter((id) => id !== maskId);
+      renderAll();
+    }
+
+    function deleteGroup(groupId) {
+      if (state.groups.length === 1) return;
+      state.groups = state.groups.filter((entry) => entry.id !== groupId);
+      if (state.selectedGroupId === groupId) {
+        state.selectedGroupId = state.groups[0]?.id || null;
+      }
+      renderAll();
+    }
+
+    function resetGroups() {
+      const defaults = makeDefaultState();
+      state.groups = defaults.groups;
+      state.selectedMaskIds = [];
+      state.selectedGroupId = defaults.selectedGroupId;
+      renderAll();
+    }
+
+    function getMaskGroupCount(maskId) {
+      return state.groups.filter((group) => group.maskIds.includes(maskId)).length;
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
+    async function toggleFullscreen() {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen();
+      } else {
+        await document.exitFullscreen();
+      }
+    }
+
+    function bindEvents() {
+      els.collapseSidebarBtn.addEventListener('click', () => {
+        state.sidebarCollapsed = !state.sidebarCollapsed;
+        renderAll();
+      });
+      els.createGroupBtn.addEventListener('click', createGroup);
+      els.assignMasksBtn.addEventListener('click', () => assignSelectedMasksToGroup(state.selectedGroupId));
+      els.selectAllMasksBtn.addEventListener('click', () => {
+        state.selectedMaskIds = state.selectedMaskIds.length === state.masks.length ? [] : state.masks.map((mask) => mask.id);
+        renderAll();
+      });
+      els.resetGroupsBtn.addEventListener('click', resetGroups);
+      els.toggleUiBtn.addEventListener('click', () => {
+        state.uiHidden = !state.uiHidden;
+        renderAll();
+      });
+      els.fullscreenBtn.addEventListener('click', () => {
+        toggleFullscreen().catch((error) => console.error('Fullscreen failed', error));
+      });
+      document.addEventListener('keydown', (event) => {
+        if (event.key.toLowerCase() === 'h') {
+          state.uiHidden = !state.uiHidden;
+          renderAll();
+        } else if (event.key.toLowerCase() === 'f') {
+          toggleFullscreen().catch((error) => console.error('Fullscreen failed', error));
+        } else if (event.key === 'Escape') {
+          state.uiHidden = false;
+          renderAll();
+        }
+      });
+    }
+
+    function startRenderLoop() {
+      const tick = () => {
+        renderStage();
+        state.animationFrameId = requestAnimationFrame(tick);
+      };
+      if (!state.animationFrameId) {
+        state.animationFrameId = requestAnimationFrame(tick);
+      }
+    }
+
+    function init() {
+      loadState();
+      bindEvents();
+      renderAll();
+      preloadMasks();
+      startRenderLoop();
+    }
+
+    init();
+  </script>
+</body>
+</html>

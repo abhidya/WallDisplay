@@ -48,10 +48,10 @@ class LogStreamManager:
         self.log_buffer = deque(maxlen=10000)  # Keep last 10k entries
         self.active_streams = {}
         self.log_files = {
-            'dashboard': '/Users/mannybhidya/PycharmProjects/nano-dlna/web/backend/dashboard_run.log',
-            'errors': '/Users/mannybhidya/PycharmProjects/nano-dlna/web/backend/errors.log',
-            'root_dashboard': '/Users/mannybhidya/PycharmProjects/nano-dlna/dashboard_run.log',
-            'root_errors': '/Users/mannybhidya/PycharmProjects/nano-dlna/errors.log'
+            'dashboard': '/Users/abdulrehmanbhidya/PycharmProjects/nano-dlna/web/backend/dashboard_run.log',
+            'errors': '/Users/abdulrehmanbhidya/PycharmProjects/nano-dlna/web/backend/errors.log',
+            'root_dashboard': '/Users/abdulrehmanbhidya/PycharmProjects/nano-dlna/dashboard_run.log',
+            'root_errors': '/Users/abdulrehmanbhidya/PycharmProjects/nano-dlna/errors.log'
         }
         self.frontend_logs = deque(maxlen=1000)
         self.db_logs = deque(maxlen=1000)

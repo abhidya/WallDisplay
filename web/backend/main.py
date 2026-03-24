@@ -12,12 +12,13 @@ from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 
 from database.database import init_db, get_db
-from routers import device_router, video_router, streaming_router, renderer_router, overlay_router, projection_router, log_router
+from routers import device_router, video_router, streaming_router, renderer_router, overlay_router, projection_router, log_router, mapping_router, media_library_router
 from api.discovery_router import router as discovery_router
 from core.device_manager import get_device_manager
 from core.streaming_registry import StreamingSessionRegistry
 from core.twisted_streaming import get_instance as get_twisted_streaming
 from core.streaming_service import get_streaming_service
+from services.overlay_cast_service import get_overlay_cast_service
 
 # Configure logging - check if already configured by run.py
 import logging.handlers
@@ -106,6 +107,8 @@ app.include_router(streaming_router, prefix="/api")
 app.include_router(renderer_router, prefix="/api")  # Add the renderer router
 app.include_router(overlay_router)  # Overlay router already has /api prefix
 app.include_router(projection_router)  # Projection router already has /api prefix
+app.include_router(mapping_router)
+app.include_router(media_library_router)
 app.include_router(log_router.router)  # Log streaming router
 app.include_router(discovery_router)  # New unified discovery API (already has /api/v2/discovery prefix)
 
@@ -188,16 +191,18 @@ async def startup_event():
     
     # Create and set device service
     try:
-        # Get the database session
-        db = next(get_db())
-        
-        # Create a device service instance
-        from services.device_service import DeviceService
-        device_service = DeviceService(db, device_manager)
-        
-        # Set the device service in device manager for recovery operations
-        device_manager.set_device_service(device_service)
-        logger.info("Device service set in device manager")
+        db_generator = get_db()
+        db = next(db_generator)
+        try:
+            # Create a device service instance
+            from services.device_service import DeviceService
+            device_service = DeviceService(db, device_manager)
+            
+            # Set the device service in device manager for recovery operations
+            device_manager.set_device_service(device_service)
+            logger.info("Device service set in device manager")
+        finally:
+            db_generator.close()
     except Exception as e:
         logger.error(f"Error creating device service: {e}")
     
@@ -329,6 +334,12 @@ async def shutdown_event():
     # Stop streaming session monitoring
     if streaming_registry:
         streaming_registry.stop_monitoring()
+
+    # Stop overlay cast sessions
+    try:
+        await get_overlay_cast_service().stop_all()
+    except Exception as e:
+        logger.error(f"Error stopping overlay cast service: {e}")
     
     # Stop all streaming servers
     if streaming_service:

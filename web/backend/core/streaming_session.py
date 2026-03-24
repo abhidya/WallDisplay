@@ -13,12 +13,23 @@ class StreamingSession:
     """
     Represents a single streaming session from server to client
     """
-    def __init__(self, session_id: str, device_name: str, video_path: str, server_ip: str, server_port: int):
+    def __init__(
+        self,
+        session_id: str,
+        device_name: str,
+        video_path: str,
+        server_ip: str,
+        server_port: int,
+        stream_type: str = "device_stream",
+        consumer_id: Optional[str] = None,
+    ):
         self.session_id = session_id
         self.device_name = device_name
         self.video_path = video_path
         self.server_ip = server_ip
         self.server_port = server_port
+        self.stream_type = stream_type
+        self.consumer_id = consumer_id
         self.start_time = datetime.now()
         self.last_activity_time = self.start_time
         self.bytes_served = 0
@@ -184,6 +195,8 @@ class StreamingSession:
         return {
             "session_id": self.session_id,
             "device_name": self.device_name,
+            "stream_type": self.stream_type,
+            "consumer_id": self.consumer_id,
             "video_path": self.video_path,
             "server_ip": self.server_ip,
             "server_port": self.server_port,

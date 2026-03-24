@@ -4,3 +4,5 @@ Twisted
 setuptools
 requests
 aiohttp
+
+watchdog

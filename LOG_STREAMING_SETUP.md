@@ -106,16 +106,16 @@ Add the MCP server to your Claude configuration:
   "mcpServers": {
     "nano-dlna-logs": {
       "command": "python",
-      "args": ["/Users/mannybhidya/PycharmProjects/nano-dlna/run_mcp_server.py"],
+      "args": ["/Users/abdulrehmanbhidya/PycharmProjects/nano-dlna/run_mcp_server.py"],
       "env": {
-        "PYTHONPATH": "/Users/mannybhidya/PycharmProjects/nano-dlna"
+        "PYTHONPATH": "/Users/abdulrehmanbhidya/PycharmProjects/nano-dlna"
       }
     }
   }
 }
 ```
 
-Or use the provided config file: `/Users/mannybhidya/PycharmProjects/nano-dlna/mcp-config.json`
+Or use the provided config file: `/Users/abdulrehmanbhidya/PycharmProjects/nano-dlna/mcp-config.json`
 
 ### 4. Start the MCP Server
 

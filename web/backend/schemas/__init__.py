@@ -23,6 +23,26 @@ from .overlay import (
     OverlayStreamRequest,
     OverlayStreamResponse,
 )
+from .mapping_scene import (
+    MappingSceneCreate,
+    MappingSceneUpdate,
+    MappingSceneResponse,
+)
+from .media_directory import (
+    MediaDirectoryCreate,
+    MediaDirectoryUpdate,
+    MediaDirectoryResponse,
+)
+from .media_list import (
+    MediaListCreate,
+    MediaListUpdate,
+    MediaListResponse,
+)
+from .media_channel import (
+    MediaChannelCreate,
+    MediaChannelUpdate,
+    MediaChannelResponse,
+)
 
 __all__ = [
     'DeviceBase',
@@ -44,4 +64,16 @@ __all__ = [
     'OverlayConfigResponse',
     'OverlayStreamRequest',
     'OverlayStreamResponse',
+    'MappingSceneCreate',
+    'MappingSceneUpdate',
+    'MappingSceneResponse',
+    'MediaDirectoryCreate',
+    'MediaDirectoryUpdate',
+    'MediaDirectoryResponse',
+    'MediaListCreate',
+    'MediaListUpdate',
+    'MediaListResponse',
+    'MediaChannelCreate',
+    'MediaChannelUpdate',
+    'MediaChannelResponse',
 ]

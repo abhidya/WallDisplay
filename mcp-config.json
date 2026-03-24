@@ -5,10 +5,10 @@
   "server": {
     "command": "python",
     "args": [
-      "/Users/mannybhidya/PycharmProjects/nano-dlna/run_mcp_server.py"
+      "/Users/abdulrehmanbhidya/PycharmProjects/nano-dlna/run_mcp_server.py"
     ],
     "env": {
-      "PYTHONPATH": "/Users/mannybhidya/PycharmProjects/nano-dlna"
+      "PYTHONPATH": "/Users/abdulrehmanbhidya/PycharmProjects/nano-dlna"
     }
   },
   "capabilities": {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Grid,
   Paper,
@@ -27,18 +27,24 @@ import {
   ListItemText,
   ListItemAvatar,
   Avatar,
-  Chip
+  Chip,
+  FormControl,
+  InputLabel,
+  MenuItem,
+  Select,
+  Stack,
 } from '@mui/material';
 import {
   Add as AddIcon,
   Delete as DeleteIcon,
+  Edit as EditIcon,
   Refresh as RefreshIcon,
   VideoLibrary as VideoIcon,
   PlayArrow as PlayIcon,
   Folder as FolderIcon,
   Upload as UploadIcon
 } from '@mui/icons-material';
-import { videoApi } from '../services/api';
+import { mediaLibraryApi, videoApi } from '../services/api';
 import { useNavigate } from 'react-router-dom';
 
 function Videos() {
@@ -64,21 +70,78 @@ function Videos() {
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [mediaDirectories, setMediaDirectories] = useState([]);
+  const [openDirectoryDialog, setOpenDirectoryDialog] = useState(false);
+  const [openMediaListDialog, setOpenMediaListDialog] = useState(false);
+  const [openMediaChannelDialog, setOpenMediaChannelDialog] = useState(false);
+  const [directoryForm, setDirectoryForm] = useState({
+    name: '',
+    path: '',
+    category: 'background',
+  });
+  const [mediaLists, setMediaLists] = useState([]);
+  const [mediaChannels, setMediaChannels] = useState([]);
+  const [editingMediaListId, setEditingMediaListId] = useState(null);
+  const [editingMediaChannelId, setEditingMediaChannelId] = useState(null);
+  const [mediaListForm, setMediaListForm] = useState({
+    name: '',
+    category: 'background',
+    video_ids: [],
+    playback_mode: 'sequence',
+    shuffle: false,
+    loop: true,
+  });
+  const [mediaChannelForm, setMediaChannelForm] = useState({
+    name: '',
+    media_list_id: '',
+    current_index: 0,
+  });
 
-  useEffect(() => {
-    fetchVideos();
-  }, []);
-
-  const fetchVideos = async () => {
+  const fetchVideos = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await videoApi.getVideos();
+      const response = await videoApi.getVideos(categoryFilter === 'all' ? {} : { category: categoryFilter });
       setVideos(response.data.videos);
       setLoading(false);
     } catch (err) {
       console.error('Error fetching videos:', err);
       setError('Failed to load videos. Please try again later.');
       setLoading(false);
+    }
+  }, [categoryFilter]);
+
+  useEffect(() => {
+    fetchVideos();
+    fetchMediaDirectories();
+    fetchMediaLists();
+    fetchMediaChannels();
+  }, [fetchVideos]);
+
+  const fetchMediaDirectories = async () => {
+    try {
+      const response = await mediaLibraryApi.listDirectories();
+      setMediaDirectories(response.data || []);
+    } catch (err) {
+      console.error('Error fetching media directories:', err);
+    }
+  };
+
+  const fetchMediaLists = async () => {
+    try {
+      const response = await mediaLibraryApi.listMediaLists();
+      setMediaLists(response.data || []);
+    } catch (err) {
+      console.error('Error fetching media lists:', err);
+    }
+  };
+
+  const fetchMediaChannels = async () => {
+    try {
+      const response = await mediaLibraryApi.listMediaChannels();
+      setMediaChannels(response.data || []);
+    } catch (err) {
+      console.error('Error fetching media channels:', err);
     }
   };
 
@@ -151,6 +214,116 @@ function Videos() {
     }
   };
 
+  const handleCreateDirectory = async () => {
+    try {
+      await mediaLibraryApi.createDirectory(directoryForm);
+      setOpenDirectoryDialog(false);
+      setDirectoryForm({ name: '', path: '', category: 'background' });
+      fetchMediaDirectories();
+      setSnackbar({
+        open: true,
+        message: 'Media directory saved',
+        severity: 'success'
+      });
+    } catch (err) {
+      console.error('Error creating media directory:', err);
+      setSnackbar({
+        open: true,
+        message: 'Failed to save media directory',
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleCreateMediaList = async () => {
+    try {
+      if (editingMediaListId) {
+        await mediaLibraryApi.updateMediaList(editingMediaListId, mediaListForm);
+      } else {
+        await mediaLibraryApi.createMediaList(mediaListForm);
+      }
+      setOpenMediaListDialog(false);
+      setEditingMediaListId(null);
+      setMediaListForm({
+        name: '',
+        category: 'background',
+        video_ids: [],
+        playback_mode: 'sequence',
+        shuffle: false,
+        loop: true,
+      });
+      fetchMediaLists();
+      setSnackbar({
+        open: true,
+        message: editingMediaListId ? 'Media list updated' : 'Media list created',
+        severity: 'success'
+      });
+    } catch (err) {
+      console.error('Error creating media list:', err);
+      setSnackbar({
+        open: true,
+        message: 'Failed to create media list',
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleCreateMediaChannel = async () => {
+    try {
+      const payload = {
+        ...mediaChannelForm,
+        media_list_id: Number(mediaChannelForm.media_list_id),
+      };
+      if (editingMediaChannelId) {
+        await mediaLibraryApi.updateMediaChannel(editingMediaChannelId, payload);
+      } else {
+        await mediaLibraryApi.createMediaChannel(payload);
+      }
+      setOpenMediaChannelDialog(false);
+      setEditingMediaChannelId(null);
+      setMediaChannelForm({
+        name: '',
+        media_list_id: '',
+        current_index: 0,
+      });
+      fetchMediaChannels();
+      setSnackbar({
+        open: true,
+        message: editingMediaChannelId ? 'Media channel updated' : 'Media channel created',
+        severity: 'success'
+      });
+    } catch (err) {
+      console.error('Error creating media channel:', err);
+      setSnackbar({
+        open: true,
+        message: 'Failed to create media channel',
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleScanSavedDirectory = async (directory) => {
+    try {
+      setScanning(true);
+      const response = await mediaLibraryApi.scanDirectory(directory.id);
+      setSnackbar({
+        open: true,
+        message: `Scanned ${directory.name}. Found ${response.data.count} new videos.`,
+        severity: 'success'
+      });
+      fetchVideos();
+    } catch (err) {
+      console.error('Error scanning saved directory:', err);
+      setSnackbar({
+        open: true,
+        message: 'Failed to scan saved media directory',
+        severity: 'error'
+      });
+    } finally {
+      setScanning(false);
+    }
+  };
+
   const handleUploadVideo = async () => {
     if (!uploadFile) return;
 
@@ -173,7 +346,7 @@ function Videos() {
     setUploadProgress(0);
 
     try {
-      const response = await videoApi.uploadVideo(formData, {
+      await videoApi.uploadVideo(formData, {
         onUploadProgress: (progressEvent) => {
           const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
           setUploadProgress(percentCompleted);
@@ -240,6 +413,72 @@ function Videos() {
     return Math.round(bytes / Math.pow(1024, i), 2) + ' ' + sizes[i];
   };
 
+  const resetMediaListDialog = () => {
+    setEditingMediaListId(null);
+    setMediaListForm({
+      name: '',
+      category: 'background',
+      video_ids: [],
+      playback_mode: 'sequence',
+      shuffle: false,
+      loop: true,
+    });
+    setOpenMediaListDialog(false);
+  };
+
+  const resetMediaChannelDialog = () => {
+    setEditingMediaChannelId(null);
+    setMediaChannelForm({
+      name: '',
+      media_list_id: '',
+      current_index: 0,
+    });
+    setOpenMediaChannelDialog(false);
+  };
+
+  const openEditMediaListDialog = (list) => {
+    setEditingMediaListId(list.id);
+    setMediaListForm({
+      name: list.name || '',
+      category: list.category || 'background',
+      video_ids: list.video_ids || [],
+      playback_mode: list.playback_mode || 'sequence',
+      shuffle: Boolean(list.shuffle),
+      loop: list.loop !== false,
+    });
+    setOpenMediaListDialog(true);
+  };
+
+  const openEditMediaChannelDialog = (channel) => {
+    setEditingMediaChannelId(channel.id);
+    setMediaChannelForm({
+      name: channel.name || '',
+      media_list_id: channel.media_list_id || '',
+      current_index: channel.current_index || 0,
+    });
+    setOpenMediaChannelDialog(true);
+  };
+
+  const addVideoToMediaList = (video) => {
+    const targetList = mediaLists.find((list) => list.category === video.category) || mediaLists[0];
+    if (targetList) {
+      const nextIds = Array.from(new Set([...(targetList.video_ids || []), video.id]));
+      openEditMediaListDialog({ ...targetList, video_ids: nextIds });
+      return;
+    }
+
+    setEditingMediaListId(null);
+    setMediaListForm({
+      name: `${video.category || 'background'} list`,
+      category: video.category || 'background',
+      video_ids: [video.id],
+      playback_mode: 'sequence',
+      shuffle: false,
+      loop: true,
+    });
+    setOpenMediaListDialog(true);
+  };
+
   if (loading) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
@@ -266,6 +505,52 @@ function Videos() {
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
           <Typography variant="h4">Videos</Typography>
           <Box>
+            <Button
+              variant="contained"
+              color="secondary"
+              startIcon={<FolderIcon />}
+              onClick={() => setOpenDirectoryDialog(true)}
+              sx={{ mr: 1 }}
+            >
+              Add Media Folder
+            </Button>
+            <Button
+              variant="contained"
+              color="secondary"
+              startIcon={<AddIcon />}
+              onClick={() => {
+                setEditingMediaListId(null);
+                setMediaListForm({
+                  name: '',
+                  category: 'background',
+                  video_ids: [],
+                  playback_mode: 'sequence',
+                  shuffle: false,
+                  loop: true,
+                });
+                setOpenMediaListDialog(true);
+              }}
+              sx={{ mr: 1 }}
+            >
+              Add Media List
+            </Button>
+            <Button
+              variant="contained"
+              color="secondary"
+              startIcon={<AddIcon />}
+              onClick={() => {
+                setEditingMediaChannelId(null);
+                setMediaChannelForm({
+                  name: '',
+                  media_list_id: '',
+                  current_index: 0,
+                });
+                setOpenMediaChannelDialog(true);
+              }}
+              sx={{ mr: 1 }}
+            >
+              Add Media Channel
+            </Button>
             <Button
               variant="contained"
               color="primary"
@@ -298,6 +583,101 @@ function Videos() {
       </Grid>
 
       {/* Upload Video */}
+      <Grid item xs={12}>
+        <Paper sx={{ p: 2, mb: 3 }}>
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems={{ md: 'center' }}>
+            <FormControl sx={{ minWidth: 220 }}>
+              <InputLabel>Category Filter</InputLabel>
+              <Select
+                value={categoryFilter}
+                label="Category Filter"
+                onChange={(event) => setCategoryFilter(event.target.value)}
+              >
+                <MenuItem value="all">All</MenuItem>
+                <MenuItem value="displays">Displays</MenuItem>
+                <MenuItem value="background">Background</MenuItem>
+                <MenuItem value="sky">Sky</MenuItem>
+                <MenuItem value="patterns">Patterns</MenuItem>
+              </Select>
+            </FormControl>
+            <Typography variant="body2" color="text.secondary">
+              Organize shared media libraries for mappings and overlay backgrounds.
+            </Typography>
+          </Stack>
+        </Paper>
+      </Grid>
+
+      <Grid item xs={12}>
+        <Paper sx={{ p: 2, mb: 3 }}>
+          <Typography variant="h6" gutterBottom>Saved Media Folders</Typography>
+          {mediaDirectories.length === 0 ? (
+            <Typography variant="body2" color="text.secondary">No saved media folders yet.</Typography>
+          ) : (
+            <List>
+              {mediaDirectories.map((directory) => (
+                <ListItem key={directory.id}>
+                  <ListItemAvatar>
+                    <Avatar><FolderIcon /></Avatar>
+                  </ListItemAvatar>
+                  <ListItemText primary={directory.name} secondary={`${directory.path} • ${directory.category}`} />
+                  <Button variant="outlined" onClick={() => handleScanSavedDirectory(directory)} disabled={scanning}>
+                    Scan
+                  </Button>
+                </ListItem>
+              ))}
+            </List>
+          )}
+        </Paper>
+      </Grid>
+
+      <Grid item xs={12} md={6}>
+        <Paper sx={{ p: 2, mb: 3 }}>
+          <Typography variant="h6" gutterBottom>Media Lists</Typography>
+          {mediaLists.length === 0 ? (
+            <Typography variant="body2" color="text.secondary">No media lists yet.</Typography>
+          ) : (
+            <List>
+              {mediaLists.map((list) => (
+                <ListItem
+                  key={list.id}
+                  secondaryAction={(
+                    <IconButton edge="end" onClick={() => openEditMediaListDialog(list)}>
+                      <EditIcon />
+                    </IconButton>
+                  )}
+                >
+                  <ListItemText primary={list.name} secondary={`${list.video_ids.length} videos • ${list.category}`} />
+                </ListItem>
+              ))}
+            </List>
+          )}
+        </Paper>
+      </Grid>
+
+      <Grid item xs={12} md={6}>
+        <Paper sx={{ p: 2, mb: 3 }}>
+          <Typography variant="h6" gutterBottom>Media Channels</Typography>
+          {mediaChannels.length === 0 ? (
+            <Typography variant="body2" color="text.secondary">No media channels yet.</Typography>
+          ) : (
+            <List>
+              {mediaChannels.map((channel) => (
+                <ListItem
+                  key={channel.id}
+                  secondaryAction={(
+                    <IconButton edge="end" onClick={() => openEditMediaChannelDialog(channel)}>
+                      <EditIcon />
+                    </IconButton>
+                  )}
+                >
+                  <ListItemText primary={channel.name} secondary={`List ${channel.media_list_id} • current index ${channel.current_index}`} />
+                </ListItem>
+              ))}
+            </List>
+          )}
+        </Paper>
+      </Grid>
+
       <Grid item xs={12}>
         <Paper sx={{ p: 2, mb: 3 }}>
           <Typography variant="h6" gutterBottom>
@@ -391,6 +771,10 @@ function Videos() {
                 {video.has_subtitle && (
                   <Chip label="Has Subtitles" size="small" color="primary" sx={{ mt: 1 }} />
                 )}
+                <Box sx={{ mt: 1 }}>
+                  <Chip label={video.category} size="small" color="secondary" sx={{ mr: 1 }} />
+                  <Chip label={video.source_type} size="small" variant="outlined" />
+                </Box>
               </CardContent>
               <CardActions>
                 <Button 
@@ -407,6 +791,13 @@ function Videos() {
                   onClick={() => navigate(`/videos/${video.id}/play`)}
                 >
                   Play
+                </Button>
+                <Button
+                  size="small"
+                  color="secondary"
+                  onClick={() => addVideoToMediaList(video)}
+                >
+                  Add To List
                 </Button>
               </CardActions>
             </Card>
@@ -496,6 +887,125 @@ function Videos() {
           >
             {scanning ? 'Scanning...' : 'Scan'}
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={openDirectoryDialog} onClose={() => setOpenDirectoryDialog(false)}>
+        <DialogTitle>Add Media Folder</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Save a local directory as a reusable media source configuration.
+          </DialogContentText>
+          <TextField
+            autoFocus
+            margin="dense"
+            label="Name"
+            fullWidth
+            value={directoryForm.name}
+            onChange={(event) => setDirectoryForm((current) => ({ ...current, name: event.target.value }))}
+            sx={{ mb: 2 }}
+          />
+          <TextField
+            margin="dense"
+            label="Directory Path"
+            fullWidth
+            value={directoryForm.path}
+            onChange={(event) => setDirectoryForm((current) => ({ ...current, path: event.target.value }))}
+            sx={{ mb: 2 }}
+          />
+          <FormControl fullWidth>
+            <InputLabel>Category</InputLabel>
+            <Select
+              value={directoryForm.category}
+              label="Category"
+              onChange={(event) => setDirectoryForm((current) => ({ ...current, category: event.target.value }))}
+            >
+              <MenuItem value="displays">Displays</MenuItem>
+              <MenuItem value="background">Background</MenuItem>
+              <MenuItem value="sky">Sky</MenuItem>
+              <MenuItem value="patterns">Patterns</MenuItem>
+            </Select>
+          </FormControl>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenDirectoryDialog(false)}>Cancel</Button>
+          <Button onClick={handleCreateDirectory} variant="contained">Save Folder</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={openMediaListDialog} onClose={resetMediaListDialog} maxWidth="sm" fullWidth>
+        <DialogTitle>{editingMediaListId ? 'Edit Media List' : 'Create Media List'}</DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            margin="dense"
+            label="Name"
+            fullWidth
+            value={mediaListForm.name}
+            onChange={(event) => setMediaListForm((current) => ({ ...current, name: event.target.value }))}
+            sx={{ mb: 2 }}
+          />
+          <FormControl fullWidth sx={{ mb: 2 }}>
+            <InputLabel>Category</InputLabel>
+            <Select
+              value={mediaListForm.category}
+              label="Category"
+              onChange={(event) => setMediaListForm((current) => ({ ...current, category: event.target.value }))}
+            >
+              <MenuItem value="displays">Displays</MenuItem>
+              <MenuItem value="background">Background</MenuItem>
+              <MenuItem value="sky">Sky</MenuItem>
+              <MenuItem value="patterns">Patterns</MenuItem>
+            </Select>
+          </FormControl>
+          <FormControl fullWidth>
+            <InputLabel>Videos</InputLabel>
+            <Select
+              multiple
+              value={mediaListForm.video_ids}
+              label="Videos"
+              onChange={(event) => setMediaListForm((current) => ({ ...current, video_ids: event.target.value }))}
+            >
+              {videos.map((video) => (
+                <MenuItem key={video.id} value={video.id}>{video.name}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={resetMediaListDialog}>Cancel</Button>
+          <Button onClick={handleCreateMediaList} variant="contained">{editingMediaListId ? 'Save' : 'Create'}</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={openMediaChannelDialog} onClose={resetMediaChannelDialog} maxWidth="sm" fullWidth>
+        <DialogTitle>{editingMediaChannelId ? 'Edit Media Channel' : 'Create Media Channel'}</DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            margin="dense"
+            label="Name"
+            fullWidth
+            value={mediaChannelForm.name}
+            onChange={(event) => setMediaChannelForm((current) => ({ ...current, name: event.target.value }))}
+            sx={{ mb: 2 }}
+          />
+          <FormControl fullWidth>
+            <InputLabel>Media List</InputLabel>
+            <Select
+              value={mediaChannelForm.media_list_id}
+              label="Media List"
+              onChange={(event) => setMediaChannelForm((current) => ({ ...current, media_list_id: event.target.value }))}
+            >
+              {mediaLists.map((list) => (
+                <MenuItem key={list.id} value={list.id}>{list.name}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={resetMediaChannelDialog}>Cancel</Button>
+          <Button onClick={handleCreateMediaChannel} variant="contained">{editingMediaChannelId ? 'Save' : 'Create'}</Button>
         </DialogActions>
       </Dialog>
 

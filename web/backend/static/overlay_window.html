@@ -20,18 +20,33 @@
             height: 100vh;
         }
         
-        /* Video container with transform capability */
-        #video-container {
+        /* Background host with transform capability */
+        #background-host {
             position: absolute;
             width: 100%;
             height: 100%;
             transform-origin: center;
+        }
+
+        #video-container,
+        #mapping-container {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
         }
         
         #bg-video {
             width: 100%;
             height: 100%;
             object-fit: cover;
+        }
+
+        #mapping-canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+            background: black;
         }
         
         /* Widget base styles */
@@ -500,11 +515,16 @@
 <body>
     <div class="loading" id="loading">Loading projection...</div>
     
-    <div id="video-container">
-        <video id="bg-video" autoplay loop muted playsinline>
-            <source id="video-source" type="video/mp4"/>
-            Your browser does not support the video tag.
-        </video>
+    <div id="background-host">
+        <div id="video-container">
+            <video id="bg-video" autoplay loop muted playsinline>
+                <source id="video-source" type="video/mp4"/>
+                Your browser does not support the video tag.
+            </video>
+        </div>
+        <div id="mapping-container" style="display:none;">
+            <canvas id="mapping-canvas" width="1280" height="720"></canvas>
+        </div>
     </div>
     
     <div id="widgets-container"></div>
@@ -593,8 +613,15 @@
     
     <script>
         let config = null;
+        let backgroundType = 'video';
+        let mappingScene = null;
         let videoTransform = { x: 0, y: 0, scale: 1, rotation: 0 };
         let widgets = [];
+        let mappingMaskCache = new Map();
+        let mappingMediaCache = new Map();
+        let mappingMediaState = new Map();
+        let mappingAnimationFrame = null;
+        const MIN_MAPPING_CLIP_SECONDS = 60;
         let isDragging = false;
         let isResizing = false;
         let isRotating = false;
@@ -604,48 +631,89 @@
         let rotateStart = { angle: 0, mouseAngle: 0 };
         let selectedWidget = null;
         let dataUpdateIntervals = {};
+        let initialUrlParams = new URLSearchParams(window.location.search);
+
+        function applyUrlOptions(params) {
+            const hideControls = (
+                params.get('controls') === 'hidden' ||
+                params.get('hide_controls') === '1' ||
+                params.get('ui') === 'hidden'
+            );
+
+            if (hideControls) {
+                document.getElementById('controls').classList.add('hidden');
+            }
+        }
+
+        function applyInitPayload(payload) {
+            config = payload.config;
+            backgroundType = payload.backgroundType || payload.background_type || config.background_type || 'video';
+            mappingScene = payload.mappingScene || payload.mapping_scene || null;
+            videoTransform = config.video_transform || { x: 0, y: 0, scale: 1, rotation: 0 };
+            widgets = config.widgets || [];
+
+            document.getElementById('loading').style.display = 'none';
+
+            if (backgroundType === 'mapping' && mappingScene) {
+                initializeMappingScene(mappingScene);
+            } else {
+                loadVideoWithRetry(payload.streamingUrl || payload.streaming_url);
+            }
+
+            updateVideoTransform();
+
+            document.getElementById('video-x').value = videoTransform.x;
+            document.getElementById('video-x-value').textContent = videoTransform.x;
+            document.getElementById('video-y').value = videoTransform.y;
+            document.getElementById('video-y-value').textContent = videoTransform.y;
+            document.getElementById('video-scale').value = videoTransform.scale;
+            document.getElementById('video-scale-value').textContent = videoTransform.scale;
+            document.getElementById('video-rotation').value = videoTransform.rotation;
+            document.getElementById('video-rotation-value').textContent = videoTransform.rotation;
+
+            createWidgets();
+            createVisibilityControls();
+            startDataUpdates();
+            startOverlayStatusPolling();
+        }
+
+        async function bootstrapFromUrl() {
+            const params = initialUrlParams;
+            const configId = params.get('config_id');
+            applyUrlOptions(params);
+            if (!configId) {
+                return false;
+            }
+
+            try {
+                const response = await fetch(`/api/overlay/window-init?config_id=${encodeURIComponent(configId)}`);
+                if (!response.ok) {
+                    throw new Error(`Failed to bootstrap overlay window (${response.status})`);
+                }
+                const payload = await response.json();
+                applyInitPayload(payload);
+                return true;
+            } catch (error) {
+                console.error('Failed to bootstrap overlay window from URL:', error);
+                showError('Unable to bootstrap overlay window from URL parameters.');
+                document.getElementById('loading').style.display = 'none';
+                return true;
+            }
+        }
         
         // Initialize from parent window
         window.addEventListener('message', function(event) {
             if (event.data.type === 'init') {
-                config = event.data.config;
-                videoTransform = config.video_transform || { x: 0, y: 0, scale: 1, rotation: 0 };
-                widgets = config.widgets;
-                
-                // Hide loading
-                document.getElementById('loading').style.display = 'none';
-                
-                // Load video with retry logic
-                loadVideoWithRetry(event.data.streamingUrl);
-                
-                // Apply transforms
-                updateVideoTransform();
-                
-                // Update control values to match loaded config
-                document.getElementById('video-x').value = videoTransform.x;
-                document.getElementById('video-x-value').textContent = videoTransform.x;
-                document.getElementById('video-y').value = videoTransform.y;
-                document.getElementById('video-y-value').textContent = videoTransform.y;
-                document.getElementById('video-scale').value = videoTransform.scale;
-                document.getElementById('video-scale-value').textContent = videoTransform.scale;
-                document.getElementById('video-rotation').value = videoTransform.rotation;
-                document.getElementById('video-rotation-value').textContent = videoTransform.rotation;
-                
-                // Create widgets
-                createWidgets();
-                
-                // Create visibility controls
-                createVisibilityControls();
-                
-                // Start data updates
-                startDataUpdates();
-                
-                // Start combined status polling for brightness and sync
-                startOverlayStatusPolling();
+                applyUrlOptions(initialUrlParams);
+                applyInitPayload(event.data);
             }
         });
+
+        bootstrapFromUrl();
         
         function loadVideoWithRetry(streamingUrl) {
+            document.getElementById('video-container').style.display = 'block';
+            document.getElementById('mapping-container').style.display = 'none';
             const video = document.getElementById('bg-video');
             const source = document.getElementById('video-source');
             
@@ -673,12 +741,320 @@
         }
         
         function updateVideoTransform() {
-            const container = document.getElementById('video-container');
+            const container = document.getElementById('background-host');
             container.style.transform = `
                 translate(${videoTransform.x}px, ${videoTransform.y}px)
                 scale(${videoTransform.scale})
                 rotate(${videoTransform.rotation}deg)
             `;
+        }
+
+        async function initializeMappingScene(scene) {
+            document.getElementById('video-container').style.display = 'none';
+            document.getElementById('mapping-container').style.display = 'block';
+            const canvas = document.getElementById('mapping-canvas');
+            canvas.width = scene.canvas_width || 1280;
+            canvas.height = scene.canvas_height || 720;
+            mappingMaskCache = new Map();
+            mappingMediaCache = new Map();
+            mappingMediaState = new Map();
+            await Promise.all((scene.masks || []).map(loadMappingMask));
+            await Promise.all((scene.groups || []).map(loadGroupMedia));
+            startMappingRenderLoop();
+        }
+
+        function loadMappingMask(mask) {
+            return new Promise((resolve) => {
+                const image = new Image();
+                image.onload = () => {
+                    mappingMaskCache.set(mask.id, image);
+                    resolve();
+                };
+                image.onerror = resolve;
+                image.src = mask.url;
+            });
+        }
+
+        function loadGroupMedia(group) {
+            const mediaSources = Array.isArray(group.media_urls) && group.media_urls.length
+                ? group.media_urls
+                : (group.media_url ? [group.media_url] : []);
+            if (!mediaSources.length) return Promise.resolve();
+            return new Promise((resolve) => {
+                const currentIndex = 0;
+                const currentUrl = mediaSources[currentIndex];
+                const isImage = /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$)/i.test(currentUrl);
+                if (isImage) {
+                    const image = new Image();
+                    image.onload = () => {
+                        mappingMediaCache.set(group.id, image);
+                        mappingMediaState.set(group.id, {
+                            element: image,
+                            sources: mediaSources,
+                            currentIndex,
+                            type: 'image',
+                        });
+                        resolve();
+                    };
+                    image.onerror = resolve;
+                    image.src = currentUrl;
+                    return;
+                }
+
+                const video = document.createElement('video');
+                video.muted = true;
+                video.autoplay = true;
+                video.playsInline = true;
+                video.preload = 'auto';
+                const state = {
+                    element: video,
+                    sources: mediaSources,
+                    currentIndex,
+                    type: 'video',
+                    holdUntil: 0,
+                    pendingAdvance: false,
+                    lastFrameCanvas: null,
+                };
+                let resolved = false;
+
+                const updateMinimumHold = () => {
+                    const duration = Number(video.duration);
+                    if (Number.isFinite(duration) && duration > 0 && duration < MIN_MAPPING_CLIP_SECONDS && state.sources.length > 1) {
+                        state.holdUntil = Date.now() + (MIN_MAPPING_CLIP_SECONDS * 1000);
+                    } else {
+                        state.holdUntil = 0;
+                    }
+                };
+
+                const swapToLoadedVideo = (loadedVideo, nextIndex) => {
+                    state.currentIndex = nextIndex;
+                    state.element = loadedVideo;
+                    state.pendingAdvance = false;
+                    mappingMediaCache.set(group.id, loadedVideo);
+                    mappingMediaState.set(group.id, state);
+                    loadedVideo.play().catch(() => {});
+                };
+
+                const queueNextVideo = (nextIndex) => {
+                    if (state.pendingAdvance) {
+                        return;
+                    }
+
+                    state.pendingAdvance = true;
+                    const nextVideo = document.createElement('video');
+                    nextVideo.muted = true;
+                    nextVideo.autoplay = true;
+                    nextVideo.playsInline = true;
+                    nextVideo.preload = 'auto';
+                    nextVideo.loop = state.sources.length === 1;
+
+                    nextVideo.onloadeddata = () => {
+                        updateVideoTimingState(nextVideo, state, nextIndex);
+                        swapToLoadedVideo(nextVideo, nextIndex);
+                    };
+                    nextVideo.onerror = () => {
+                        state.pendingAdvance = false;
+                    };
+
+                    nextVideo.src = state.sources[nextIndex];
+                    nextVideo.load();
+                };
+
+                const updateVideoTimingState = (targetVideo, targetState, nextIndex) => {
+                    targetState.currentIndex = nextIndex;
+                    const duration = Number(targetVideo.duration);
+                    if (Number.isFinite(duration) && duration > 0 && duration < MIN_MAPPING_CLIP_SECONDS && targetState.sources.length > 1) {
+                        targetState.holdUntil = Date.now() + (MIN_MAPPING_CLIP_SECONDS * 1000);
+                    } else {
+                        targetState.holdUntil = 0;
+                    }
+                };
+
+                const applyVideoSource = (nextIndex) => {
+                    state.currentIndex = nextIndex;
+                    video.loop = state.sources.length === 1;
+                    video.src = state.sources[nextIndex];
+                    video.load();
+                };
+
+                video.onloadeddata = () => {
+                    mappingMediaCache.set(group.id, video);
+                    updateMinimumHold();
+                    mappingMediaState.set(group.id, state);
+                    video.play().catch(() => {});
+                    if (!resolved) {
+                        resolved = true;
+                        resolve();
+                    }
+                };
+                video.onended = () => {
+                    const state = mappingMediaState.get(group.id);
+                    if (!state || state.sources.length <= 1) return;
+                    if (state.holdUntil && Date.now() < state.holdUntil) {
+                        const currentVideo = state.element;
+                        currentVideo.currentTime = 0;
+                        currentVideo.play().catch(() => {});
+                        return;
+                    }
+                    const nextIndex = (state.currentIndex + 1) % state.sources.length;
+                    queueNextVideo(nextIndex);
+                };
+                video.onerror = () => {
+                    if (!resolved) {
+                        resolved = true;
+                        resolve();
+                    }
+                };
+                applyVideoSource(currentIndex);
+            });
+        }
+
+        function startMappingRenderLoop() {
+            if (mappingAnimationFrame) {
+                cancelAnimationFrame(mappingAnimationFrame);
+            }
+            const loop = () => {
+                renderMappingScene();
+                mappingAnimationFrame = requestAnimationFrame(loop);
+            };
+            mappingAnimationFrame = requestAnimationFrame(loop);
+        }
+
+        function renderMappingScene() {
+            if (!mappingScene) return;
+            const canvas = document.getElementById('mapping-canvas');
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            const groups = [...(mappingScene.groups || [])]
+                .filter(group => group.visible !== false && group.mask_ids && group.mask_ids.length)
+                .sort((a, b) => (a.z_index || 0) - (b.z_index || 0));
+
+            groups.forEach(group => drawMappingGroup(ctx, group, canvas.width, canvas.height));
+        }
+
+        function drawMappingGroup(ctx, group, canvasWidth, canvasHeight) {
+            const maskImages = (group.mask_ids || []).map(maskId => mappingMaskCache.get(maskId)).filter(Boolean);
+            if (!maskImages.length) return;
+
+            const bounds = computeMaskBounds(maskImages, canvasWidth, canvasHeight);
+            const groupCanvas = document.createElement('canvas');
+            groupCanvas.width = canvasWidth;
+            groupCanvas.height = canvasHeight;
+            const groupCtx = groupCanvas.getContext('2d');
+
+            const media = mappingMediaCache.get(group.id);
+            const mediaState = mappingMediaState.get(group.id);
+            if (media && (media.tagName !== 'VIDEO' || media.readyState >= 2)) {
+                drawMediaCover(groupCtx, media, bounds, group.transform || {});
+                if (media.tagName === 'VIDEO' && mediaState) {
+                    if (!mediaState.lastFrameCanvas) {
+                        mediaState.lastFrameCanvas = document.createElement('canvas');
+                        mediaState.lastFrameCanvas.width = canvasWidth;
+                        mediaState.lastFrameCanvas.height = canvasHeight;
+                    }
+                    const lastFrameCtx = mediaState.lastFrameCanvas.getContext('2d');
+                    lastFrameCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+                    lastFrameCtx.drawImage(groupCanvas, 0, 0);
+                }
+            } else if (mediaState && mediaState.lastFrameCanvas) {
+                groupCtx.drawImage(mediaState.lastFrameCanvas, 0, 0);
+            } else {
+                drawFallbackFill(groupCtx, group, bounds);
+            }
+
+            applyLuminanceMasks(groupCtx, maskImages, canvasWidth, canvasHeight);
+            ctx.drawImage(groupCanvas, 0, 0);
+        }
+
+        function computeMaskBounds(maskImages, width, height) {
+            let minX = width;
+            let minY = height;
+            let maxX = 0;
+            let maxY = 0;
+            maskImages.forEach((image) => {
+                const offscreen = document.createElement('canvas');
+                offscreen.width = width;
+                offscreen.height = height;
+                const offscreenCtx = offscreen.getContext('2d', { willReadFrequently: true });
+                offscreenCtx.drawImage(image, 0, 0, width, height);
+                const { data } = offscreenCtx.getImageData(0, 0, width, height);
+                for (let y = 0; y < height; y++) {
+                    for (let x = 0; x < width; x++) {
+                        const idx = (y * width + x) * 4;
+                        const alpha = data[idx + 3];
+                        const lum = (data[idx] + data[idx + 1] + data[idx + 2]) / 3;
+                        if (alpha > 5 && lum > 127) {
+                            minX = Math.min(minX, x);
+                            minY = Math.min(minY, y);
+                            maxX = Math.max(maxX, x);
+                            maxY = Math.max(maxY, y);
+                        }
+                    }
+                }
+            });
+            return {
+                x: minX,
+                y: minY,
+                width: Math.max(1, maxX - minX + 1),
+                height: Math.max(1, maxY - minY + 1)
+            };
+        }
+
+        function drawMediaCover(ctx, media, bounds, transform) {
+            const sourceWidth = media.videoWidth || media.naturalWidth || bounds.width;
+            const sourceHeight = media.videoHeight || media.naturalHeight || bounds.height;
+            const scale = Math.max(bounds.width / sourceWidth, bounds.height / sourceHeight) * (transform.scale || 1);
+            const width = sourceWidth * scale;
+            const height = sourceHeight * scale;
+            const x = bounds.x + ((bounds.width - width) / 2) + (transform.offset_x || 0);
+            const y = bounds.y + ((bounds.height - height) / 2) + (transform.offset_y || 0);
+            ctx.drawImage(media, x, y, width, height);
+        }
+
+        function drawFallbackFill(ctx, group, bounds) {
+            const gradient = ctx.createLinearGradient(bounds.x, bounds.y, bounds.x + bounds.width, bounds.y + bounds.height);
+            gradient.addColorStop(0, group.color_a || '#00bbf9');
+            gradient.addColorStop(1, group.color_b || '#003049');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+        }
+
+        function applyLuminanceMasks(ctx, maskImages, width, height) {
+            const maskCanvas = document.createElement('canvas');
+            maskCanvas.width = width;
+            maskCanvas.height = height;
+            const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
+            const combinedImageData = maskCtx.createImageData(width, height);
+            const combinedPixels = combinedImageData.data;
+
+            maskImages.forEach((image) => {
+                maskCtx.clearRect(0, 0, width, height);
+                maskCtx.drawImage(image, 0, 0, width, height);
+                const { data } = maskCtx.getImageData(0, 0, width, height);
+
+                for (let i = 0; i < data.length; i += 4) {
+                    const alpha = data[i + 3];
+                    if (alpha <= 5) {
+                        continue;
+                    }
+
+                    const lum = (data[i] + data[i + 1] + data[i + 2]) / 3;
+                    if (lum > combinedPixels[i + 3]) {
+                        combinedPixels[i] = 255;
+                        combinedPixels[i + 1] = 255;
+                        combinedPixels[i + 2] = 255;
+                        combinedPixels[i + 3] = lum > 127 ? 255 : 0;
+                    }
+                }
+            });
+
+            maskCtx.putImageData(combinedImageData, 0, 0);
+            ctx.globalCompositeOperation = 'destination-in';
+            ctx.drawImage(maskCanvas, 0, 0);
+            ctx.globalCompositeOperation = 'source-over';
         }
         
         function createWidgets() {
@@ -1058,16 +1434,24 @@
                             console.log(`Sync event detected: ${data.data.triggered_by} at ${data.data.timestamp}`);
                             
                             // Sync video playback
-                            const video = document.getElementById('bg-video');
-                            const syncStartTime = performance.now();
-                            
-                            video.currentTime = 0;
-                            video.play().then(() => {
-                                const syncTime = performance.now() - syncStartTime;
-                                console.log(`Video synced in ${syncTime}ms`);
-                            }).catch(err => {
-                                console.error('Failed to sync video:', err);
-                            });
+                            if (backgroundType === 'mapping') {
+                                mappingMediaCache.forEach((media) => {
+                                    if (media instanceof HTMLVideoElement) {
+                                        media.currentTime = 0;
+                                        media.play().catch(err => console.error('Failed to sync mapping media:', err));
+                                    }
+                                });
+                            } else {
+                                const video = document.getElementById('bg-video');
+                                const syncStartTime = performance.now();
+                                video.currentTime = 0;
+                                video.play().then(() => {
+                                    const syncTime = performance.now() - syncStartTime;
+                                    console.log(`Video synced in ${syncTime}ms`);
+                                }).catch(err => {
+                                    console.error('Failed to sync video:', err);
+                                });
+                            }
                         }
                     } catch (error) {
                         console.error('Error processing event:', error);
@@ -1107,11 +1491,20 @@
                             lastSyncEventId = status.sync.event_id;
                             console.log(`Sync event detected: ${status.sync.triggered_by} at ${status.sync.timestamp}`);
                             
-                            const video = document.getElementById('bg-video');
-                            video.currentTime = 0;
-                            video.play().catch(err => {
-                                console.error('Failed to sync video:', err);
-                            });
+                            if (backgroundType === 'mapping') {
+                                mappingMediaCache.forEach((media) => {
+                                    if (media instanceof HTMLVideoElement) {
+                                        media.currentTime = 0;
+                                        media.play().catch(err => console.error('Failed to sync mapping media:', err));
+                                    }
+                                });
+                            } else {
+                                const video = document.getElementById('bg-video');
+                                video.currentTime = 0;
+                                video.play().catch(err => {
+                                    console.error('Failed to sync video:', err);
+                                });
+                            }
                         }
                     } catch (error) {
                         console.error('Status update error:', error);
@@ -1160,24 +1553,69 @@
         }
         
         // Control functions
-        function saveConfig(button) {
+        async function saveConfig(button) {
             if (!config) return;
             
             config.video_transform = videoTransform;
             config.widgets = widgets;
-            
-            if (window.opener && !window.opener.closed) {
-                window.opener.postMessage({
-                    type: 'updateConfig',
-                    config: config
-                }, '*');
-                
-                // Visual feedback
+
+            const originalLabel = button ? button.textContent : null;
+            if (button) {
+                button.disabled = true;
+                button.textContent = 'Saving...';
+            }
+
+            try {
+                if (!config.id) {
+                    throw new Error('Cannot save configuration without config id');
+                }
+
+                const response = await fetch(`/api/overlay/configs/${encodeURIComponent(config.id)}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        name: config.name,
+                        background_type: config.background_type,
+                        video_id: config.video_id,
+                        mapping_scene_id: config.mapping_scene_id,
+                        video_transform: videoTransform,
+                        widgets: widgets,
+                        api_configs: config.api_configs || {},
+                    }),
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Failed to save configuration (${response.status})`);
+                }
+
+                config = await response.json();
+
+                if (window.opener && !window.opener.closed) {
+                    window.opener.postMessage({
+                        type: 'updateConfig',
+                        config: config
+                    }, '*');
+                }
+
                 if (button) {
                     button.textContent = '✅ Saved!';
                     setTimeout(() => {
-                        button.textContent = '💾 Save Configuration';
+                        button.textContent = originalLabel || '💾 Save Configuration';
                     }, 2000);
+                }
+            } catch (error) {
+                console.error('Save config error:', error);
+                if (button) {
+                    button.textContent = 'Save Failed';
+                    setTimeout(() => {
+                        button.textContent = originalLabel || '💾 Save Configuration';
+                    }, 2000);
+                }
+            } finally {
+                if (button) {
+                    button.disabled = false;
                 }
             }
         }

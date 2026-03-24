@@ -9,7 +9,9 @@ class OverlayConfig(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
-    video_id = Column(Integer, ForeignKey("videos.id"), nullable=False)
+    background_type = Column(String, nullable=False, default="video")
+    video_id = Column(Integer, ForeignKey("videos.id"), nullable=True)
+    mapping_scene_id = Column(Integer, nullable=True)
     video_transform = Column(JSON, nullable=False)
     widgets = Column(JSON, nullable=False)
     api_configs = Column(JSON, nullable=False)

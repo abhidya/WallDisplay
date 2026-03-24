@@ -110,15 +110,26 @@ const discoveryV2Api = {
   disableBackend: (backendName) => api.post(`/v2/discovery/backends/${backendName}/disable`),
   
   // Casting Control
-  startCast: (deviceId, mediaUrl, options = {}) => 
-    api.post('/v2/discovery/cast', { device_id: deviceId, media_url: mediaUrl, ...options }),
-  stopCast: (deviceId) => api.post(`/v2/discovery/cast/${deviceId}/stop`),
-  pauseCast: (deviceId) => api.post(`/v2/discovery/cast/${deviceId}/pause`),
-  resumeCast: (deviceId) => api.post(`/v2/discovery/cast/${deviceId}/resume`),
+  startCast: (deviceId, contentUrl, options = {}) => 
+    api.post('/v2/discovery/cast', {
+      device_id: deviceId,
+      content_url: contentUrl,
+      content_type: options.content_type || 'video/mp4',
+      metadata: options.metadata || null,
+    }),
+  stopCast: (sessionId) => api.post(`/v2/discovery/stop/${sessionId}`),
+  pauseCast: (sessionId) => api.post(`/v2/discovery/pause/${sessionId}`),
+  resumeCast: (sessionId) => api.post(`/v2/discovery/resume/${sessionId}`),
   getActiveSessions: () => api.get('/v2/discovery/sessions'),
   
   // System Status
   getSystemStatus: () => api.get('/v2/discovery/status'),
+};
+
+const overlayApi = {
+  startCast: (payload) => api.post('/overlay/cast', payload),
+  listCastSessions: () => api.get('/overlay/cast/sessions'),
+  stopCastSession: (sessionId) => api.delete(`/overlay/cast/sessions/${sessionId}`),
 };
 
 // Video API
@@ -137,8 +148,38 @@ const videoApi = {
   }),
   streamVideo: (id, serveIp) => 
     api.post(`/videos/${id}/stream`, null, { params: { serve_ip: serveIp } }),
-  scanDirectory: (directory) => 
-    api.post('/videos/scan-directory', null, { params: { directory } }),
+  scanDirectory: (directory, category = 'background', sourceDirectoryId = null) => 
+    api.post('/videos/scan-directory', null, { params: { directory, category, source_directory_id: sourceDirectoryId } }),
+};
+
+const mappingsApi = {
+  listScenes: () => api.get('/mappings/scenes'),
+  getScene: (id) => api.get(`/mappings/scenes/${id}`),
+  createScene: (data) => api.post('/mappings/scenes', data),
+  updateScene: (id, data) => api.put(`/mappings/scenes/${id}`, data),
+  deleteScene: (id) => api.delete(`/mappings/scenes/${id}`),
+  uploadMasks: (id, formData) => api.post(`/mappings/scenes/${id}/masks/upload`, formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  }),
+};
+
+const mediaLibraryApi = {
+  listDirectories: () => api.get('/media-library/directories'),
+  createDirectory: (data) => api.post('/media-library/directories', data),
+  updateDirectory: (id, data) => api.put(`/media-library/directories/${id}`, data),
+  deleteDirectory: (id) => api.delete(`/media-library/directories/${id}`),
+  scanDirectory: (id) => api.post(`/media-library/directories/${id}/scan`),
+  listMediaLists: () => api.get('/media-library/lists'),
+  createMediaList: (data) => api.post('/media-library/lists', data),
+  updateMediaList: (id, data) => api.put(`/media-library/lists/${id}`, data),
+  deleteMediaList: (id) => api.delete(`/media-library/lists/${id}`),
+  listMediaChannels: () => api.get('/media-library/channels'),
+  createMediaChannel: (data) => api.post('/media-library/channels', data),
+  updateMediaChannel: (id, data) => api.put(`/media-library/channels/${id}`, data),
+  advanceMediaChannel: (id) => api.post(`/media-library/channels/${id}/advance`),
+  deleteMediaChannel: (id) => api.delete(`/media-library/channels/${id}`),
 };
 
 // Renderer API
@@ -229,9 +270,12 @@ export {
   api, 
   deviceApi, 
   videoApi, 
+  mappingsApi,
+  mediaLibraryApi,
   rendererApi, 
   depthApi, 
   streamingApi, 
   settingsApi,
-  discoveryV2Api 
+  discoveryV2Api,
+  overlayApi,
 };

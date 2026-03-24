@@ -20,21 +20,21 @@ mkdir -p data uploads
 cd backend
 if [ ! -d "venv" ]; then
     echo "Creating Python virtual environment..."
-    python3 -m venv venv
+    python -m venv venv
 fi
 
 # Activate virtual environment and install dependencies
-source venv/bin/activate
+source /Users/abdulrehmanbhidya/PycharmProjects/nano-dlna/.venv/bin/activate
 pip install -r requirements.txt
-
+#
 # Check for import errors before running the server
 echo "Checking for import errors..."
-PYTHONPATH=/Users/mannybhidya/PycharmProjects/nano-dlna python3 -c "import sys; sys.path.insert(0, '.'); import main" 2>/tmp/import_check.log
+PYTHONPATH=/Users/abdulrehmanbhidya/PycharmProjects/nano-dlna/.venv/bin/python python -c "import sys; sys.path.insert(0, '.'); import main" 2>/tmp/import_check.log
 if [ $? -ne 0 ]; then
     echo "Import error detected. Check the error log:"
     cat /tmp/import_check.log
     echo "Fixing common import issue in streaming_router.py..."
-    
+
     # Fix known issue with relative imports
     STREAMING_ROUTER="routers/streaming_router.py"
     if [ -f "$STREAMING_ROUTER" ]; then
@@ -42,9 +42,9 @@ if [ $? -ne 0 ]; then
         sed -i'' -e 's/from ..core.streaming_registry/from core.streaming_registry/g' "$STREAMING_ROUTER"
         echo "Fixed import in $STREAMING_ROUTER"
     fi
-    
+
     # Check again after fix
-    PYTHONPATH=/Users/mannybhidya/PycharmProjects/nano-dlna python3 -c "import sys; sys.path.insert(0, '.'); import main" 2>/tmp/import_check.log
+    PYTHONPATH=/Users/abdulrehmanbhidya/PycharmProjects/nano-dlna/.venv/bin/python python -c "import sys; sys.path.insert(0, '.'); import main" 2>/tmp/import_check.log
     if [ $? -ne 0 ]; then
         echo "Import issues persist after attempted fix:"
         cat /tmp/import_check.log
@@ -57,7 +57,7 @@ fi
 
 # Run the backend in the background
 echo "Starting backend server..."
-PYTHONPATH=/Users/mannybhidya/PycharmProjects/nano-dlna python3 run.py &
+PYTHONPATH=/Users/abdulrehmanbhidya/PycharmProjects/nano-dlna/.venv/bin/python python run.py &
 BACKEND_PID=$!
 
 # Wait for backend to start and verify it's running

@@ -827,7 +827,7 @@ class DLNADevice(Device):
                 if not video_path or not os.path.exists(video_path):
                     # Try to find the file in common locations
                     possible_paths = [
-                        os.path.join("/Users/mannybhidya/PycharmProjects/nano-dlna", filename),
+                        os.path.join("/Users/abdulrehmanbhidya/PycharmProjects/nano-dlna", filename),
                         os.path.join(os.getcwd(), filename),
                         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", filename),
                     ]

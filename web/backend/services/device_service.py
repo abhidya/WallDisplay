@@ -2,7 +2,9 @@ import logging
 import os
 import json
 import traceback
+import time
 from typing import List, Optional, Dict, Any
+from urllib.parse import urlparse
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from fastapi import Depends
@@ -14,6 +16,7 @@ from core.dlna_device import DLNADevice
 from core.transcreen_device import TranscreenDevice
 from schemas.device import DeviceCreate, DeviceUpdate
 from core.config_service import ConfigService
+from services.overlay_cast_service import get_overlay_cast_service
 
 logger = logging.getLogger(__name__)
 
@@ -1132,12 +1135,159 @@ class DeviceService:
                 # Add additional live info from device_status
                 device_dict["last_seen"] = status_info.get("last_updated")
                 device_dict["manager_is_playing"] = status_info.get("is_playing", device.is_playing)
+                device_dict["last_seen_at"] = status_info.get("last_seen_at")
+                device_dict["last_lost_at"] = status_info.get("last_lost_at")
+                device_dict["reconnect_count"] = status_info.get("reconnect_count", 0)
+                device_dict["degraded_count"] = status_info.get("degraded_count", 0)
+                device_dict["offline_count"] = status_info.get("offline_count", 0)
                 logger.info(f"Device {device.name} status from manager: {status_info.get('status')}, is_playing: {status_info.get('is_playing')}")
             else:
                 logger.warning(f"Device '{device.name}' not found in device_manager.device_status, using DB status: {device.status}")
-        
+
+        device_dict.update(self._derive_device_runtime_state(device, device_dict))
         logger.debug(f"_device_to_dict: final device_dict['status'] for '{device.name}' is '{device_dict['status']}'")
         return device_dict
+
+    def _derive_device_runtime_state(self, device: DeviceModel, device_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Produce stable, presentation-friendly availability fields from raw DB and manager state.
+        This does not change persisted device status; it only normalizes what the frontend sees.
+        """
+        now = time.time()
+        timeout = getattr(self.device_manager, "connectivity_timeout", 30)
+        degraded_threshold = timeout
+        offline_threshold = timeout * 2
+
+        manager_status = device_dict.get("status") or device.status or "unknown"
+        manager_is_playing = device_dict.get("manager_is_playing", device_dict.get("is_playing", False))
+        last_seen_raw = device_dict.get("last_seen")
+
+        last_seen_ts = None
+        if isinstance(last_seen_raw, (int, float)):
+            last_seen_ts = float(last_seen_raw)
+
+        seconds_since_seen = None if last_seen_ts is None else max(0.0, now - last_seen_ts)
+
+        if manager_status in {"playing", "connected"}:
+            if seconds_since_seen is None or seconds_since_seen <= degraded_threshold:
+                availability = "online"
+            elif seconds_since_seen <= offline_threshold:
+                availability = "degraded"
+            else:
+                availability = "offline"
+        elif manager_status in {"streaming_issue", "error"}:
+            availability = "degraded" if seconds_since_seen is None or seconds_since_seen <= offline_threshold else "offline"
+        elif manager_status in {"disconnected", "offline"}:
+            availability = "offline"
+        else:
+            availability = "unknown"
+
+        connected_since = None
+        downtime_started_at = None
+        uptime_seconds = None
+        downtime_seconds = None
+        last_lost_at = device_dict.get("last_lost_at")
+
+        if availability in {"online", "degraded"} and last_seen_ts is not None:
+            connected_since = last_seen_ts if seconds_since_seen is None else max(last_seen_ts - min(seconds_since_seen, degraded_threshold), 0)
+            uptime_seconds = max(0.0, now - connected_since)
+        elif availability == "offline":
+            if isinstance(last_lost_at, (int, float)):
+                downtime_started_at = float(last_lost_at)
+                downtime_seconds = max(0.0, now - downtime_started_at)
+            elif last_seen_ts is not None:
+                downtime_started_at = last_seen_ts + offline_threshold
+                downtime_seconds = max(0.0, now - downtime_started_at)
+
+        overlay_cast = self._get_overlay_cast_state(device)
+
+        return {
+            "availability": availability,
+            "derived_status": availability,
+            "manager_status": manager_status,
+            "manager_is_playing": manager_is_playing,
+            "seconds_since_seen": seconds_since_seen,
+            "connected_since": connected_since,
+            "uptime_seconds": uptime_seconds,
+            "downtime_started_at": downtime_started_at,
+            "downtime_seconds": downtime_seconds,
+            "last_seen_at": device_dict.get("last_seen_at"),
+            "last_lost_at": last_lost_at,
+            "reconnect_count": int(device_dict.get("reconnect_count", 0) or 0),
+            "degraded_count": int(device_dict.get("degraded_count", 0) or 0),
+            "offline_count": int(device_dict.get("offline_count", 0) or 0),
+            **overlay_cast,
+        }
+
+    def _get_overlay_cast_state(self, device: DeviceModel) -> Dict[str, Any]:
+        active_session = None
+        cast_service = get_overlay_cast_service()
+        for session in cast_service.list_sessions():
+            if session.get("archived"):
+                continue
+            if self._overlay_session_matches_device(session, device):
+                active_session = session
+                break
+
+        if not active_session:
+            return {
+                "active_overlay_cast": False,
+                "overlay_cast_status": None,
+                "overlay_cast_started_at": None,
+                "overlay_cast_uptime_seconds": None,
+                "overlay_cast_current_step": None,
+                "overlay_cast_ffmpeg_speed": None,
+                "overlay_cast_ffmpeg_fps": None,
+                "overlay_cast_ffmpeg_bitrate_kbps": None,
+                "overlay_cast_active_clients": 0,
+                "overlay_cast_session_id": None,
+            }
+
+        started_at_raw = active_session.get("started_at")
+        started_at = None
+        overlay_cast_uptime_seconds = None
+        if started_at_raw:
+            if isinstance(started_at_raw, str):
+                try:
+                    started_at = datetime.fromisoformat(started_at_raw)
+                except ValueError:
+                    started_at = None
+            elif isinstance(started_at_raw, datetime):
+                started_at = started_at_raw
+            if started_at is not None:
+                overlay_cast_uptime_seconds = max(
+                    0.0,
+                    (datetime.utcnow() - started_at.replace(tzinfo=None)).total_seconds(),
+                )
+
+        return {
+            "active_overlay_cast": True,
+            "overlay_cast_status": active_session.get("status"),
+            "overlay_cast_started_at": started_at_raw,
+            "overlay_cast_uptime_seconds": overlay_cast_uptime_seconds,
+            "overlay_cast_current_step": active_session.get("current_step"),
+            "overlay_cast_ffmpeg_speed": active_session.get("ffmpeg_speed"),
+            "overlay_cast_ffmpeg_fps": active_session.get("ffmpeg_fps"),
+            "overlay_cast_ffmpeg_bitrate_kbps": active_session.get("ffmpeg_bitrate_kbps"),
+            "overlay_cast_active_clients": active_session.get("active_clients", 0),
+            "overlay_cast_session_id": active_session.get("session_id"),
+        }
+
+    def _overlay_session_matches_device(self, session: Dict[str, Any], device: DeviceModel) -> bool:
+        device_id = session.get("device_id")
+        if not device_id or device.type != "dlna" or not device.hostname:
+            return False
+
+        expected_prefix = f"dlna_{device.hostname}_"
+        if device_id.startswith(expected_prefix):
+            return True
+
+        if device.action_url:
+            parsed = urlparse(device.action_url)
+            if parsed.hostname == device.hostname and parsed.port is not None:
+                return device_id == f"dlna_{parsed.hostname}_{parsed.port}"
+
+        return False
 
     def sync_device_status_with_discovery(self, discovered_device_names: set) -> None:
         """

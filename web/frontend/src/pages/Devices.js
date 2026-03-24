@@ -43,6 +43,55 @@ import { deviceApi, discoveryV2Api } from '../services/api';
 import { useNavigate } from 'react-router-dom';
 import ConfigurationManager from '../components/ConfigurationManager';
 
+function formatDurationSeconds(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return null;
+  }
+
+  const totalSeconds = Math.max(0, Math.floor(Number(value)));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m ${seconds}s`;
+  }
+  if (minutes > 0) {
+    return `${minutes}m ${seconds}s`;
+  }
+  return `${seconds}s`;
+}
+
+function formatLastSeen(secondsSinceSeen) {
+  if (secondsSinceSeen === null || secondsSinceSeen === undefined) {
+    return 'No discovery data';
+  }
+  if (secondsSinceSeen < 5) {
+    return 'Seen just now';
+  }
+  const duration = formatDurationSeconds(secondsSinceSeen);
+  return duration ? `Seen ${duration} ago` : 'No discovery data';
+}
+
+function getAvailabilityLabel(device) {
+  return device.availability || device.derived_status || device.status || 'unknown';
+}
+
+function getAvailabilityColor(availability) {
+  switch (availability) {
+    case 'online':
+    case 'connected':
+      return 'success';
+    case 'degraded':
+      return 'warning';
+    case 'offline':
+    case 'disconnected':
+      return 'default';
+    default:
+      return 'default';
+  }
+}
+
 function Devices() {
   const navigate = useNavigate();
   const [devices, setDevices] = useState([]);
@@ -73,15 +122,30 @@ function Devices() {
     zone: ''
   });
 
+  const onlineDevices = devices.filter(device => getAvailabilityLabel(device) === 'online');
+  const degradedDevices = devices.filter(device => getAvailabilityLabel(device) === 'degraded');
+  const offlineDevices = devices.filter(device => getAvailabilityLabel(device) === 'offline');
+  const activePlaybackDevices = devices.filter(device => device.is_playing);
+  const manualControlDevices = devices.filter(
+    device => device.user_control_mode && device.user_control_mode !== 'auto'
+  );
+  const stalestSeenSeconds = devices.reduce((maxSeen, device) => {
+    const seen = device.seconds_since_seen;
+    if (seen === null || seen === undefined || Number.isNaN(Number(seen))) {
+      return maxSeen;
+    }
+    return Math.max(maxSeen, Number(seen));
+  }, 0);
+
   useEffect(() => {
     fetchDevices();
     fetchDiscoveryStatus();
     
-    // Set up polling interval to fetch fresh device data every 5 seconds
+    // Keep device/discovery state fresh without excessive poll noise.
     const pollingInterval = setInterval(() => {
       fetchDevices(true); // true = isPolling, to avoid showing loading spinner
       fetchDiscoveryStatus();
-    }, 5000); // Poll every 5 seconds
+    }, 15000);
     
     // Cleanup polling interval on unmount
     return () => {
@@ -565,10 +629,27 @@ function Devices() {
                   <Chip label="Running" color="success" size="small" sx={{ ml: 1 }} /> : 
                   <Chip label="Paused" color="default" size="small" sx={{ ml: 1 }} />
                 }
-                <Typography variant="body2" color="textSecondary" component="span" sx={{ ml: 1 }}>
-                  {discoveryStatus && ` • ${discoveryStatus.devices_discovered} devices • ${discoveryStatus.devices_playing} playing`}
-                </Typography>
               </Box>
+              <Typography variant="body2" color="textSecondary" sx={{ mt: 0.75 }}>
+                Status is now derived from last-seen timing with an `online / degraded / offline` model instead of raw poll results.
+              </Typography>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1.5 }}>
+                <Chip label={`${onlineDevices.length} online`} color="success" size="small" />
+                <Chip label={`${degradedDevices.length} degraded`} color="warning" size="small" />
+                <Chip label={`${offlineDevices.length} offline`} size="small" />
+                <Chip label={`${activePlaybackDevices.length} playing`} color={activePlaybackDevices.length > 0 ? 'success' : 'default'} size="small" />
+                <Chip label={`${manualControlDevices.length} manual override`} color={manualControlDevices.length > 0 ? 'warning' : 'default'} size="small" />
+              </Box>
+              <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
+                {devices.length > 0
+                  ? `Observed ${devices.length} devices. Worst-case last seen: ${formatLastSeen(stalestSeenSeconds)}.`
+                  : 'No devices have been observed yet.'}
+              </Typography>
+              {discoveryStatus && (
+                <Typography variant="body2" color="textSecondary" sx={{ mt: 0.5 }}>
+                  Raw discovery counters: {discoveryStatus.devices_discovered} discovered, {discoveryStatus.devices_playing} playing.
+                </Typography>
+              )}
             </Box>
             <Box>
               <Button
@@ -690,10 +771,18 @@ function Devices() {
               <CardContent>
                 <Typography variant="body2" color="textSecondary" gutterBottom>
                   Status: <Chip 
-                    label={device.status} 
-                    color={device.status === 'connected' ? 'success' : 'default'} 
+                    label={getAvailabilityLabel(device)}
+                    color={getAvailabilityColor(getAvailabilityLabel(device))}
                     size="small" 
                   />
+                  {device.manager_status && (
+                    <Chip
+                      label={`manager: ${device.manager_status}`}
+                      variant="outlined"
+                      size="small"
+                      sx={{ ml: 1 }}
+                    />
+                  )}
                 </Typography>
                 <Typography variant="body2" color="textSecondary" gutterBottom>
                   Playing: <Chip 
@@ -710,6 +799,11 @@ function Devices() {
                       title={device.user_control_reason || 'User controlled'}
                     />
                   )}
+                </Typography>
+                <Typography variant="body2" color="textSecondary" gutterBottom>
+                  {formatLastSeen(device.seconds_since_seen)}
+                  {formatDurationSeconds(device.uptime_seconds) && ` • uptime ${formatDurationSeconds(device.uptime_seconds)}`}
+                  {!formatDurationSeconds(device.uptime_seconds) && formatDurationSeconds(device.downtime_seconds) && ` • downtime ${formatDurationSeconds(device.downtime_seconds)}`}
                 </Typography>
                 {device.current_video && (
                   <>

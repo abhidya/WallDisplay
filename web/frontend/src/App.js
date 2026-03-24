@@ -20,6 +20,8 @@ import DepthProcessing from './pages/DepthProcessing';
 import ProjectionMapping from './pages/ProjectionMapping';
 import OverlayProjection from './pages/OverlayProjection';
 import ProjectionAnimation from './pages/ProjectionAnimation';
+import Mappings from './pages/Mappings';
+import StreamingDiagnostics from './pages/StreamingDiagnostics';
 
 // Create a theme instance
 const theme = createTheme({
@@ -57,7 +59,9 @@ function App() {
           <Route path="/renderer" element={<Renderer />} />
           <Route path="/depth" element={<DepthProcessing />} />
           <Route path="/projection" element={<ProjectionMapping />} />
+          <Route path="/mappings" element={<Mappings />} />
           <Route path="/overlay" element={<OverlayProjection />} />
+          <Route path="/streaming" element={<StreamingDiagnostics />} />
           <Route path="/projection-animation" element={<ProjectionAnimation />} />
           <Route path="*" element={<NotFound />} />
         </Routes>

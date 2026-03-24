@@ -18,6 +18,9 @@ class VideoModel(Base):
     duration = Column(Float, nullable=True)
     format = Column(String, nullable=True)
     resolution = Column(String, nullable=True)
+    category = Column(String, nullable=False, default="background")
+    source_type = Column(String, nullable=False, default="upload")
+    source_directory_id = Column(Integer, nullable=True)
     has_subtitle = Column(Boolean, default=False, nullable=False)
     subtitle_path = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -42,6 +45,9 @@ class VideoModel(Base):
             "duration": self.duration,
             "format": self.format,
             "resolution": self.resolution,
+            "category": self.category,
+            "source_type": self.source_type,
+            "source_directory_id": self.source_directory_id,
             "has_subtitle": self.has_subtitle,
             "subtitle_path": self.subtitle_path,
             "created_at": self.created_at.isoformat() if self.created_at else None,

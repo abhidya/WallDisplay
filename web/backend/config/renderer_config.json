@@ -43,11 +43,11 @@
       }
     },
     "overlay-frontdoor": {
-      "template": "/Users/mannybhidya/PycharmProjects/overlay frontdoor/index.html",
+      "template": "/Users/abdulrehmanbhidya/PycharmProjects/overlay frontdoor/index.html",
       "data": {
         "autoplay": true,
         "loop": true,
-        "video_file": "/Users/mannybhidya/PycharmProjects/nano-dlna/door6.mp4",
+        "video_file": "/Users/abdulrehmanbhidya/PycharmProjects/nano-dlna/door6.mp4",
         "video_host": "http://10.0.0.74",
         "video_ports": [9000, 8999, 8998]
       }

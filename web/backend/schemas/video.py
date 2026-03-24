@@ -8,6 +8,9 @@ class VideoBase(BaseModel):
     """
     name: str = Field(..., description="Video name")
     path: str = Field(..., description="Path to the video file")
+    category: str = Field("background", description="Category for organizing media")
+    source_type: str = Field("upload", description="How the media was added")
+    source_directory_id: Optional[int] = Field(None, description="Directory source identifier")
 
 class VideoCreate(VideoBase):
     """
@@ -32,6 +35,9 @@ class VideoUpdate(BaseModel):
     duration: Optional[float] = Field(None, description="Video duration in seconds")
     format: Optional[str] = Field(None, description="Video format")
     resolution: Optional[str] = Field(None, description="Video resolution")
+    category: Optional[str] = Field(None, description="Category for organizing media")
+    source_type: Optional[str] = Field(None, description="How the media was added")
+    source_directory_id: Optional[int] = Field(None, description="Directory source identifier")
     has_subtitle: Optional[bool] = Field(None, description="Whether the video has subtitles")
     subtitle_path: Optional[str] = Field(None, description="Path to the subtitle file")
 
@@ -45,6 +51,9 @@ class VideoResponse(VideoBase):
     duration: Optional[float] = Field(None, description="Video duration in seconds")
     format: Optional[str] = Field(None, description="Video format")
     resolution: Optional[str] = Field(None, description="Video resolution")
+    category: str = Field("background", description="Category for organizing media")
+    source_type: str = Field("upload", description="How the media was added")
+    source_directory_id: Optional[int] = Field(None, description="Directory source identifier")
     has_subtitle: bool = Field(False, description="Whether the video has subtitles")
     subtitle_path: Optional[str] = Field(None, description="Path to the subtitle file")
     created_at: Optional[datetime] = Field(None, description="Creation timestamp")

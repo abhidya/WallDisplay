@@ -77,6 +77,29 @@ class Device:
         """Check if device has a specific capability"""
         return capability in self.capabilities
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert device to a JSON-serializable dictionary."""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "friendly_name": self.friendly_name,
+            "casting_method": self.casting_method.value,
+            "hostname": self.hostname,
+            "port": self.port,
+            "capabilities": [capability.value for capability in self.capabilities],
+            "metadata": self.metadata,
+            "discovered_at": self.discovered_at.isoformat(),
+            "last_seen": self.last_seen.isoformat(),
+            "is_online": self.is_online,
+            "action_url": self.action_url,
+            "location": self.location,
+            "manufacturer": self.manufacturer,
+            "features": self.features,
+            "model": self.model,
+            "display_index": self.display_index,
+            "resolution": list(self.resolution) if self.resolution else None,
+        }
+
 
 @dataclass
 class CastingSession:
@@ -91,6 +114,22 @@ class CastingSession:
     position: float = 0.0  # seconds
     duration: float = 0.0  # seconds
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert casting session to a JSON-serializable dictionary."""
+        return {
+            "session_id": self.id,
+            "device_id": self.device.id,
+            "device_name": self.device.friendly_name,
+            "content_url": self.content_url,
+            "content_type": self.content_type,
+            "started_at": self.started_at.isoformat(),
+            "is_active": self.is_active,
+            "is_paused": self.is_paused,
+            "position": self.position,
+            "duration": self.duration,
+            "metadata": self.metadata,
+        }
 
 
 class DiscoveryBackend(ABC):

@@ -28,6 +28,8 @@ import {
   CameraAlt as ProjectionIcon,
   GridOn as OverlayIcon,
   Animation as AnimationIcon,
+  AccountTree as MappingIcon,
+  Insights as DiagnosticsIcon,
   ChevronLeft as ChevronLeftIcon,
   ChevronRight as ChevronRightIcon,
 } from '@mui/icons-material';
@@ -42,7 +44,9 @@ const menuItems = [
   { text: 'Renderer', icon: <RendererIcon />, path: '/renderer' },
   { text: 'Depth Processing', icon: <DepthIcon />, path: '/depth' },
   { text: 'Projection Mapping', icon: <ProjectionIcon />, path: '/projection' },
+  { text: 'Mappings', icon: <MappingIcon />, path: '/mappings' },
   { text: 'Overlay', icon: <OverlayIcon />, path: '/overlay' },
+  { text: 'Streaming', icon: <DiagnosticsIcon />, path: '/streaming' },
   { text: 'Projection Animation', icon: <AnimationIcon />, path: '/projection-animation' },
   { text: 'Settings', icon: <SettingsIcon />, path: '/settings' },
 ];

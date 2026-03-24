@@ -5,7 +5,7 @@ from typing import List, Optional
 import os
 import logging
 
-from database.database import get_db
+from database.database import get_db, SessionLocal
 from models.video import VideoModel
 from schemas.video import (
     VideoCreate,
@@ -39,12 +39,15 @@ def get_video_service(db: Session = Depends(get_db)) -> VideoService:
 def get_videos(
     skip: int = 0,
     limit: int = 100,
+    category: Optional[str] = None,
     video_service: VideoService = Depends(get_video_service),
 ):
     """
     Get all videos
     """
     videos = video_service.get_videos(skip=skip, limit=limit)
+    if category:
+        videos = [video for video in videos if video.category == category]
     # Convert datetime objects to strings
     formatted_videos = []
     for video in videos:
@@ -193,25 +196,31 @@ async def upload_video(
 @router.get("/{video_id}/file")
 def get_video_file(
     video_id: int,
-    video_service: VideoService = Depends(get_video_service),
 ):
     """
     Get video file for direct playback
     """
-    video = video_service.get_video_by_id(video_id)
-    if not video:
+    db = SessionLocal()
+    try:
+        video_service = VideoService(db, get_twisted_streaming())
+        video = video_service.get_video_by_id(video_id)
+        if not video:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Video with ID {video_id} not found",
+            )
+
+        video_path = video.path
+    finally:
+        db.close()
+
+    if not os.path.exists(video_path):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Video with ID {video_id} not found",
+            detail=f"Video file not found at path: {video_path}",
         )
-    
-    if not os.path.exists(video.path):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Video file not found at path: {video.path}",
-        )
-    
-    return FileResponse(video.path, media_type="video/mp4")
+
+    return FileResponse(video_path, media_type="video/mp4")
 
 @router.post("/{video_id}/stream")
 def stream_video(
@@ -235,6 +244,8 @@ def stream_video(
 @router.post("/scan-directory")
 def scan_directory(
     directory: str = Query(None, description="Directory to scan for videos"),
+    category: str = Query("background", description="Category to assign to discovered videos"),
+    source_directory_id: Optional[int] = Query(None, description="Source directory identifier"),
     body: dict = Body(None, description="Request body for directory parameter"),
     video_service: VideoService = Depends(get_video_service),
 ):
@@ -261,7 +272,7 @@ def scan_directory(
         )
 
     try:
-        videos_models = video_service.scan_directory(scan_dir_param)
+        videos_models = video_service.scan_directory(scan_dir_param, category=category, source_directory_id=source_directory_id)
         formatted_videos = [video.to_dict() for video in videos_models]
         return {
             "success": True,
@@ -279,6 +290,8 @@ def scan_directory(
 @router.post("/scan")
 def scan_videos(
     directory: str = Query(None, description="Directory to scan for videos"),
+    category: str = Query("background", description="Category to assign to discovered videos"),
+    source_directory_id: Optional[int] = Query(None, description="Source directory identifier"),
     body: dict = Body(None, description="Request body for directory parameter"),
     video_service: VideoService = Depends(get_video_service),
 ):
@@ -299,7 +312,7 @@ def scan_videos(
         )
 
     try:
-        videos_models = video_service.scan_directory(scan_dir_param)
+        videos_models = video_service.scan_directory(scan_dir_param, category=category, source_directory_id=source_directory_id)
         # The service returns a list of VideoModel, router should format it
         formatted_videos = [video.to_dict() for video in videos_models]
         return {

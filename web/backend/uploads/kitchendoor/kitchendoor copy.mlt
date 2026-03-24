@@ -1,0 +1,128 @@
+<?xml version="1.0" standalone="no"?>
+<mlt LC_NUMERIC="C" version="7.37.0" title="Shotcut version 26.1.30" producer="main_bin">
+  <profile description="PAL 4:3 DV or DVD" width="1920" height="1080" progressive="1" sample_aspect_num="1" sample_aspect_den="1" display_aspect_num="16" display_aspect_den="9" frame_rate_num="25" frame_rate_den="1" colorspace="709"/>
+  <playlist id="main_bin">
+    <property name="xml_retain">1</property>
+  </playlist>
+  <producer id="black" in="00:00:00.000" out="00:00:03.920">
+    <property name="length">00:00:03.960</property>
+    <property name="eof">pause</property>
+    <property name="resource">0</property>
+    <property name="aspect_ratio">1</property>
+    <property name="mlt_service">color</property>
+    <property name="mlt_image_format">rgba</property>
+    <property name="set.test_audio">0</property>
+  </producer>
+  <playlist id="background">
+    <entry producer="black" in="00:00:00.000" out="00:00:03.920"/>
+  </playlist>
+  <producer id="producer0" in="00:00:00.000" out="03:59:59.960">
+    <property name="length">04:00:00.000</property>
+    <property name="eof">pause</property>
+    <property name="resource">#FF000000</property>
+    <property name="aspect_ratio">1</property>
+    <property name="mlt_service">color</property>
+    <property name="mlt_image_format">rgba</property>
+    <property name="shotcut:caption">#FF000000</property>
+    <property name="ignore_points">0</property>
+    <property name="xml">was here</property>
+    <property name="seekable">1</property>
+  </producer>
+  <playlist id="playlist0">
+    <property name="shotcut:video">1</property>
+    <property name="shotcut:name">V1</property>
+    <entry producer="producer0" in="00:00:00.000" out="00:00:03.920"/>
+  </playlist>
+  <producer id="producer1" in="00:00:00.000" out="00:09:59.960">
+    <property name="length">15000</property>
+    <property name="eof">pause</property>
+    <property name="resource">&lt;producer&gt;</property>
+    <property name="aspect_ratio">1</property>
+    <property name="version">0.3</property>
+    <property name="mlt_service">frei0r.plasma</property>
+    <property name="0">0.96</property>
+    <property name="1">1.00</property>
+    <property name="2">1.00</property>
+    <property name="3">0.49</property>
+    <property name="4">1.00</property>
+    <property name="5">1.00</property>
+    <property name="shotcut:caption">Plasma</property>
+    <property name="shotcut:detail">Plasma</property>
+    <property name="xml">was here</property>
+    <property name="seekable">1</property>
+  </producer>
+  <playlist id="playlist1">
+    <property name="shotcut:video">1</property>
+    <property name="shotcut:name">V2</property>
+    <property name="meta.shotcut.vui">1</property>
+    <entry producer="producer1" in="00:00:00.000" out="00:00:03.920"/>
+    <filter id="filter4" out="00:00:03.920">
+      <property name="transition">qtblend</property>
+      <property name="mlt_image_format">rgba</property>
+      <property name="mlt_service">mask_apply</property>
+      <property name="transition.threads">0</property>
+    </filter>
+    <filter id="filter5" out="00:00:03.920">
+      <property name="filter">shape</property>
+      <property name="mlt_service">mask_start</property>
+      <property name="shotcut:filter">maskFromFile</property>
+      <property name="filter.mix">29.63</property>
+      <property name="filter.softness">0</property>
+      <property name="filter.invert">1</property>
+      <property name="filter.use_luminance">1</property>
+      <property name="filter.resource">/Users/abdulrehmanbhidya/Downloads/lineart_masks/mask_011.png</property>
+      <property name="filter.use_mix">1</property>
+      <property name="filter.audio_match">0</property>
+      <property name="filter.alpha_operation">overwrite</property>
+      <property name="filter.invert_mask">1</property>
+      <property name="filter.reverse">0</property>
+      <property name="disable">0</property>
+    </filter>
+  </playlist>
+  <tractor id="tractor0" title="Shotcut version 26.1.30" in="00:00:00.000" out="00:00:03.920">
+    <property name="shotcut">1</property>
+    <property name="shotcut:projectAudioChannels">2</property>
+    <property name="shotcut:projectFolder">1</property>
+    <property name="shotcut:scaleFactor">4.49003</property>
+    <property name="shotcut:skipConvert">0</property>
+    <property name="shotcut:trackHeaderWidth">150</property>
+    <property name="shotcut:processingMode">Native8Cpu</property>
+    <track producer="background"/>
+    <track producer="playlist0" hide="audio"/>
+    <track producer="playlist1" hide="audio"/>
+    <transition id="transition0">
+      <property name="a_track">0</property>
+      <property name="b_track">1</property>
+      <property name="mlt_service">mix</property>
+      <property name="always_active">1</property>
+      <property name="sum">1</property>
+    </transition>
+    <transition id="transition1">
+      <property name="a_track">0</property>
+      <property name="b_track">1</property>
+      <property name="compositing">0</property>
+      <property name="distort">0</property>
+      <property name="rotate_center">0</property>
+      <property name="mlt_service">qtblend</property>
+      <property name="1">normal</property>
+      <property name="disable">1</property>
+    </transition>
+    <transition id="transition2">
+      <property name="a_track">0</property>
+      <property name="b_track">2</property>
+      <property name="mlt_service">mix</property>
+      <property name="always_active">1</property>
+      <property name="sum">1</property>
+    </transition>
+    <transition id="transition3">
+      <property name="a_track">1</property>
+      <property name="b_track">2</property>
+      <property name="compositing">0</property>
+      <property name="distort">0</property>
+      <property name="rotate_center">0</property>
+      <property name="mlt_service">qtblend</property>
+      <property name="1">normal</property>
+      <property name="disable">0</property>
+    </transition>
+  </tractor>
+</mlt>

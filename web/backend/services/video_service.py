@@ -4,7 +4,7 @@ import shutil
 import socket
 from typing import List, Optional, Dict, Any, BinaryIO
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
 import subprocess
 import json
 from fastapi import Depends
@@ -12,7 +12,7 @@ from fastapi import Depends
 from models.video import VideoModel
 from schemas.video import VideoCreate, VideoUpdate
 from core.twisted_streaming import get_instance as get_twisted_streaming
-from database.database import get_db
+from database.database import ensure_sqlite_schema_compatibility, get_db
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,15 @@ class VideoService:
         Returns:
             List[VideoModel]: List of videos
         """
-        return self.db.query(VideoModel).offset(skip).limit(limit).all()
+        try:
+            return self.db.query(VideoModel).offset(skip).limit(limit).all()
+        except OperationalError as exc:
+            if "no such column" not in str(exc).lower():
+                raise
+            logger.warning("Video query hit legacy schema; applying SQLite compatibility upgrade and retrying")
+            self.db.rollback()
+            ensure_sqlite_schema_compatibility()
+            return self.db.query(VideoModel).offset(skip).limit(limit).all()
     
     def get_video_by_id(self, video_id: int) -> Optional[VideoModel]:
         """
@@ -61,7 +69,15 @@ class VideoService:
         Returns:
             Optional[VideoModel]: The video if found, None otherwise
         """
-        return self.db.query(VideoModel).filter(VideoModel.id == video_id).first()
+        try:
+            return self.db.query(VideoModel).filter(VideoModel.id == video_id).first()
+        except OperationalError as exc:
+            if "no such column" not in str(exc).lower():
+                raise
+            logger.warning("Video lookup hit legacy schema; applying SQLite compatibility upgrade and retrying")
+            self.db.rollback()
+            ensure_sqlite_schema_compatibility()
+            return self.db.query(VideoModel).filter(VideoModel.id == video_id).first()
     
     def get_video_by_path(self, path: str) -> Optional[VideoModel]:
         """
@@ -73,7 +89,15 @@ class VideoService:
         Returns:
             Optional[VideoModel]: The video if found, None otherwise
         """
-        return self.db.query(VideoModel).filter(VideoModel.path == path).first()
+        try:
+            return self.db.query(VideoModel).filter(VideoModel.path == path).first()
+        except OperationalError as exc:
+            if "no such column" not in str(exc).lower():
+                raise
+            logger.warning("Video lookup by path hit legacy schema; applying SQLite compatibility upgrade and retrying")
+            self.db.rollback()
+            ensure_sqlite_schema_compatibility()
+            return self.db.query(VideoModel).filter(VideoModel.path == path).first()
     
     def create_video(self, video: VideoCreate) -> VideoModel:
         """
@@ -121,6 +145,9 @@ class VideoService:
                 duration=duration,
                 format=format_name,
                 resolution=resolution,
+                category=video.category,
+                source_type=video.source_type,
+                source_directory_id=video.source_directory_id,
                 has_subtitle=bool(has_subtitle),  # Ensure it's a boolean
                 subtitle_path=subtitle_path,
             )
@@ -419,7 +446,7 @@ class VideoService:
             logger.error(f"Error finding subtitle file: {e}")
             return None
     
-    def scan_directory(self, directory: str) -> List[VideoModel]:
+    def scan_directory(self, directory: str, category: str = "background", source_directory_id: Optional[int] = None) -> List[VideoModel]:
         """
         Scan a directory for video files and add them to the database
         
@@ -456,7 +483,13 @@ class VideoService:
                         # Create video entry
                         try:
                             video_name = os.path.splitext(file)[0]
-                            video = VideoCreate(name=video_name, path=file_path)
+                            video = VideoCreate(
+                                name=video_name,
+                                path=file_path,
+                                category=category,
+                                source_type="directory_scan",
+                                source_directory_id=source_directory_id,
+                            )
                             db_video = self.create_video(video)
                             videos_added.append(db_video)
                             logger.info(f"Added video: {file_path}")

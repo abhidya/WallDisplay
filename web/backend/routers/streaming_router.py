@@ -186,6 +186,17 @@ async def get_streaming_analytics() -> Dict[str, Any]:
     
     # Calculate total bandwidth
     total_bandwidth = sum(session.get_bandwidth() for session in active_sessions)
+    bandwidth_by_stream_type: Dict[str, float] = {}
+    active_by_stream_type: Dict[str, int] = {}
+    active_by_consumer_prefix: Dict[str, int] = {}
+
+    for session in active_sessions:
+        bandwidth_by_stream_type[session.stream_type] = (
+            bandwidth_by_stream_type.get(session.stream_type, 0) + session.get_bandwidth()
+        )
+        active_by_stream_type[session.stream_type] = active_by_stream_type.get(session.stream_type, 0) + 1
+        consumer_prefix = (session.consumer_id or "unassigned").split(":", 1)[0]
+        active_by_consumer_prefix[consumer_prefix] = active_by_consumer_prefix.get(consumer_prefix, 0) + 1
     
     # Count connection events
     connection_events = sum(len(session.connection_history) for session in active_sessions)
@@ -200,6 +211,9 @@ async def get_streaming_analytics() -> Dict[str, Any]:
     # Add to stats
     stats.update({
         "total_bandwidth_bps": total_bandwidth,
+        "bandwidth_by_stream_type_bps": bandwidth_by_stream_type,
+        "active_sessions_by_stream_type": active_by_stream_type,
+        "active_sessions_by_consumer_prefix": active_by_consumer_prefix,
         "connection_events": connection_events,
         "avg_session_uptime_seconds": avg_uptime,
     })
@@ -222,6 +236,16 @@ async def get_streaming_health() -> Dict[str, Any]:
     
     # Check for sessions with connection errors
     error_sessions = sum(1 for session in active_sessions if session.connection_errors > 0)
+    sessions_by_stream_type: Dict[str, int] = {}
+    stalled_by_stream_type: Dict[str, int] = {}
+    error_by_stream_type: Dict[str, int] = {}
+
+    for session in active_sessions:
+        sessions_by_stream_type[session.stream_type] = sessions_by_stream_type.get(session.stream_type, 0) + 1
+        if session.is_stalled():
+            stalled_by_stream_type[session.stream_type] = stalled_by_stream_type.get(session.stream_type, 0) + 1
+        if session.connection_errors > 0:
+            error_by_stream_type[session.stream_type] = error_by_stream_type.get(session.stream_type, 0) + 1
     
     # Calculate health score (0-100%)
     if active_sessions:
@@ -244,5 +268,8 @@ async def get_streaming_health() -> Dict[str, Any]:
         "stalled_sessions": stalled_sessions,
         "error_sessions": error_sessions,
         "total_active_sessions": len(active_sessions),
+        "sessions_by_stream_type": sessions_by_stream_type,
+        "stalled_by_stream_type": stalled_by_stream_type,
+        "error_by_stream_type": error_by_stream_type,
         "status": "healthy" if health_score > 80 else "degraded" if health_score > 50 else "unhealthy"
     }

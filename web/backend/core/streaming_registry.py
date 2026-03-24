@@ -45,8 +45,15 @@ class StreamingSessionRegistry:
         self.health_check_interval = 5  # seconds
         self.health_check_handlers = []  # Functions to call during health checks
         
-    def register_session(self, device_name: str, video_path: str, 
-                        server_ip: str, server_port: int) -> StreamingSession:
+    def register_session(
+        self,
+        device_name: str,
+        video_path: str,
+        server_ip: str,
+        server_port: int,
+        stream_type: str = "device_stream",
+        consumer_id: Optional[str] = None,
+    ) -> StreamingSession:
         """
         Register a new streaming session
         
@@ -63,7 +70,15 @@ class StreamingSessionRegistry:
         session_id = str(uuid.uuid4())
         
         # Create new session
-        session = StreamingSession(session_id, device_name, video_path, server_ip, server_port)
+        session = StreamingSession(
+            session_id,
+            device_name,
+            video_path,
+            server_ip,
+            server_port,
+            stream_type=stream_type,
+            consumer_id=consumer_id,
+        )
         
         # Add to registry with thread safety
         with self.session_lock:
@@ -264,6 +279,7 @@ class StreamingSessionRegistry:
         """
         # Get a copy of active sessions to avoid long lock holding
         active_sessions = self.get_active_sessions()
+        stalled_sessions = []
         
         for session in active_sessions:
             try:
@@ -281,16 +297,41 @@ class StreamingSessionRegistry:
                 # Check for stalled sessions
                 # Increased from 15s to 90s to account for devices that buffer entire video
                 if session.is_stalled(inactivity_threshold=90.0):
-                    logger.warning(f"Streaming session {session.session_id} for device {session.device_name} appears stalled")
-                    
-                    # Call registered health check handlers
-                    for handler in self.health_check_handlers:
-                        try:
-                            handler(session)
-                        except Exception as handler_error:
-                            logger.error(f"Error in health check handler: {handler_error}")
+                    stalled_sessions.append(session)
             except Exception as e:
                 logger.error(f"Error checking session health: {e}")
+
+        if stalled_sessions:
+            self._log_stalled_session_summary(stalled_sessions)
+            for session in stalled_sessions:
+                for handler in self.health_check_handlers:
+                    try:
+                        handler(session)
+                    except Exception as handler_error:
+                        logger.error(f"Error in health check handler: {handler_error}")
+
+    def _log_stalled_session_summary(self, stalled_sessions: List[StreamingSession]) -> None:
+        by_stream_type: Dict[str, int] = {}
+        by_device: Dict[str, int] = {}
+
+        for session in stalled_sessions:
+            by_stream_type[session.stream_type] = by_stream_type.get(session.stream_type, 0) + 1
+            by_device[session.device_name] = by_device.get(session.device_name, 0) + 1
+
+        stream_summary = ", ".join(
+            f"{stream_type}={count}" for stream_type, count in sorted(by_stream_type.items())
+        )
+        device_summary = ", ".join(
+            f"{device_name}={count}"
+            for device_name, count in sorted(by_device.items(), key=lambda item: (-item[1], item[0]))[:5]
+        )
+
+        logger.warning(
+            "Detected %s stalled streaming sessions (%s)%s",
+            len(stalled_sessions),
+            stream_summary or "no stream-type data",
+            f"; top devices: {device_summary}" if device_summary else "",
+        )
                 
     def _clean_stale_sessions(self) -> None:
         """
@@ -323,6 +364,13 @@ class StreamingSessionRegistry:
             total_bytes = sum(session.bytes_served for session in self.sessions.values())
             total_errors = sum(session.connection_errors for session in self.sessions.values())
             devices_streaming = len(self.device_sessions)
+            sessions_by_stream_type: Dict[str, int] = {}
+            sessions_by_consumer_prefix: Dict[str, int] = {}
+
+            for session in self.sessions.values():
+                sessions_by_stream_type[session.stream_type] = sessions_by_stream_type.get(session.stream_type, 0) + 1
+                consumer_prefix = (session.consumer_id or "unassigned").split(":", 1)[0]
+                sessions_by_consumer_prefix[consumer_prefix] = sessions_by_consumer_prefix.get(consumer_prefix, 0) + 1
             
             return {
                 "total_sessions": total_sessions,
@@ -330,6 +378,8 @@ class StreamingSessionRegistry:
                 "total_bytes_served": total_bytes,
                 "total_connection_errors": total_errors,
                 "devices_streaming": devices_streaming,
+                "sessions_by_stream_type": sessions_by_stream_type,
+                "sessions_by_consumer_prefix": sessions_by_consumer_prefix,
                 "sessions_by_status": {
                     "initializing": sum(1 for s in self.sessions.values() if s.status == "initializing"),
                     "active": sum(1 for s in self.sessions.values() if s.status == "active"),

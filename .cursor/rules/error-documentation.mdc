@@ -588,7 +588,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 3. The logs showed that the device was registered and the system attempted to auto-play the video:
 ```
 2025-05-09 20:05:54,795 - core.device_manager - INFO - Registered DLNA device: Hccast-3ADE76_dlna with action URL: http://10.0.0.154:49595/upnp/control/rendertransport1
-2025-05-09 20:05:54,796 - core.device_manager - INFO - Assigning video /Users/mannybhidya/PycharmProjects/nano-dlna/door6.mp4 to device Hccast-3ADE76_dlna
+2025-05-09 20:05:54,796 - core.device_manager - INFO - Assigning video /Users/abdulrehmanbhidya/PycharmProjects/nano-dlna/door6.mp4 to device Hccast-3ADE76_dlna
 ```
 
 4. The error occurred in the loop monitoring setup, suggesting an issue with the playback monitoring thread.

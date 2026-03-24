@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
     Grid,
     Paper,
@@ -28,7 +28,8 @@ import {
     CircularProgress,
     Tooltip,
     Slider,
-    Stack
+    Stack,
+    Divider
 } from '@mui/material';
 import {
     Add as AddIcon,
@@ -47,11 +48,14 @@ import {
     DarkMode as DarkModeIcon,
     Sync as SyncIcon
 } from '@mui/icons-material';
-import { api } from '../services/api';
+import { api, discoveryV2Api, mappingsApi, overlayApi } from '../services/api';
 
 function OverlayProjection() {
     const [videos, setVideos] = useState([]);
+    const [mappingScenes, setMappingScenes] = useState([]);
+    const [backgroundType, setBackgroundType] = useState('video');
     const [selectedVideo, setSelectedVideo] = useState(null);
+    const [selectedMapping, setSelectedMapping] = useState(null);
     const [overlayConfigs, setOverlayConfigs] = useState([]);
     const [selectedConfig, setSelectedConfig] = useState(null);
     const [projectionWindow, setProjectionWindow] = useState(null);
@@ -62,17 +66,28 @@ function OverlayProjection() {
     const [newConfigName, setNewConfigName] = useState('');
     const [brightness, setBrightness] = useState(100);
     const [brightnessLoading, setBrightnessLoading] = useState(false);
+    const [castDevices, setCastDevices] = useState([]);
+    const [selectedCastDeviceId, setSelectedCastDeviceId] = useState('');
+    const [castSession, setCastSession] = useState(null);
+    const [castSessions, setCastSessions] = useState([]);
+    const [castLoading, setCastLoading] = useState(false);
+    const [castDebugOpen, setCastDebugOpen] = useState(true);
     
     useEffect(() => {
         fetchVideos();
+        fetchMappingScenes();
         fetchBrightness();
+        fetchCastDevices();
+        fetchCastSessions();
     }, []);
     
     useEffect(() => {
-        if (selectedVideo) {
-            fetchOverlayConfigs(selectedVideo.id);
+        if (backgroundType === 'video' && selectedVideo) {
+            fetchOverlayConfigs({ video_id: selectedVideo.id });
+        } else if (backgroundType === 'mapping' && selectedMapping) {
+            fetchOverlayConfigs({ mapping_scene_id: selectedMapping.id });
         }
-    }, [selectedVideo]);
+    }, [selectedVideo, selectedMapping, backgroundType]);
     
     const fetchVideos = async () => {
         try {
@@ -84,10 +99,19 @@ function OverlayProjection() {
             setError('Failed to load videos');
         }
     };
-    
-    const fetchOverlayConfigs = async (videoId) => {
+
+    const fetchMappingScenes = async () => {
         try {
-            const response = await api.get(`/overlay/configs?video_id=${videoId}`);
+            const response = await mappingsApi.listScenes();
+            setMappingScenes(response.data || []);
+        } catch (error) {
+            console.error('Error fetching mapping scenes:', error);
+        }
+    };
+    
+    const fetchOverlayConfigs = async (params) => {
+        try {
+            const response = await api.get('/overlay/configs', { params });
             setOverlayConfigs(response.data);
         } catch (error) {
             console.error('Error fetching overlay configs:', error);
@@ -104,6 +128,58 @@ function OverlayProjection() {
             console.error('Error fetching brightness:', error);
         }
     };
+
+    const fetchCastDevices = async () => {
+        try {
+            const response = await discoveryV2Api.getDevices({
+                casting_method: 'dlna',
+            });
+            const devices = Array.isArray(response.data) ? response.data : [];
+            const sortedDevices = [...devices].sort((left, right) => {
+                const leftRank = left.is_online ? 0 : 1;
+                const rightRank = right.is_online ? 0 : 1;
+                if (leftRank !== rightRank) {
+                    return leftRank - rightRank;
+                }
+                return (left.friendly_name || left.name || '').localeCompare(right.friendly_name || right.name || '');
+            });
+            setCastDevices(sortedDevices);
+            setSelectedCastDeviceId((current) => {
+                if (current && sortedDevices.some((device) => device.id === current)) {
+                    return current;
+                }
+                return sortedDevices[0]?.id || '';
+            });
+        } catch (error) {
+            console.error('Error fetching cast devices:', error);
+        }
+    };
+
+    const fetchCastSessions = async () => {
+        try {
+            const response = await overlayApi.listCastSessions();
+            const sessions = Array.isArray(response.data) ? response.data : [];
+            setCastSessions(sessions);
+            const sessionForSelection = selectedConfig
+                ? sessions.find((session) => !session.archived && session.config_id === selectedConfig.id) || null
+                : sessions.find((session) => !session.archived) || null;
+            setCastSession(sessionForSelection);
+        } catch (error) {
+            console.error('Error fetching cast sessions:', error);
+        }
+    };
+
+    useEffect(() => {
+        if (!castLoading && !castSession) {
+            return undefined;
+        }
+
+        const intervalId = window.setInterval(() => {
+            fetchCastSessions();
+        }, 1500);
+
+        return () => window.clearInterval(intervalId);
+    }, [castLoading, castSession, selectedConfig]);
     
     const updateBrightness = async (value) => {
         setBrightness(value);
@@ -121,7 +197,9 @@ function OverlayProjection() {
     const createNewConfig = async () => {
         const newConfig = {
             name: newConfigName || `Config ${new Date().toLocaleString()}`,
-            video_id: selectedVideo.id,
+            background_type: backgroundType,
+            video_id: backgroundType === 'video' ? selectedVideo.id : null,
+            mapping_scene_id: backgroundType === 'mapping' ? selectedMapping.id : null,
             video_transform: { x: 0, y: 0, scale: 1, rotation: 0 },
             widgets: [
                 {
@@ -187,7 +265,7 @@ function OverlayProjection() {
         }
     };
     
-    const updateConfig = async (config) => {
+    const updateConfig = useCallback(async (config) => {
         try {
             // Extract only the fields that the backend expects
             const updateData = {
@@ -198,15 +276,14 @@ function OverlayProjection() {
             };
             
             const response = await api.put(`/overlay/configs/${config.id}`, updateData);
-            const updatedConfigs = overlayConfigs.map(c => 
-                c.id === config.id ? response.data : c
-            );
-            setOverlayConfigs(updatedConfigs);
+            setOverlayConfigs((current) => current.map((entry) =>
+                entry.id === config.id ? response.data : entry
+            ));
             setSelectedConfig(response.data);
         } catch (error) {
             console.error('Error updating config:', error);
         }
-    };
+    }, []);
     
     const deleteConfig = async (configId) => {
         try {
@@ -222,55 +299,69 @@ function OverlayProjection() {
     };
     
     const launchProjection = async () => {
-        if (!selectedVideo || !selectedConfig) return;
+        if (!selectedConfig) return;
+        if (backgroundType === 'video' && !selectedVideo) return;
+        if (backgroundType === 'mapping' && !selectedMapping) return;
         
         setLoading(true);
         setError('');
         
         try {
-            // Close existing window if any
-            if (projectionWindow && !projectionWindow.closed) {
-                projectionWindow.close();
-            }
-            
+            const windowUrl = `/backend-static/overlay_window.html?config_id=${selectedConfig.id}`;
+            const windowName = `overlay_projection_${selectedConfig.id}_${Date.now()}`;
+
             // Open projection window
             const projWindow = window.open(
-                '/backend-static/overlay_window.html',
-                'overlay_projection',
+                windowUrl,
+                windowName,
                 'width=1920,height=1080'
             );
             
             setProjectionWindow(projWindow);
+            const streamResponsePromise = api.post('/overlay/stream', {
+                video_id: selectedVideo?.id || null,
+                config_id: selectedConfig.id
+            });
             
             // Function to send configuration
             const sendConfiguration = async () => {
                 if (projWindow.closed) return; // Don't send if window was closed
                 
                 try {
-                    // Get streaming URL from backend
-                    const streamResponse = await api.post('/overlay/stream', {
-                        video_id: selectedVideo.id,
-                        config_id: selectedConfig.id
-                    });
+                    const streamResponse = await streamResponsePromise;
                     
                     projWindow.postMessage({
                         type: 'init',
                         config: selectedConfig,
+                        backgroundType: streamResponse.data.background_type,
                         streamingUrl: streamResponse.data.streaming_url,
-                        videoPath: selectedVideo.file_path
+                        mappingScene: streamResponse.data.mapping_scene || null,
+                        videoPath: selectedVideo?.path || null
                     }, '*');
                 } catch (error) {
                     console.error('Error getting streaming URL:', error);
                     // Fallback to direct URL if backend fails
                     let streamingUrl = '';
-                    if (selectedVideo && selectedVideo.file_path) {
-                        streamingUrl = `http://localhost:9000/file_video/${selectedVideo.file_path.split('/').pop()}`;
+                    let fallbackMappingScene = null;
+                    if (selectedVideo && selectedVideo.path) {
+                        streamingUrl = `http://localhost:9000/file_video/${selectedVideo.path.split('/').pop()}`;
+                    }
+                    if (backgroundType === 'mapping' && selectedMapping) {
+                        fallbackMappingScene = {
+                            ...selectedMapping,
+                            masks: (selectedMapping.masks || []).map((mask) => ({
+                                ...mask,
+                                url: `/api/mappings/scenes/${selectedMapping.id}/masks/${mask.id}/file`,
+                            })),
+                        };
                     }
                     projWindow.postMessage({
                         type: 'init',
                         config: selectedConfig,
+                        backgroundType,
                         streamingUrl: streamingUrl,
-                        videoPath: selectedVideo ? selectedVideo.file_path : ''
+                        mappingScene: fallbackMappingScene,
+                        videoPath: selectedVideo ? selectedVideo.path : ''
                     }, '*');
                 }
             };
@@ -287,6 +378,48 @@ function OverlayProjection() {
             setLoading(false);
         }
     };
+
+    const startProjectorCast = async () => {
+        if (!selectedConfig || !selectedCastDeviceId) {
+            return;
+        }
+
+        setCastLoading(true);
+        setError('');
+        try {
+            const response = await overlayApi.startCast({
+                device_id: selectedCastDeviceId,
+                config_id: selectedConfig.id,
+                overlay_base_url: `${window.location.protocol}//${window.location.host}`,
+                controls_hidden: true,
+            });
+            setCastSession(response.data);
+        } catch (error) {
+            console.error('Error starting projector cast:', error);
+            await fetchCastSessions();
+            setError(error.response?.data?.detail || 'Failed to start projector cast');
+        } finally {
+            setCastLoading(false);
+        }
+    };
+
+    const stopProjectorCast = async () => {
+        if (!castSession?.session_id) {
+            return;
+        }
+
+        setCastLoading(true);
+        setError('');
+        try {
+            await overlayApi.stopCastSession(castSession.session_id);
+            setCastSession(null);
+        } catch (error) {
+            console.error('Error stopping projector cast:', error);
+            setError(error.response?.data?.detail || 'Failed to stop projector cast');
+        } finally {
+            setCastLoading(false);
+        }
+    };
     
     // Listen for updates from projection window
     useEffect(() => {
@@ -298,6 +431,10 @@ function OverlayProjection() {
         
         window.addEventListener('message', handleMessage);
         return () => window.removeEventListener('message', handleMessage);
+    }, [selectedConfig, updateConfig]);
+
+    useEffect(() => {
+        fetchCastSessions();
     }, [selectedConfig]);
     
     const toggleWidgetVisibility = (widgetId) => {
@@ -346,19 +483,35 @@ function OverlayProjection() {
                         Overlay Projection
                     </Typography>
                     <Typography variant="body1" color="text.secondary">
-                        Select a video and configure live information overlays for projection via AirPlay
+                        Select a background source and configure live information overlays for projection via AirPlay
                     </Typography>
                 </Paper>
             </Grid>
             
-            {/* Video Selection */}
+            {/* Background Selection */}
             <Grid item xs={12} md={6}>
                 <Card>
                     <CardHeader 
-                        title="Video Selection"
+                        title="Background Selection"
                         avatar={<VideoIcon />}
                     />
                     <CardContent>
+                        <FormControl fullWidth sx={{ mb: 2 }}>
+                            <InputLabel>Background Type</InputLabel>
+                            <Select
+                                value={backgroundType}
+                                label="Background Type"
+                                onChange={(e) => {
+                                    setBackgroundType(e.target.value);
+                                    setSelectedConfig(null);
+                                }}
+                            >
+                                <MenuItem value="video">Video</MenuItem>
+                                <MenuItem value="mapping">Mapping</MenuItem>
+                            </Select>
+                        </FormControl>
+
+                        {backgroundType === 'video' ? (
                         <FormControl fullWidth>
                             <InputLabel>Select Video</InputLabel>
                             <Select
@@ -366,6 +519,7 @@ function OverlayProjection() {
                                 onChange={(e) => {
                                     const video = videos.find(v => v.id === e.target.value);
                                     setSelectedVideo(video);
+                                    setSelectedMapping(null);
                                     setSelectedConfig(null);
                                 }}
                                 label="Select Video"
@@ -380,14 +534,49 @@ function OverlayProjection() {
                                 ))}
                             </Select>
                         </FormControl>
+                        ) : (
+                        <FormControl fullWidth>
+                            <InputLabel>Select Mapping</InputLabel>
+                            <Select
+                                value={selectedMapping?.id || ''}
+                                onChange={(e) => {
+                                    const mapping = mappingScenes.find(scene => scene.id === e.target.value);
+                                    setSelectedMapping(mapping);
+                                    setSelectedVideo(null);
+                                    setSelectedConfig(null);
+                                }}
+                                label="Select Mapping"
+                            >
+                                <MenuItem value="">
+                                    <em>Choose a mapping...</em>
+                                </MenuItem>
+                                {mappingScenes.map(scene => (
+                                    <MenuItem key={scene.id} value={scene.id}>
+                                        {scene.name}
+                                    </MenuItem>
+                                ))}
+                            </Select>
+                        </FormControl>
+                        )}
                         
-                        {selectedVideo && (
+                        {backgroundType === 'video' && selectedVideo && (
                             <Box sx={{ mt: 2, p: 2, bgcolor: 'grey.100', borderRadius: 1 }}>
                                 <Typography variant="body2">
-                                    <strong>File:</strong> {selectedVideo.file_path}
+                                    <strong>File:</strong> {selectedVideo.path}
                                 </Typography>
                                 <Typography variant="body2">
                                     <strong>Duration:</strong> {selectedVideo.duration || 'Unknown'}
+                                </Typography>
+                            </Box>
+                        )}
+
+                        {backgroundType === 'mapping' && selectedMapping && (
+                            <Box sx={{ mt: 2, p: 2, bgcolor: 'grey.100', borderRadius: 1 }}>
+                                <Typography variant="body2">
+                                    <strong>Masks:</strong> {selectedMapping.masks?.length || 0}
+                                </Typography>
+                                <Typography variant="body2">
+                                    <strong>Groups:</strong> {selectedMapping.groups?.length || 0}
                                 </Typography>
                             </Box>
                         )}
@@ -405,7 +594,7 @@ function OverlayProjection() {
                                 <span>
                                     <IconButton 
                                         onClick={() => setConfigNameDialog(true)}
-                                        disabled={!selectedVideo}
+                                        disabled={backgroundType === 'video' ? !selectedVideo : !selectedMapping}
                                     >
                                         <AddIcon />
                                     </IconButton>
@@ -414,9 +603,13 @@ function OverlayProjection() {
                         }
                     />
                     <CardContent>
-                        {!selectedVideo ? (
+                        {backgroundType === 'video' && !selectedVideo ? (
                             <Alert severity="info">
                                 Select a video to view configurations
+                            </Alert>
+                        ) : backgroundType === 'mapping' && !selectedMapping ? (
+                            <Alert severity="info">
+                                Select a mapping to view configurations
                             </Alert>
                         ) : overlayConfigs.length === 0 ? (
                             <Alert severity="info">
@@ -609,7 +802,7 @@ function OverlayProjection() {
                             size="large"
                             startIcon={loading ? <CircularProgress size={20} /> : <LaunchIcon />}
                             onClick={launchProjection}
-                            disabled={!selectedVideo || !selectedConfig || loading}
+                            disabled={(!selectedConfig) || (backgroundType === 'video' ? !selectedVideo : !selectedMapping) || loading}
                         >
                             Launch Projection Window
                         </Button>
@@ -623,6 +816,175 @@ function OverlayProjection() {
                                     setProjectionWindow(null);
                                 }}
                             />
+                        )}
+                    </Box>
+
+                    <Divider sx={{ my: 3 }} />
+
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        <Typography variant="h6">
+                            DLNA Projector Cast
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                            Render the selected overlay config in a headless browser and cast the live relay stream to a discovered DLNA renderer.
+                        </Typography>
+
+                        <FormControl fullWidth disabled={castLoading}>
+                            <InputLabel>Target Projector</InputLabel>
+                            <Select
+                                value={selectedCastDeviceId}
+                                label="Target Projector"
+                                onChange={(e) => setSelectedCastDeviceId(e.target.value)}
+                            >
+                                <MenuItem value="">
+                                    <em>Choose a DLNA projector...</em>
+                                </MenuItem>
+                                {castDevices.map((device) => (
+                                    <MenuItem key={device.id} value={device.id}>
+                                        {(device.friendly_name || device.name)}{device.is_online ? ' - online' : ' - offline'}
+                                    </MenuItem>
+                                ))}
+                            </Select>
+                        </FormControl>
+
+                        <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center', alignItems: 'center', flexWrap: 'wrap' }}>
+                            <Button
+                                variant="contained"
+                                color="secondary"
+                                startIcon={castLoading ? <CircularProgress size={20} /> : <LaunchIcon />}
+                                onClick={startProjectorCast}
+                                disabled={!selectedConfig || !selectedCastDeviceId || castLoading}
+                            >
+                                Cast To Projector
+                            </Button>
+                            <Button
+                                variant="outlined"
+                                color="secondary"
+                                onClick={stopProjectorCast}
+                                disabled={!castSession || castLoading}
+                            >
+                                Stop Cast
+                            </Button>
+                            <Button
+                                variant="text"
+                                onClick={fetchCastDevices}
+                                disabled={castLoading}
+                            >
+                                Refresh Devices
+                            </Button>
+                        </Box>
+
+                        {castSession && (
+                            <Box sx={{ p: 2, bgcolor: 'grey.100', borderRadius: 1 }}>
+                                <Typography variant="body2">
+                                    <strong>Status:</strong> {castSession.status}
+                                </Typography>
+                                <Typography variant="body2">
+                                    <strong>Current Step:</strong> {castSession.current_step}
+                                </Typography>
+                                <Typography variant="body2">
+                                    <strong>Active Clients:</strong> {castSession.active_clients}
+                                </Typography>
+                                <Typography variant="body2">
+                                    <strong>FFmpeg Speed:</strong> {castSession.ffmpeg_speed ? `${castSession.ffmpeg_speed.toFixed(2)}x` : 'n/a'}
+                                </Typography>
+                                <Typography variant="body2">
+                                    <strong>Encoder FPS:</strong> {castSession.ffmpeg_fps ? castSession.ffmpeg_fps.toFixed(1) : 'n/a'}
+                                </Typography>
+                                <Typography variant="body2">
+                                    <strong>Bitrate:</strong> {castSession.ffmpeg_bitrate_kbps ? `${Math.round(castSession.ffmpeg_bitrate_kbps)} kbps` : 'n/a'}
+                                </Typography>
+                                <Typography variant="body2">
+                                    <strong>Relay:</strong> {castSession.relay_url}
+                                </Typography>
+                                <Typography variant="body2">
+                                    <strong>Overlay URL:</strong> {castSession.overlay_url}
+                                </Typography>
+                                {castSession.error && (
+                                    <Typography variant="body2" color="error">
+                                        <strong>Error:</strong> {castSession.error}
+                                    </Typography>
+                                )}
+                                <Button
+                                    size="small"
+                                    sx={{ mt: 1 }}
+                                    onClick={() => setCastDebugOpen((current) => !current)}
+                                >
+                                    {castDebugOpen ? 'Hide Cast Debug' : 'Show Cast Debug'}
+                                </Button>
+                                {castDebugOpen && (
+                                    <Box sx={{ mt: 1, p: 1.5, bgcolor: '#111', color: '#d7f7d7', borderRadius: 1, fontFamily: 'monospace', fontSize: 12, maxHeight: 220, overflow: 'auto' }}>
+                                        {(castSession.debug_log || []).length > 0 ? (
+                                            (castSession.debug_log || []).map((entry, index) => (
+                                                <Box key={`${entry}-${index}`}>{entry}</Box>
+                                            ))
+                                        ) : (
+                                            <Box>No cast debug entries yet.</Box>
+                                        )}
+                                    </Box>
+                                )}
+                            </Box>
+                        )}
+
+                        {castSessions.length > 0 && (
+                            <Box sx={{ mt: 2 }}>
+                                <Typography variant="subtitle1" sx={{ mb: 1 }}>
+                                    Overlay Capture Sessions
+                                </Typography>
+                                <List dense>
+                                    {castSessions.map((session) => (
+                                        <ListItem
+                                            key={session.session_id}
+                                            sx={{
+                                                mb: 1,
+                                                borderRadius: 1,
+                                                bgcolor: session.archived ? 'grey.100' : 'grey.50',
+                                                alignItems: 'flex-start',
+                                            }}
+                                        >
+                                            <ListItemText
+                                                primary={`${session.device_id} • config ${session.config_id}`}
+                                                secondary={
+                                                    <Box component="span" sx={{ display: 'block' }}>
+                                                        <Box component="span" sx={{ display: 'block' }}>
+                                                            Status: {session.status} • Step: {session.current_step} • Clients: {session.active_clients}
+                                                        </Box>
+                                                        <Box component="span" sx={{ display: 'block' }}>
+                                                            Speed: {session.ffmpeg_speed ? `${session.ffmpeg_speed.toFixed(2)}x` : 'n/a'} • FPS: {session.ffmpeg_fps ? session.ffmpeg_fps.toFixed(1) : 'n/a'} • Bitrate: {session.ffmpeg_bitrate_kbps ? `${Math.round(session.ffmpeg_bitrate_kbps)} kbps` : 'n/a'}
+                                                        </Box>
+                                                        <Box component="span" sx={{ display: 'block' }}>
+                                                            Relay: {session.relay_url}
+                                                        </Box>
+                                                        {session.error && (
+                                                            <Box component="span" sx={{ display: 'block', color: 'error.main' }}>
+                                                                Error: {session.error}
+                                                            </Box>
+                                                        )}
+                                                        <Box component="span" sx={{ display: 'block', mt: 1, fontFamily: 'monospace', fontSize: 12, maxHeight: 120, overflow: 'auto', backgroundColor: '#111', color: '#d7f7d7', p: 1, borderRadius: 1 }}>
+                                                            {(session.debug_log || []).slice(-8).map((entry, index) => (
+                                                                <Box component="span" key={`${session.session_id}-${index}`} sx={{ display: 'block' }}>
+                                                                    {entry}
+                                                                </Box>
+                                                            ))}
+                                                        </Box>
+                                                    </Box>
+                                                }
+                                            />
+                                            <ListItemSecondaryAction>
+                                                {!session.archived && (
+                                                    <Button
+                                                        size="small"
+                                                        color="secondary"
+                                                        onClick={() => overlayApi.stopCastSession(session.session_id).then(fetchCastSessions)}
+                                                    >
+                                                        Stop
+                                                    </Button>
+                                                )}
+                                            </ListItemSecondaryAction>
+                                        </ListItem>
+                                    ))}
+                                </List>
+                            </Box>
                         )}
                     </Box>
                     

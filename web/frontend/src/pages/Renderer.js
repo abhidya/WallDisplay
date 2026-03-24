@@ -60,8 +60,6 @@ function Renderer() {
     message: '',
     severity: 'success'
   });
-  const [refreshInterval, setRefreshInterval] = useState(null);
-  
   // AirPlay discovery state
   const [airplayDevices, setAirplayDevices] = useState([]);
   const [airplayLoading, setAirplayLoading] = useState(false);
@@ -71,18 +69,13 @@ function Renderer() {
   useEffect(() => {
     fetchData();
     
-    // Set up auto-refresh interval
+    // Keep active renderer state reasonably fresh without hammering the backend.
     const interval = setInterval(() => {
       fetchActiveRenderers();
-    }, 5000); // Refresh active renderers every 5 seconds
+    }, 15000);
     
-    setRefreshInterval(interval);
-    
-    // Clean up interval on component unmount
     return () => {
-      if (refreshInterval) {
-        clearInterval(refreshInterval);
-      }
+      clearInterval(interval);
     };
   }, []);
 

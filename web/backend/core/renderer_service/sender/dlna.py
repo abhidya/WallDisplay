@@ -28,7 +28,7 @@ class DLNASender(Sender):
         self.logger = logger or logging.getLogger(__name__)
         
         # Set configuration values
-        self.stream_port_range = config.get("stream_port_range", [9000, 9100])
+        self.stream_port_range = config.get("stream_port_range", [9010, 9100])
         self.connect_timeout = config.get("connect_timeout", 5)
         
         # Instance variables

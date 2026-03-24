@@ -32,7 +32,9 @@ class ApiConfigs(BaseModel):
 
 class OverlayConfigBase(BaseModel):
     name: str
-    video_id: int
+    background_type: str = "video"
+    video_id: Optional[int] = None
+    mapping_scene_id: Optional[int] = None
     video_transform: VideoTransform
     widgets: List[Widget]
     api_configs: ApiConfigs
@@ -42,6 +44,9 @@ class OverlayConfigCreate(OverlayConfigBase):
 
 class OverlayConfigUpdate(BaseModel):
     name: Optional[str] = None
+    background_type: Optional[str] = None
+    video_id: Optional[int] = None
+    mapping_scene_id: Optional[int] = None
     video_transform: Optional[VideoTransform] = None
     widgets: Optional[List[Widget]] = None
     api_configs: Optional[ApiConfigs] = None
@@ -55,11 +60,59 @@ class OverlayConfigResponse(OverlayConfigBase):
         from_attributes = True
 
 class OverlayStreamRequest(BaseModel):
-    video_id: int
+    video_id: Optional[int] = None
     config_id: Optional[int] = None
 
 class OverlayStreamResponse(BaseModel):
-    streaming_url: str
-    port: int
-    video_path: str
+    background_type: str = "video"
+    streaming_url: Optional[str] = None
+    port: int = 0
+    video_path: Optional[str] = None
     config_id: Optional[int] = None
+    mapping_scene: Optional[Dict[str, Any]] = None
+
+
+class OverlayWindowInitResponse(BaseModel):
+    config: OverlayConfigResponse
+    background_type: str = "video"
+    streaming_url: Optional[str] = None
+    video_path: Optional[str] = None
+    mapping_scene: Optional[Dict[str, Any]] = None
+
+
+class OverlayCastStartRequest(BaseModel):
+    device_id: str
+    config_id: int
+    overlay_base_url: Optional[str] = None
+    controls_hidden: bool = True
+    viewport_width: int = 1920
+    viewport_height: int = 1080
+    capture_width: int = 1280
+    capture_height: int = 720
+    quality: int = 30
+    frame_rate: int = 15
+    stream_port: Optional[int] = None
+
+
+class OverlayCastSessionResponse(BaseModel):
+    session_id: str
+    device_id: str
+    config_id: int
+    overlay_url: str
+    relay_url: str
+    stream_port: int
+    status: str
+    archived: bool
+    current_step: str
+    debug_log: List[str]
+    active_clients: int
+    ffmpeg_speed: Optional[float] = None
+    ffmpeg_fps: Optional[float] = None
+    ffmpeg_bitrate_kbps: Optional[float] = None
+    last_client_connected_at: Optional[datetime] = None
+    last_client_disconnected_at: Optional[datetime] = None
+    last_client_activity_at: Optional[datetime] = None
+    started_at: datetime
+    updated_at: datetime
+    error: Optional[str] = None
+    discovery_session_id: Optional[str] = None
