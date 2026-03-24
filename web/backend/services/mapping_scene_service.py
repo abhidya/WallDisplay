@@ -4,11 +4,17 @@ import uuid
 from typing import Dict, List, Optional
 
 from fastapi import UploadFile
-from PIL import Image
+from PIL import Image, ImageDraw
 from sqlalchemy.orm import Session
 
 from models.mapping_scene import MappingScene
-from schemas.mapping_scene import MappingMask, MappingSceneCreate, MappingSceneResponse, MappingSceneUpdate
+from schemas.mapping_scene import (
+    MappingMask,
+    MappingPoint,
+    MappingSceneCreate,
+    MappingSceneResponse,
+    MappingSceneUpdate,
+)
 
 
 class MappingSceneService:
@@ -95,6 +101,45 @@ class MappingSceneService:
                 ).model_dump()
             )
             sort_order += 1
+        scene.masks = existing_masks
+        self.db.commit()
+        self.db.refresh(scene)
+        return self._to_response(scene)
+
+    def create_polygon_mask(self, scene_id: int, name: str, points: List[MappingPoint]) -> MappingSceneResponse:
+        scene = self.db.query(MappingScene).filter(MappingScene.id == scene_id).first()
+        if not scene:
+            raise ValueError("Scene not found")
+        if len(points) < 3:
+            raise ValueError("Polygon masks require at least 3 points")
+
+        mask_dir = os.path.join(self._ensure_scene_dir(scene_id), "masks")
+        os.makedirs(mask_dir, exist_ok=True)
+
+        stored_name = f"{uuid.uuid4().hex}.png"
+        stored_path = os.path.join(mask_dir, stored_name)
+        width = scene.canvas_width or 1280
+        height = scene.canvas_height or 720
+
+        image = Image.new("RGBA", (width, height), (0, 0, 0, 255))
+        draw = ImageDraw.Draw(image)
+        polygon = [(point.x, point.y) for point in points]
+        draw.polygon(polygon, fill=(255, 255, 255, 255))
+        image.save(stored_path, format="PNG")
+
+        rel_path = os.path.relpath(stored_path, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        existing_masks = list(scene.masks or [])
+        existing_masks.append(
+            MappingMask(
+                id=uuid.uuid4().hex,
+                name=name,
+                file_name=f"{name}.png",
+                stored_path=rel_path.replace("\\", "/"),
+                width=width,
+                height=height,
+                sort_order=len(existing_masks),
+            ).model_dump()
+        )
         scene.masks = existing_masks
         self.db.commit()
         self.db.refresh(scene)

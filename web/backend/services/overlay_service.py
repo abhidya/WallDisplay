@@ -264,7 +264,7 @@ class OverlayService:
             group.get("media_directory_ids") or group.get("media_directory_id")
         ):
             directory_ids = group.get("media_directory_ids") or [group["media_directory_id"]]
-            valid_directory_ids = [directory_id for directory_id in directory_ids if directory_id]
+            valid_directory_ids = self._normalize_directory_ids(directory_ids)
             if not valid_directory_ids:
                 return []
             videos = self.db.query(VideoModel).filter(
@@ -301,6 +301,17 @@ class OverlayService:
             return []
         playback_url = self._resolve_video_playback_url(video_id)
         return [playback_url] if playback_url else []
+
+    def _normalize_directory_ids(self, directory_ids: List[object]) -> List[int]:
+        normalized_ids: List[int] = []
+        for directory_id in directory_ids:
+            if directory_id in (None, ""):
+                continue
+            try:
+                normalized_ids.append(int(directory_id))
+            except (TypeError, ValueError):
+                continue
+        return normalized_ids
 
     def _resolve_video_playback_url(self, video_id: int) -> Optional[str]:
         video = self.db.query(VideoModel).filter(VideoModel.id == video_id).first()

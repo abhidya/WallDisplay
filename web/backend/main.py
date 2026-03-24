@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 
 from database.database import init_db, get_db
-from routers import device_router, video_router, streaming_router, renderer_router, overlay_router, projection_router, log_router, mapping_router, media_library_router
+from routers import device_router, video_router, streaming_router, renderer_router, overlay_router, projection_router, log_router, mapping_router, media_library_router, structured_lighting_router
 from api.discovery_router import router as discovery_router
 from core.device_manager import get_device_manager
 from core.streaming_registry import StreamingSessionRegistry
@@ -109,6 +109,7 @@ app.include_router(overlay_router)  # Overlay router already has /api prefix
 app.include_router(projection_router)  # Projection router already has /api prefix
 app.include_router(mapping_router)
 app.include_router(media_library_router)
+app.include_router(structured_lighting_router.router)
 app.include_router(log_router.router)  # Log streaming router
 app.include_router(discovery_router)  # New unified discovery API (already has /api/v2/discovery prefix)
 
@@ -143,6 +144,37 @@ streaming_service = None
 streaming_registry = None
 renderer_service = None
 migration_adapter = None
+
+
+def _resolve_config_path(root_dir: str, path_value: str) -> str:
+    path_value = os.path.expanduser(os.path.expandvars(path_value))
+    if os.path.isabs(path_value):
+        return path_value
+    return os.path.abspath(os.path.join(root_dir, path_value))
+
+
+def _get_startup_config_files(root_dir: str, backend_dir: str) -> List[str]:
+    env_config_files = os.environ.get("NANODLNA_CONFIG_FILES", "").strip()
+    env_config_file = os.environ.get("NANODLNA_CONFIG_FILE", "").strip()
+
+    if env_config_files:
+        raw_paths = [item.strip() for item in env_config_files.split(os.pathsep) if item.strip()]
+        candidates = [_resolve_config_path(root_dir, item) for item in raw_paths]
+    elif env_config_file:
+        candidates = [_resolve_config_path(root_dir, env_config_file)]
+    else:
+        candidates = [
+            os.path.join(root_dir, "tramscreem+device_config.json"),
+            os.path.join(backend_dir, "my_device_config.json"),
+            os.path.join(backend_dir, "tramscreem+device_config.json"),
+            os.path.join(root_dir, "my_device_config.json"),
+        ]
+
+    unique_paths = []
+    for path_value in candidates:
+        if path_value not in unique_paths:
+            unique_paths.append(path_value)
+    return unique_paths
 
 # Mount static files for the frontend
 @app.on_event("startup")
@@ -210,15 +242,8 @@ async def startup_event():
     try:
         # First, check for configuration files in the project root
         root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        config_files = [
-            os.path.join(root_dir, "tramscreem+device_config.json"),
-            os.path.join(os.path.dirname(__file__), "my_device_config.json"),
-            os.path.join(os.path.dirname(__file__), "tramscreem+device_config.json"),
-            os.path.join(root_dir, "my_device_config.json"),
-        ]
-        
-        # Remove duplicates
-        config_files = list(set(config_files))
+        backend_dir = os.path.dirname(__file__)
+        config_files = _get_startup_config_files(root_dir, backend_dir)
         
         # Log all potential config files for debugging
         logger.info(f"Checking for config files: {config_files}")

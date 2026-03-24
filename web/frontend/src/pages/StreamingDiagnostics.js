@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   Alert,
   Box,
+  Button,
   Card,
   CardContent,
   Chip,
@@ -15,7 +16,7 @@ import {
   Stack,
   Typography,
 } from '@mui/material';
-import { streamingApi } from '../services/api';
+import { overlayApi, streamingApi } from '../services/api';
 
 function renderCountMap(data) {
   return Object.entries(data || {}).sort((a, b) => b[1] - a[1]);
@@ -58,8 +59,12 @@ function StreamingDiagnostics() {
   const [analytics, setAnalytics] = useState(null);
   const [health, setHealth] = useState(null);
   const [sessions, setSessions] = useState([]);
+  const [overlaySessions, setOverlaySessions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [sessionActionError, setSessionActionError] = useState('');
+  const [stoppingSessionId, setStoppingSessionId] = useState('');
+  const [resettingSessionId, setResettingSessionId] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -70,11 +75,12 @@ function StreamingDiagnostics() {
           setLoading(true);
         }
 
-        const [statsRes, analyticsRes, healthRes, sessionsRes] = await Promise.all([
+        const [statsRes, analyticsRes, healthRes, sessionsRes, overlaySessionsRes] = await Promise.all([
           streamingApi.getStreamingStats(),
           streamingApi.getStreamingAnalytics(),
           streamingApi.getStreamingHealth(),
           streamingApi.getSessions(),
+          overlayApi.listCastSessions(),
         ]);
 
         if (!active) {
@@ -85,6 +91,7 @@ function StreamingDiagnostics() {
         setAnalytics(analyticsRes.data);
         setHealth(healthRes.data);
         setSessions(sessionsRes.data || []);
+        setOverlaySessions((overlaySessionsRes.data || []).filter((session) => !session.archived));
         setError('');
         setLoading(false);
       } catch (err) {
@@ -106,6 +113,50 @@ function StreamingDiagnostics() {
     };
   }, []);
 
+  const refreshData = async () => {
+    const [statsRes, analyticsRes, healthRes, sessionsRes, overlaySessionsRes] = await Promise.all([
+      streamingApi.getStreamingStats(),
+      streamingApi.getStreamingAnalytics(),
+      streamingApi.getStreamingHealth(),
+      streamingApi.getSessions(),
+      overlayApi.listCastSessions(),
+    ]);
+
+    setStats(statsRes.data);
+    setAnalytics(analyticsRes.data);
+    setHealth(healthRes.data);
+    setSessions(sessionsRes.data || []);
+    setOverlaySessions((overlaySessionsRes.data || []).filter((session) => !session.archived));
+  };
+
+  const handleTerminateSession = async (sessionId) => {
+    try {
+      setStoppingSessionId(sessionId);
+      setSessionActionError('');
+      await streamingApi.deleteSession(sessionId);
+      await refreshData();
+    } catch (err) {
+      console.error('Failed to terminate streaming session', err);
+      setSessionActionError('Failed to terminate streaming session.');
+    } finally {
+      setStoppingSessionId('');
+    }
+  };
+
+  const handleResetSession = async (sessionId) => {
+    try {
+      setResettingSessionId(sessionId);
+      setSessionActionError('');
+      await streamingApi.resetSession(sessionId);
+      await refreshData();
+    } catch (err) {
+      console.error('Failed to reset streaming session', err);
+      setSessionActionError('Failed to reset streaming session.');
+    } finally {
+      setResettingSessionId('');
+    }
+  };
+
   if (loading && !stats) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '50vh' }}>
@@ -120,6 +171,7 @@ function StreamingDiagnostics() {
   const activeByConsumer = renderCountMap(analytics?.active_sessions_by_consumer_prefix);
   const stalledByType = renderCountMap(health?.stalled_by_stream_type);
   const errorByType = renderCountMap(health?.error_by_stream_type);
+  const runningOverlaySessions = overlaySessions.filter((session) => session.status === 'running');
 
   return (
     <Stack spacing={3}>
@@ -131,6 +183,7 @@ function StreamingDiagnostics() {
       </Box>
 
       {error ? <Alert severity="error">{error}</Alert> : null}
+      {sessionActionError ? <Alert severity="error">{sessionActionError}</Alert> : null}
 
       <Grid container spacing={2}>
         <Grid item xs={12} md={3}>
@@ -147,6 +200,39 @@ function StreamingDiagnostics() {
             title="Bandwidth"
             value={`${Math.round((analytics?.total_bandwidth_bps || 0) / 1024)} KB/s`}
             subtitle={`${sessions.length} live session records`}
+          />
+        </Grid>
+      </Grid>
+
+      <Grid container spacing={2}>
+        <Grid item xs={12} md={3}>
+          <MetricCard
+            title="Overlay Cast Sessions"
+            value={overlaySessions.length}
+            subtitle={`${runningOverlaySessions.length} running`}
+          />
+        </Grid>
+        <Grid item xs={12} md={3}>
+          <MetricCard
+            title="Overlay Clients"
+            value={overlaySessions.reduce((total, session) => total + (session.active_clients || 0), 0)}
+            subtitle="relay consumers"
+          />
+        </Grid>
+        <Grid item xs={12} md={3}>
+          <MetricCard
+            title="Avg Overlay Speed"
+            value={runningOverlaySessions.length
+              ? `${(runningOverlaySessions.reduce((total, session) => total + (session.ffmpeg_speed || 0), 0) / runningOverlaySessions.length).toFixed(2)}x`
+              : 'n/a'}
+            subtitle="ffmpeg realtime factor"
+          />
+        </Grid>
+        <Grid item xs={12} md={3}>
+          <MetricCard
+            title="Slow Overlay Casts"
+            value={runningOverlaySessions.filter((session) => (session.ffmpeg_speed || 0) < 1).length}
+            subtitle="below realtime"
           />
         </Grid>
       </Grid>
@@ -190,12 +276,59 @@ function StreamingDiagnostics() {
                   <Stack direction="row" spacing={1}>
                     <Chip label={session.stream_type || 'unknown'} size="small" />
                     <Chip label={session.status || 'unknown'} size="small" color={session.status === 'active' ? 'success' : 'default'} />
+                    <Button
+                      size="small"
+                      color="info"
+                      variant="outlined"
+                      disabled={resettingSessionId === session.session_id}
+                      onClick={() => handleResetSession(session.session_id)}
+                    >
+                      {resettingSessionId === session.session_id ? 'Resetting...' : 'Reset'}
+                    </Button>
+                    <Button
+                      size="small"
+                      color="warning"
+                      variant="outlined"
+                      disabled={stoppingSessionId === session.session_id || resettingSessionId === session.session_id}
+                      onClick={() => handleTerminateSession(session.session_id)}
+                    >
+                      {stoppingSessionId === session.session_id ? 'Stopping...' : 'Terminate'}
+                    </Button>
                   </Stack>
                 }
               >
                 <ListItemText
                   primary={`${session.device_name} • ${session.consumer_id || 'unassigned'}`}
                   secondary={`${session.server_ip}:${session.server_port} • ${Math.round((session.bandwidth_bps || 0) / 1024)} KB/s`}
+                />
+              </ListItem>
+            ))}
+          </List>
+        )}
+      </Paper>
+
+      <Paper sx={{ p: 2 }}>
+        <Typography variant="h6" gutterBottom>Overlay Capture Sessions</Typography>
+        <Divider sx={{ mb: 1.5 }} />
+        {!overlaySessions.length ? (
+          <Typography variant="body2" color="text.secondary">No overlay capture sessions.</Typography>
+        ) : (
+          <List dense disablePadding>
+            {overlaySessions.slice(0, 12).map((session) => (
+              <ListItem
+                key={session.session_id}
+                disableGutters
+                secondaryAction={(
+                  <Stack direction="row" spacing={1}>
+                    <Chip label={session.status || 'unknown'} size="small" color={session.status === 'running' ? 'success' : 'default'} />
+                    <Chip label={session.current_step || 'unknown'} size="small" />
+                    <Chip label={`${session.active_clients || 0} clients`} size="small" />
+                  </Stack>
+                )}
+              >
+                <ListItemText
+                  primary={`${session.device_id} • config ${session.config_id}`}
+                  secondary={`speed ${session.ffmpeg_speed ? `${session.ffmpeg_speed.toFixed(2)}x` : 'n/a'} • fps ${session.ffmpeg_fps || 'n/a'} • bitrate ${Math.round(session.ffmpeg_bitrate_kbps || 0)} kbps`}
                 />
               </ListItem>
             ))}

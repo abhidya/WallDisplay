@@ -108,6 +108,26 @@ async def get_session(session_id: str) -> Dict[str, Any]:
         
     return session.to_dict()
 
+@router.delete("/sessions/{session_id}")
+async def delete_session(session_id: str) -> Dict[str, Any]:
+    """
+    Force-remove a streaming session from the registry.
+
+    Args:
+        session_id: ID of the session to remove
+
+    Returns:
+        Dict[str, Any]: Action status
+
+    Raises:
+        HTTPException: If session not found
+    """
+    registry = StreamingSessionRegistry.get_instance()
+    removed = registry.unregister_session(session_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    return {"status": "success", "message": f"Session {session_id} removed"}
+
 @router.get("/device/{device_name}")
 async def get_sessions_for_device(device_name: str) -> List[Dict[str, Any]]:
     """

@@ -3,6 +3,6 @@
     {
         "device_name": "tranScreen-83924",
         "type": "transcreen",
-        "video_file": "/Users/abdulrehmanbhidya/Desktop/frontdoor-newsize copy.mp4"
+        "video_file": "${HOME}/Desktop/frontdoor-newsize copy.mp4"
     }
 ]

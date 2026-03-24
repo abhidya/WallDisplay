@@ -1,12 +1,13 @@
 import asyncio
 import base64
+import html
 import logging
-import queue
 import re
 import socket
 import subprocess
 import sys
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -14,14 +15,22 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Dict, Optional
 from urllib.parse import urlencode
 
+import aiohttp
+
+from discovery.base import CastingSession
 from discovery.discovery_manager import DiscoveryManager
 
 logger = logging.getLogger(__name__)
 RELAY_IDLE_TIMEOUT_SECONDS = 15
 SESSION_HISTORY_LIMIT = 12
+DEFAULT_PRIMING_SECONDS = 6
 FFMPEG_SPEED_RE = re.compile(r"speed=\s*([0-9.]+)x")
 FFMPEG_FPS_RE = re.compile(r"fps=\s*([0-9.]+)")
 FFMPEG_BITRATE_RE = re.compile(r"bitrate=\s*([0-9.]+)kbits/s")
+
+
+class ReusableThreadingHTTPServer(ThreadingHTTPServer):
+    allow_reuse_address = True
 
 
 class OverlayCastRelayHandler(BaseHTTPRequestHandler):
@@ -41,7 +50,8 @@ class OverlayCastRelayHandler(BaseHTTPRequestHandler):
             return
 
         self.send_response(200)
-        self.send_header("Content-Type", "video/mpeg")
+        self.send_header("Content-Type", "video/mp2t")
+        self.send_header("Connection", "keep-alive")
         self.end_headers()
 
         session = getattr(self.server, "overlay_session", None)
@@ -52,7 +62,7 @@ class OverlayCastRelayHandler(BaseHTTPRequestHandler):
 
         try:
             while True:
-                chunk = ffmpeg_proc.stdout.read(65536)
+                chunk = ffmpeg_proc.stdout.read(32768)
                 if not chunk:
                     break
                 self.wfile.write(chunk)
@@ -91,6 +101,7 @@ class OverlayCastSession:
     last_client_disconnected_at: Optional[datetime] = None
     last_client_activity_at: Optional[datetime] = None
     discovery_session_id: Optional[str] = None
+    encoder: Optional[str] = None
     task: Optional[asyncio.Task] = None
     ready_event: asyncio.Event = field(default_factory=asyncio.Event)
     stop_event: asyncio.Event = field(default_factory=asyncio.Event)
@@ -100,8 +111,9 @@ class OverlayCastSession:
     relay_server: Optional[ThreadingHTTPServer] = None
     relay_thread: Optional[threading.Thread] = None
     ffmpeg_log_thread: Optional[threading.Thread] = None
-    frame_queue: Optional[queue.Queue] = None
     frame_writer_thread: Optional[threading.Thread] = None
+    latest_frame: Optional[bytes] = None
+    frame_interval_seconds: float = 1 / 20
 
     def to_dict(self) -> dict:
         return {
@@ -126,6 +138,7 @@ class OverlayCastSession:
             "updated_at": self.updated_at.isoformat(),
             "error": self.error,
             "discovery_session_id": self.discovery_session_id,
+            "encoder": self.encoder,
         }
 
 
@@ -154,12 +167,12 @@ class OverlayCastService:
         config_id: int,
         overlay_base_url: str,
         controls_hidden: bool = True,
-        viewport_width: int = 1920,
-        viewport_height: int = 1080,
+        viewport_width: int = 1280,
+        viewport_height: int = 720,
         capture_width: int = 1280,
         capture_height: int = 720,
         quality: int = 30,
-        frame_rate: int = 15,
+        frame_rate: int = 20,
         stream_port: Optional[int] = None,
     ) -> dict:
         with self._session_lock:
@@ -178,6 +191,7 @@ class OverlayCastService:
                 overlay_url=overlay_url,
                 relay_url=relay_url,
                 stream_port=relay_port,
+                frame_interval_seconds=1 / max(frame_rate, 1),
             )
             self._log_step(session, "queued", f"Queued cast for device {device_id} using overlay config {config_id}")
             session.task = asyncio.create_task(
@@ -195,7 +209,7 @@ class OverlayCastService:
             self.device_sessions[device_id] = session_id
 
         try:
-            await asyncio.wait_for(session.ready_event.wait(), timeout=10)
+            await asyncio.wait_for(session.ready_event.wait(), timeout=12)
         except asyncio.TimeoutError as exc:
             await self._stop_session(session.session_id)
             raise RuntimeError("Overlay cast start timed out before relay became ready") from exc
@@ -256,10 +270,7 @@ class OverlayCastService:
 
             playwright_context = await async_playwright().start()
             self._log_step(session, "browser_launch", "Launching headless Chromium")
-            browser = await playwright_context.chromium.launch(
-                headless=True,
-                args=["--no-sandbox"],
-            )
+            browser = await playwright_context.chromium.launch(headless=True, args=["--no-sandbox"])
             self._log_step(session, "page_create", "Opening overlay page")
             page = await browser.new_page(
                 viewport={"width": viewport_width, "height": viewport_height}
@@ -267,42 +278,9 @@ class OverlayCastService:
             await page.goto(session.overlay_url)
             self._log_step(session, "page_loaded", f"Overlay page loaded: {session.overlay_url}")
 
-            ffmpeg_cmd = [
-                "ffmpeg",
-                "-y",
-                "-f",
-                "image2pipe",
-                "-vcodec",
-                "mjpeg",
-                "-r",
-                str(frame_rate),
-                "-i",
-                "-",
-                "-c:v",
-                "h264_videotoolbox",
-                "-b:v",
-                "2000k",
-                "-pix_fmt",
-                "yuv420p",
-                "-color_range",
-                "2",
-                "-realtime",
-                "1",
-                "-profile:v",
-                "baseline",
-                "-level",
-                "4.1",
-                "-r",
-                str(frame_rate),
-                "-g",
-                str(max(frame_rate * 2, 1)),
-                "-f",
-                "mpegts",
-                "-muxrate",
-                "2500k",
-                "pipe:1",
-            ]
-            self._log_step(session, "ffmpeg_start", "Starting FFmpeg encoder")
+            encoder, ffmpeg_cmd = self._build_ffmpeg_command(frame_rate)
+            session.encoder = encoder
+            self._log_step(session, "ffmpeg_start", f"Starting FFmpeg encoder with {encoder}")
             ffmpeg_proc = subprocess.Popen(
                 ffmpeg_cmd,
                 stdin=subprocess.PIPE,
@@ -311,22 +289,23 @@ class OverlayCastService:
             )
             if ffmpeg_proc.poll() is not None:
                 raise RuntimeError("FFmpeg exited immediately during startup")
+
             ffmpeg_log_thread = threading.Thread(
                 target=self._pump_ffmpeg_logs,
                 args=(session, ffmpeg_proc),
                 daemon=True,
             )
             ffmpeg_log_thread.start()
-            frame_queue: queue.Queue[Optional[bytes]] = queue.Queue(maxsize=max(frame_rate * 2, 4))
+
             frame_writer_thread = threading.Thread(
-                target=self._pump_frames_to_ffmpeg,
-                args=(session, ffmpeg_proc, frame_queue),
+                target=self._pump_latest_frame_to_ffmpeg,
+                args=(session, ffmpeg_proc),
                 daemon=True,
             )
             frame_writer_thread.start()
 
             self._log_step(session, "relay_bind", f"Starting local relay on port {session.stream_port}")
-            relay_server = ThreadingHTTPServer(("0.0.0.0", session.stream_port), OverlayCastRelayHandler)
+            relay_server = ReusableThreadingHTTPServer(("0.0.0.0", session.stream_port), OverlayCastRelayHandler)
             relay_server.ffmpeg_proc = ffmpeg_proc
             relay_server.overlay_session = session
             relay_thread = threading.Thread(target=relay_server.serve_forever, daemon=True)
@@ -339,7 +318,7 @@ class OverlayCastService:
                 if session.stop_event.is_set():
                     return
                 try:
-                    self._enqueue_frame(session, base64.b64decode(event["data"]))
+                    session.latest_frame = base64.b64decode(event["data"])
                     await cdp.send("Page.screencastFrameAck", {"sessionId": event["sessionId"]})
                 except Exception as exc:
                     logger.debug("Overlay cast frame handling stopped: %s", exc)
@@ -353,7 +332,7 @@ class OverlayCastService:
                     "quality": quality,
                     "maxWidth": capture_width,
                     "maxHeight": capture_height,
-                    "everyNthFrame": 1,
+                    "everyNthFrame": 5,
                 },
             )
 
@@ -363,28 +342,15 @@ class OverlayCastService:
             session.relay_server = relay_server
             session.relay_thread = relay_thread
             session.ffmpeg_log_thread = ffmpeg_log_thread
-            session.frame_queue = frame_queue
             session.frame_writer_thread = frame_writer_thread
             session.ready_event.set()
 
             self._log_step(session, "priming", "Priming pipeline before DLNA handoff")
-            await asyncio.sleep(5)
+            await asyncio.sleep(DEFAULT_PRIMING_SECONDS)
 
             self._log_step(session, "dlna_cast", f"Sending relay URL to DLNA device {session.device_id}")
-            discovery_session = await self.discovery_manager.cast_content(
-                device_id=session.device_id,
-                content_url=session.relay_url,
-                content_type="video/mpeg",
-                metadata={
-                    "source": "overlay_cast",
-                    "config_id": session.config_id,
-                    "overlay_url": session.overlay_url,
-                },
-            )
-            if not discovery_session:
-                raise RuntimeError("DLNA cast command failed")
-
-            session.discovery_session_id = discovery_session.id
+            await self._direct_dlna_handshake(session)
+            session.discovery_session_id = None
             session.status = "running"
             self._log_step(session, "running", "DLNA cast acknowledged and session is running")
             logger.info(
@@ -442,6 +408,11 @@ class OverlayCastService:
                 await self.discovery_manager.stop_casting(session.discovery_session_id)
             except Exception as exc:
                 logger.warning("Failed to stop discovery cast session %s: %s", session.discovery_session_id, exc)
+        else:
+            try:
+                await self._direct_dlna_stop(session)
+            except Exception as exc:
+                logger.warning("Failed to stop direct overlay cast for %s: %s", session.device_id, exc)
 
         if session.task:
             session.task.cancel()
@@ -475,18 +446,6 @@ class OverlayCastService:
             session.browser = None
 
         if session.ffmpeg_proc is not None:
-            if session.frame_queue is not None:
-                try:
-                    session.frame_queue.put_nowait(None)
-                except queue.Full:
-                    try:
-                        session.frame_queue.get_nowait()
-                    except queue.Empty:
-                        pass
-                    try:
-                        session.frame_queue.put_nowait(None)
-                    except queue.Full:
-                        pass
             try:
                 if session.ffmpeg_proc.stdin is not None:
                     session.ffmpeg_proc.stdin.close()
@@ -506,14 +465,10 @@ class OverlayCastService:
                 pass
             session.relay_server = None
 
-        if session.relay_thread is not None:
-            session.relay_thread = None
-        if session.ffmpeg_log_thread is not None:
-            session.ffmpeg_log_thread = None
-        if session.frame_writer_thread is not None:
-            session.frame_writer_thread = None
-        if session.frame_queue is not None:
-            session.frame_queue = None
+        session.relay_thread = None
+        session.ffmpeg_log_thread = None
+        session.frame_writer_thread = None
+        session.latest_frame = None
 
     def _build_overlay_url(self, overlay_base_url: str, config_id: int, controls_hidden: bool) -> str:
         base = overlay_base_url.rstrip("/")
@@ -547,22 +502,6 @@ class OverlayCastService:
         session.debug_log = session.debug_log[-30:]
         logger.info("Overlay cast %s %s: %s", session.session_id, step, message)
 
-    def _enqueue_frame(self, session: OverlayCastSession, frame_data: bytes):
-        if session.frame_queue is None or session.stop_event.is_set():
-            return
-
-        try:
-            session.frame_queue.put_nowait(frame_data)
-        except queue.Full:
-            try:
-                session.frame_queue.get_nowait()
-            except queue.Empty:
-                return
-            try:
-                session.frame_queue.put_nowait(frame_data)
-            except queue.Full:
-                logger.debug("Dropping overlay cast frame for session %s due to sustained backpressure", session.session_id)
-
     def _archive_session(self, session: OverlayCastSession):
         session.archived = True
         self.session_history = [entry for entry in self.session_history if entry.get("session_id") != session.session_id]
@@ -593,31 +532,145 @@ class OverlayCastService:
         except Exception as exc:
             logger.debug("Failed to capture FFmpeg logs for overlay cast %s: %s", session.session_id, exc)
 
-    def _pump_frames_to_ffmpeg(
-        self,
-        session: OverlayCastSession,
-        ffmpeg_proc: subprocess.Popen,
-        frame_queue: queue.Queue,
-    ):
+    def _pump_latest_frame_to_ffmpeg(self, session: OverlayCastSession, ffmpeg_proc: subprocess.Popen):
         while not session.stop_event.is_set():
-            try:
-                frame = frame_queue.get(timeout=0.5)
-            except queue.Empty:
-                continue
-
-            if frame is None:
-                break
-
             try:
                 if ffmpeg_proc.stdin is None:
                     break
-                ffmpeg_proc.stdin.write(frame)
-                ffmpeg_proc.stdin.flush()
+                if session.latest_frame:
+                    ffmpeg_proc.stdin.write(session.latest_frame)
+                    ffmpeg_proc.stdin.flush()
             except Exception as exc:
                 logger.warning("Overlay cast frame writer stopped for session %s: %s", session.session_id, exc)
                 session.error = str(exc)
                 session.stop_event.set()
                 break
+            time.sleep(session.frame_interval_seconds)
+
+    def _build_ffmpeg_command(self, frame_rate: int) -> tuple[str, list[str]]:
+        encoder = "h264_videotoolbox" if sys.platform == "darwin" else "libx264"
+        encoder_options = ["-realtime", "1"] if encoder == "h264_videotoolbox" else ["-preset", "ultrafast"]
+        ffmpeg_cmd = [
+            "ffmpeg",
+            "-y",
+            "-f",
+            "image2pipe",
+            "-vcodec",
+            "mjpeg",
+            "-i",
+            "-",
+            "-c:v",
+            encoder,
+            *encoder_options,
+            "-b:v",
+            "2500k",
+            "-r",
+            str(frame_rate),
+            "-pix_fmt",
+            "yuv420p",
+            "-f",
+            "mpegts",
+            "-muxrate",
+            "4000k",
+            "-pcr_period", "20",  # Forces timing headers every 20ms
+            "pipe:1",
+        ]
+        return encoder, ffmpeg_cmd
+
+    async def _direct_dlna_handshake(self, session: OverlayCastSession) -> CastingSession:
+        device = self.discovery_manager.get_device_by_id(session.device_id)
+        if not device or not device.action_url:
+            raise RuntimeError("DLNA device action URL not available")
+
+        stream_url = session.relay_url
+        meta = (
+            '<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" '
+            'xmlns:dc="http://purl.org/dc/elements/1.1/" '
+            'xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/">'
+            '<item id="0" parentID="-1" restricted="1"><dc:title>WallMapper</dc:title>'
+            '<upnp:class>object.item.videoItem</upnp:class>'
+            f'<res protocolInfo="http-get:*:video/mpeg:DLNA.ORG_PN=MPEG_TS_SD_EU_ISO">{stream_url}</res>'
+            "</item></DIDL-Lite>"
+        )
+        escaped_meta = html.escape(meta)
+
+        set_uri_body = (
+            '<?xml version="1.0" encoding="utf-8"?>'
+            '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">'
+            '<s:Body><u:SetAVTransportURI xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">'
+            "<InstanceID>0</InstanceID>"
+            f"<CurrentURI>{stream_url}</CurrentURI>"
+            f"<CurrentURIMetaData>{escaped_meta}</CurrentURIMetaData>"
+            "</u:SetAVTransportURI></s:Body></s:Envelope>"
+        )
+        play_body = (
+            '<?xml version="1.0" encoding="utf-8"?>'
+            '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">'
+            '<s:Body><u:Play xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">'
+            "<InstanceID>0</InstanceID><Speed>1</Speed>"
+            "</u:Play></s:Body></s:Envelope>"
+        )
+
+        async with aiohttp.ClientSession() as http_session:
+            async with http_session.post(
+                device.action_url,
+                data=set_uri_body,
+                headers={
+                    "Content-Type": "text/xml",
+                    "SOAPACTION": '"urn:schemas-upnp-org:service:AVTransport:1#SetAVTransportURI"',
+                },
+            ) as response:
+                if response.status != 200:
+                    raise RuntimeError(f"SetAVTransportURI failed with {response.status}")
+
+            await asyncio.sleep(3)
+
+            async with http_session.post(
+                device.action_url,
+                data=play_body,
+                headers={
+                    "Content-Type": "text/xml",
+                    "SOAPACTION": '"urn:schemas-upnp-org:service:AVTransport:1#Play"',
+                },
+            ) as response:
+                if response.status != 200:
+                    raise RuntimeError(f"Play failed with {response.status}")
+
+        return CastingSession(
+            id=str(uuid.uuid4()),
+            device=device,
+            content_url=stream_url,
+            content_type="video/mpeg",
+            metadata={
+                "source": "overlay_cast",
+                "config_id": session.config_id,
+                "overlay_url": session.overlay_url,
+                "relay_mode": "direct_dlna_handshake",
+            },
+        )
+
+    async def _direct_dlna_stop(self, session: OverlayCastSession):
+        device = self.discovery_manager.get_device_by_id(session.device_id)
+        if not device or not device.action_url:
+            return
+
+        stop_body = (
+            '<?xml version="1.0" encoding="utf-8"?>'
+            '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">'
+            '<s:Body><u:Stop xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">'
+            "<InstanceID>0</InstanceID>"
+            "</u:Stop></s:Body></s:Envelope>"
+        )
+        async with aiohttp.ClientSession() as http_session:
+            async with http_session.post(
+                device.action_url,
+                data=stop_body,
+                headers={
+                    "Content-Type": "text/xml",
+                    "SOAPACTION": '"urn:schemas-upnp-org:service:AVTransport:1#Stop"',
+                },
+            ):
+                return
 
 
 def get_overlay_cast_service() -> OverlayCastService:

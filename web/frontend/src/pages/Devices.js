@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Grid,
   Paper,
   Typography,
@@ -37,7 +40,8 @@ import {
   Pause as PauseIcon,
   Stop as StopIcon,
   Settings as SettingsIcon,
-  FilterList as FilterIcon
+  FilterList as FilterIcon,
+  ExpandMore as ExpandMoreIcon
 } from '@mui/icons-material';
 import { deviceApi, discoveryV2Api } from '../services/api';
 import { useNavigate } from 'react-router-dom';
@@ -121,6 +125,7 @@ function Devices() {
     group: '',
     zone: ''
   });
+  const [showDiscoveryDiagnostics, setShowDiscoveryDiagnostics] = useState(false);
 
   const onlineDevices = devices.filter(device => getAvailabilityLabel(device) === 'online');
   const degradedDevices = devices.filter(device => getAvailabilityLabel(device) === 'degraded');
@@ -645,11 +650,44 @@ function Devices() {
                   ? `Observed ${devices.length} devices. Worst-case last seen: ${formatLastSeen(stalestSeenSeconds)}.`
                   : 'No devices have been observed yet.'}
               </Typography>
-              {discoveryStatus && (
-                <Typography variant="body2" color="textSecondary" sx={{ mt: 0.5 }}>
-                  Raw discovery counters: {discoveryStatus.devices_discovered} discovered, {discoveryStatus.devices_playing} playing.
-                </Typography>
-              )}
+              <Accordion
+                expanded={showDiscoveryDiagnostics}
+                onChange={(_, expanded) => setShowDiscoveryDiagnostics(expanded)}
+                disableGutters
+                elevation={0}
+                sx={{
+                  mt: 1,
+                  bgcolor: 'transparent',
+                  '&:before': { display: 'none' },
+                }}
+              >
+                <AccordionSummary
+                  expandIcon={<ExpandMoreIcon />}
+                  sx={{ px: 0, minHeight: 'auto', '& .MuiAccordionSummary-content': { my: 0 } }}
+                >
+                  <Typography variant="body2" color="textSecondary">
+                    Discovery Diagnostics
+                  </Typography>
+                </AccordionSummary>
+                <AccordionDetails sx={{ px: 0, pt: 0.5 }}>
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                    <Chip
+                      label={`Loop ${discoveryStatus?.paused ? 'paused' : discoveryStatus?.running ? 'running' : 'stopped'}`}
+                      size="small"
+                      color={discoveryStatus?.running ? 'success' : 'default'}
+                    />
+                    {discoveryStatus?.interval !== undefined && (
+                      <Chip label={`Interval ${discoveryStatus.interval}s`} size="small" />
+                    )}
+                    {discoveryStatus?.devices_discovered !== undefined && (
+                      <Chip label={`${discoveryStatus.devices_discovered} discovered this pass`} size="small" />
+                    )}
+                    {discoveryStatus?.devices_playing !== undefined && (
+                      <Chip label={`${discoveryStatus.devices_playing} marked playing`} size="small" />
+                    )}
+                  </Box>
+                </AccordionDetails>
+              </Accordion>
             </Box>
             <Box>
               <Button
@@ -801,9 +839,28 @@ function Devices() {
                   )}
                 </Typography>
                 <Typography variant="body2" color="textSecondary" gutterBottom>
+                  Projection:{' '}
+                  <Chip
+                    label={device.active_overlay_cast ? (device.overlay_cast_status || 'running') : 'stopped'}
+                    color={device.active_overlay_cast ? 'success' : 'default'}
+                    size="small"
+                  />
+                  {device.active_overlay_cast && device.overlay_cast_ffmpeg_speed !== null && device.overlay_cast_ffmpeg_speed !== undefined && (
+                    <Chip
+                      label={`speed ${device.overlay_cast_ffmpeg_speed.toFixed(2)}x`}
+                      color={device.overlay_cast_ffmpeg_speed >= 1 ? 'success' : 'warning'}
+                      size="small"
+                      sx={{ ml: 1 }}
+                    />
+                  )}
+                </Typography>
+                <Typography variant="body2" color="textSecondary" gutterBottom>
                   {formatLastSeen(device.seconds_since_seen)}
                   {formatDurationSeconds(device.uptime_seconds) && ` • uptime ${formatDurationSeconds(device.uptime_seconds)}`}
                   {!formatDurationSeconds(device.uptime_seconds) && formatDurationSeconds(device.downtime_seconds) && ` • downtime ${formatDurationSeconds(device.downtime_seconds)}`}
+                </Typography>
+                <Typography variant="body2" color="textSecondary" gutterBottom>
+                  Reconnects {device.reconnect_count ?? 0} • degraded {device.degraded_count ?? 0} • offline {device.offline_count ?? 0}
                 </Typography>
                 {device.current_video && (
                   <>

@@ -41,9 +41,6 @@ class DeviceService:
         """
         devices = self.db.query(DeviceModel).offset(skip).limit(limit).all()
         result = [self._device_to_dict(device) for device in devices]
-        # Debug: print first device to see what's being returned
-        if result:
-            print(f"DEBUG get_devices returning first device: {result[0].get('name')} with playback_started_at={result[0].get('playback_started_at')}")
         return result
     
     def get_device_by_id(self, device_id: int) -> Optional[Dict[str, Any]]:
@@ -248,7 +245,7 @@ class DeviceService:
             if "config" in device.model_fields_set:
                 db_device.config = device.config
             
-            logger.info(f"DEBUG: db_device.status BEFORE commit: {db_device.status}")
+            logger.debug(f"db_device.status before commit: {db_device.status}")
             self.db.add(db_device) # Explicitly add to session before commit
             self.db.commit()
             
@@ -259,7 +256,7 @@ class DeviceService:
                 logger.error(f"Device {device_id} not found after commit and explicit re-fetch.")
                 return None
             
-            logger.info(f"DEBUG: current_db_device_state.status (from explicit re-fetch): {current_db_device_state.status}")
+            logger.debug(f"current_db_device_state.status after re-fetch: {current_db_device_state.status}")
             # The manual override current_db_device_state.status = "offline" is now removed to observe true behavior.
             
             # Update the device in the device manager
@@ -711,10 +708,10 @@ class DeviceService:
             List[Dict[str, Any]]: List of discovered devices as dictionaries
         """
         try:
-            logger.info(f"Starting device discovery with timeout {timeout} seconds")
+            logger.debug(f"Starting device discovery with timeout {timeout} seconds")
             # Use the device manager to discover devices directly
             discovered_devices = self.device_manager._discover_dlna_devices(timeout=timeout)
-            logger.info(f"Discovered devices: {discovered_devices}")
+            logger.debug(f"Discovered devices: {discovered_devices}")
             
             # First, check which devices already exist in the database and core manager
             existing_devices = {}
@@ -893,13 +890,23 @@ class DeviceService:
             
             logger.info(f"Found {len(devices_config)} devices in config file")
             
+            config_dir = os.path.dirname(abs_path)
+
             # Register devices with the device manager and create them in the database
             db_devices = []
             for device_info in devices_config:
+                device_info = dict(device_info)
                 device_name = device_info.get("device_name") or device_info.get("name") # Check for "name" as well
                 if not device_name:
                     logger.error("Device missing 'device_name' or 'name' in config file entry")
                     continue
+
+                video_file = device_info.get("video_file")
+                if video_file:
+                    resolved_video_file = os.path.expanduser(os.path.expandvars(video_file))
+                    if not os.path.isabs(resolved_video_file):
+                        resolved_video_file = os.path.abspath(os.path.join(config_dir, resolved_video_file))
+                    device_info["video_file"] = resolved_video_file
                 
                 # Ensure device_info uses "device_name" consistently internally if "name" was used
                 if "name" in device_info and "device_name" not in device_info:
@@ -1140,9 +1147,18 @@ class DeviceService:
                 device_dict["reconnect_count"] = status_info.get("reconnect_count", 0)
                 device_dict["degraded_count"] = status_info.get("degraded_count", 0)
                 device_dict["offline_count"] = status_info.get("offline_count", 0)
-                logger.info(f"Device {device.name} status from manager: {status_info.get('status')}, is_playing: {status_info.get('is_playing')}")
+                logger.debug(
+                    "Device %s status from manager: %s, is_playing: %s",
+                    device.name,
+                    status_info.get("status"),
+                    status_info.get("is_playing"),
+                )
             else:
-                logger.warning(f"Device '{device.name}' not found in device_manager.device_status, using DB status: {device.status}")
+                logger.debug(
+                    "Device '%s' not found in device_manager.device_status, using DB status: %s",
+                    device.name,
+                    device.status,
+                )
 
         device_dict.update(self._derive_device_runtime_state(device, device_dict))
         logger.debug(f"_device_to_dict: final device_dict['status'] for '{device.name}' is '{device_dict['status']}'")
@@ -1317,17 +1333,12 @@ class DeviceService:
     def get_device_instance(self, device_id: int):
         db_device = self.db.query(DeviceModel).filter(DeviceModel.id == device_id).first()
         if not db_device:
-            print(f"[get_device_instance] Device with ID {device_id} not found in DB")
             logger.error(f"[get_device_instance] Device with ID {device_id} not found in DB")
             return None
-        print(f"[get_device_instance] Looking for device '{db_device.name}' in DeviceManager")
-        print(f"[get_device_instance] DeviceManager.devices keys BEFORE: {list(self.device_manager.devices.keys())}")
-        logger.info(f"[get_device_instance] Looking for device '{db_device.name}' in DeviceManager")
-        logger.info(f"[get_device_instance] DeviceManager.devices keys BEFORE: {list(self.device_manager.devices.keys())}")
+        logger.debug(f"[get_device_instance] Looking for device '{db_device.name}' in DeviceManager")
         core_device = self.device_manager.get_device(db_device.name)
         if not core_device:
-            print(f"[get_device_instance] Device '{db_device.name}' not found, registering from DB info: {db_device.__dict__}")
-            logger.info(f"[get_device_instance] Device '{db_device.name}' not found, registering from DB info: {db_device.__dict__}")
+            logger.debug(f"[get_device_instance] Device '{db_device.name}' not found, registering from DB")
             device_info = {
                 "device_name": db_device.name,
                 "type": db_device.type,
@@ -1340,12 +1351,8 @@ class DeviceService:
             if db_device.config:
                 device_info.update(db_device.config)
             core_device = self.device_manager.register_device(device_info)
-            print(f"[get_device_instance] DeviceManager.devices keys AFTER: {list(self.device_manager.devices.keys())}")
-            logger.info(f"[get_device_instance] DeviceManager.devices keys AFTER: {list(self.device_manager.devices.keys())}")
             if not core_device:
-                print(f"[get_device_instance] Registration failed for device '{db_device.name}' with info: {device_info}")
                 logger.error(f"[get_device_instance] Registration failed for device '{db_device.name}' with info: {device_info}")
         else:
-            print(f"[get_device_instance] Found device '{db_device.name}' in DeviceManager")
-            logger.info(f"[get_device_instance] Found device '{db_device.name}' in DeviceManager")
+            logger.debug(f"[get_device_instance] Found device '{db_device.name}' in DeviceManager")
         return core_device

@@ -5,7 +5,6 @@ import {
   Button,
   Chip,
   Collapse,
-  Divider,
   Drawer,
   FormControl,
   IconButton,
@@ -71,6 +70,12 @@ const emptyGroup = () => ({
   color_b: '#6a7f58',
 });
 
+function normalizeNumericIdList(values) {
+  return (Array.isArray(values) ? values : [])
+    .map((value) => Number(value))
+    .filter((value) => Number.isInteger(value) && value > 0);
+}
+
 function Mappings() {
   const stageRef = useRef(null);
   const previewCanvasRef = useRef(null);
@@ -89,6 +94,7 @@ function Mappings() {
   const [rightOpen, setRightOpen] = useState(true);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [polygonDraft, setPolygonDraft] = useState(null);
   const [collapsedSections, setCollapsedSections] = useState({
     scenes: false,
     sceneSettings: false,
@@ -198,8 +204,8 @@ function Mappings() {
 
   useEffect(() => {
     if (!sceneDraft || !previewCanvasRef.current) return;
-    renderStage(previewCanvasRef.current, sceneDraft, maskImages, selectedGroupId);
-  }, [sceneDraft, maskImages, selectedGroupId]);
+    renderStage(previewCanvasRef.current, sceneDraft, maskImages, selectedGroupId, polygonDraft);
+  }, [sceneDraft, maskImages, selectedGroupId, polygonDraft]);
 
   const persistScene = async () => {
     try {
@@ -207,11 +213,11 @@ function Mappings() {
         ...sceneDraft,
         groups: (sceneDraft.groups || []).map((group) => ({
           ...group,
-          video_id: group.video_id || null,
-          media_list_id: group.media_list_id || null,
-          media_channel_id: group.media_channel_id || null,
-          media_directory_id: group.media_directory_id || null,
-          media_directory_ids: group.media_directory_ids || [],
+          video_id: group.video_id ? Number(group.video_id) : null,
+          media_list_id: group.media_list_id ? Number(group.media_list_id) : null,
+          media_channel_id: group.media_channel_id ? Number(group.media_channel_id) : null,
+          media_directory_id: group.media_directory_id ? Number(group.media_directory_id) : null,
+          media_directory_ids: normalizeNumericIdList(group.media_directory_ids || []),
         })),
       };
 
@@ -248,6 +254,57 @@ function Mappings() {
     } catch (err) {
       console.error(err);
       setError('Failed to upload masks');
+    }
+  };
+
+  const startPolygonMask = () => {
+    if (!selectedScene) {
+      setError('Save the scene before creating masks.');
+      return;
+    }
+    setPolygonDraft({
+      name: `Mask ${new Date().toLocaleTimeString()}`,
+      points: [],
+    });
+    setMessage('');
+    setError('');
+  };
+
+  const cancelPolygonMask = () => {
+    setPolygonDraft(null);
+  };
+
+  const undoPolygonPoint = () => {
+    setPolygonDraft((current) => {
+      if (!current) {
+        return current;
+      }
+      return {
+        ...current,
+        points: current.points.slice(0, -1),
+      };
+    });
+  };
+
+  const savePolygonMask = async () => {
+    if (!selectedScene || !polygonDraft) {
+      return;
+    }
+    if (polygonDraft.points.length < 3) {
+      setError('Polygon masks require at least 3 points.');
+      return;
+    }
+
+    try {
+      const response = await mappingsApi.createPolygonMask(selectedScene.id, polygonDraft);
+      const updatedScene = response.data;
+      setScenes((current) => current.map((scene) => (scene.id === updatedScene.id ? updatedScene : scene)));
+      loadScene(updatedScene);
+      setPolygonDraft(null);
+      setMessage(`Created mask "${polygonDraft.name}"`);
+    } catch (err) {
+      console.error(err);
+      setError('Failed to create polygon mask');
     }
   };
 
@@ -322,6 +379,25 @@ function Mappings() {
     setCollapsedSections((current) => ({
       ...current,
       [section]: !current[section],
+    }));
+  };
+
+  const handleStageClick = (event) => {
+    if (!polygonDraft || !sceneDraft || !previewCanvasRef.current) {
+      return;
+    }
+
+    const rect = previewCanvasRef.current.getBoundingClientRect();
+    const width = sceneDraft.canvas_width || 1280;
+    const height = sceneDraft.canvas_height || 720;
+    const scaleX = width / rect.width;
+    const scaleY = height / rect.height;
+    const x = Math.max(0, Math.min(width, (event.clientX - rect.left) * scaleX));
+    const y = Math.max(0, Math.min(height, (event.clientY - rect.top) * scaleY));
+
+    setPolygonDraft((current) => ({
+      ...current,
+      points: [...current.points, { x: Math.round(x), y: Math.round(y) }],
     }));
   };
 
@@ -456,13 +532,49 @@ function Mappings() {
                       collapsed={collapsedSections.masks}
                       onToggle={() => toggleSection('masks')}
                       action={(
-                        <Button component="label" size="small" variant="outlined" startIcon={<UploadIcon />} disabled={!selectedScene}>
-                          Upload
-                          <input hidden accept="image/png" multiple type="file" onChange={uploadMasks} />
-                        </Button>
+                        <Stack direction="row" spacing={1}>
+                          <Button size="small" variant="outlined" onClick={startPolygonMask} disabled={!selectedScene || Boolean(polygonDraft)}>
+                            New Polygon
+                          </Button>
+                          <Button component="label" size="small" variant="outlined" startIcon={<UploadIcon />} disabled={!selectedScene}>
+                            Upload
+                            <input hidden accept="image/png" multiple type="file" onChange={uploadMasks} />
+                          </Button>
+                        </Stack>
                       )}
                     />
                     <Collapse in={!collapsedSections.masks}>
+                      {polygonDraft ? (
+                        <Paper sx={{ p: 1.5, mb: 1.5, bgcolor: '#fff7ea', border: `1px solid ${PANEL_BORDER}`, boxShadow: 'none' }}>
+                          <Stack spacing={1.5}>
+                            <Typography variant="subtitle2">Polygon Mask Authoring</Typography>
+                            <TextField
+                              label="Mask Name"
+                              value={polygonDraft.name}
+                              onChange={(event) => setPolygonDraft((current) => ({ ...current, name: event.target.value }))}
+                              fullWidth
+                              sx={darkFieldSx}
+                            />
+                            <Typography variant="body2" sx={{ color: PANEL_SUBTEXT }}>
+                              Click the stage to place points. The polygon closes automatically on save.
+                            </Typography>
+                            <Typography variant="body2" sx={{ color: PANEL_SUBTEXT }}>
+                              {polygonDraft.points.length} points
+                            </Typography>
+                            <Stack direction="row" spacing={1}>
+                              <Button size="small" variant="outlined" onClick={undoPolygonPoint} disabled={!polygonDraft.points.length}>
+                                Undo
+                              </Button>
+                              <Button size="small" variant="outlined" color="inherit" onClick={cancelPolygonMask}>
+                                Cancel
+                              </Button>
+                              <Button size="small" variant="contained" onClick={savePolygonMask} disabled={polygonDraft.points.length < 3}>
+                                Save Mask
+                              </Button>
+                            </Stack>
+                          </Stack>
+                        </Paper>
+                      ) : null}
                       <Box sx={{ maxHeight: 340, overflowY: 'auto' }}>
                         <List dense>
                           {(sceneDraft.masks || []).map((mask) => {
@@ -481,7 +593,6 @@ function Mappings() {
                     </Collapse>
                   </Paper>
                 </>
-              )}
               )}
             </Stack>
           </Drawer>
@@ -514,11 +625,13 @@ function Mappings() {
               <Box sx={{ width: '100%', maxWidth: uiHidden ? '100vw' : 1320 }}>
                 <canvas
                   ref={previewCanvasRef}
+                  onClick={handleStageClick}
                   style={{
                     width: '100%',
                     aspectRatio: `${sceneDraft.canvas_width || 1280} / ${sceneDraft.canvas_height || 720}`,
                     display: 'block',
                     background: '#000',
+                    cursor: polygonDraft ? 'crosshair' : 'default',
                   }}
                 />
               </Box>
@@ -665,8 +778,8 @@ function Mappings() {
                               label="Saved Media Folders"
                               onChange={(event) => {
                                 const nextIds = typeof event.target.value === 'string'
-                                  ? event.target.value.split(',').map((value) => Number(value)).filter(Boolean)
-                                  : event.target.value;
+                                  ? normalizeNumericIdList(event.target.value.split(','))
+                                  : normalizeNumericIdList(event.target.value);
                                 updateGroup(selectedGroup.id, {
                                   media_directory_ids: nextIds,
                                   media_directory_id: nextIds[0] || '',
@@ -869,7 +982,7 @@ function SectionHeader({ title, collapsed, onToggle, action = null }) {
   );
 }
 
-function renderStage(canvas, sceneDraft, maskImages, selectedGroupId) {
+function renderStage(canvas, sceneDraft, maskImages, selectedGroupId, polygonDraft = null) {
   const width = sceneDraft.canvas_width || 1280;
   const height = sceneDraft.canvas_height || 720;
   canvas.width = width;
@@ -907,6 +1020,10 @@ function renderStage(canvas, sceneDraft, maskImages, selectedGroupId) {
     ctx.font = selectedGroupId === group.id ? 'bold 15px sans-serif' : '14px sans-serif';
     ctx.fillText(group.name, bounds.x + 8, Math.max(18, bounds.y + 18));
   });
+
+  if (polygonDraft?.points?.length) {
+    drawPolygonDraft(ctx, polygonDraft.points);
+  }
 }
 
 function computeMaskBounds(maskImages, width, height) {
@@ -987,4 +1104,33 @@ function applyLuminanceMasks(ctx, maskImages, width, height) {
   ctx.globalCompositeOperation = 'destination-in';
   ctx.drawImage(maskCanvas, 0, 0);
   ctx.globalCompositeOperation = 'source-over';
+}
+
+function drawPolygonDraft(ctx, points) {
+  if (!points.length) {
+    return;
+  }
+
+  ctx.save();
+  ctx.strokeStyle = '#ffe082';
+  ctx.fillStyle = 'rgba(255, 224, 130, 0.18)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  points.slice(1).forEach((point) => {
+    ctx.lineTo(point.x, point.y);
+  });
+  if (points.length >= 3) {
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.stroke();
+
+  points.forEach((point, index) => {
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, index === 0 ? 6 : 4, 0, Math.PI * 2);
+    ctx.fillStyle = index === 0 ? '#ffca28' : '#ffffff';
+    ctx.fill();
+  });
+  ctx.restore();
 }

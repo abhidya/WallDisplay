@@ -39,10 +39,13 @@ def add_config_videos(config_path, db_path):
             config = json.load(f)
         
         # Extract video paths from the configuration
+        config_dir = os.path.dirname(os.path.abspath(config_path))
         video_paths = []
         for device in config:
             if "video_file" in device and device["video_file"]:
-                video_path = device["video_file"]
+                video_path = os.path.expanduser(os.path.expandvars(device["video_file"]))
+                if not os.path.isabs(video_path):
+                    video_path = os.path.abspath(os.path.join(config_dir, video_path))
                 if os.path.exists(video_path):
                     video_paths.append(video_path)
                     logger.info(f"Found video path in config: {video_path}")

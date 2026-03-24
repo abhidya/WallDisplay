@@ -221,6 +221,7 @@ backend_coverage_report.txt
 *.log
 dashboard_run.log
 nanodlna_output.log
+logs/
 
 # Database files
 *.db
@@ -238,6 +239,9 @@ nanodlna.db
 # Node.js files
 node_modules/
 npm-debug.log
+
+# Generated service files
+service/generated/
 yarn-debug.log
 yarn-error.log
 package-lock.json

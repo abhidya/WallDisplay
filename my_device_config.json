@@ -4,7 +4,7 @@
         "type": "dlna",
         "hostname": "10.0.0.45",
         "action_url": "http://10.0.0.45:3500/AVTransport/3bd809df-2a90-4498-b92b-ae8dc63e977a/control.xml",
-        "video_file": "/Users/abdulrehmanbhidya/PycharmProjects/nano-dlna/kitchendoorv2.mp4",
+        "video_file": "kitchendoorv2.mp4",
         "friendly_name": "Smart_Projector-45[DLNA]",
         "mime_type": "video/mp4"
     },
@@ -13,7 +13,7 @@
         "type": "dlna",
         "hostname": "10.0.0.122",
         "action_url": "http://10.0.0.122:49595/upnp/control/rendertransport1",
-        "video_file": "/Users/abdulrehmanbhidya/Movies/kitchendoorjune/junekitchendoor_tiny.mp4",
+        "video_file": "${NANODLNA_MEDIA_ROOT}/kitchendoorjune/junekitchendoor_tiny.mp4",
         "friendly_name": "SideProjector_dlna",
         "mime_type": "video/mp4",
         "loop": true,
@@ -26,7 +26,7 @@
         "type": "dlna",
         "hostname": "10.0.0.154",
         "action_url": "http://10.0.0.154:49595/upnp/control/rendertransport1",
-        "video_file": "/Users/abdulrehmanbhidya/PycharmProjects/nano-dlna/web/backend/static/black_video.mp4",
+        "video_file": "web/backend/static/black_video.mp4",
         "friendly_name": "Hccast-3ADE76_dlna",
         "mime_type": "video/mp4",
         "airplay_mode": true,
@@ -38,7 +38,7 @@
         "type": "dlna",
         "hostname": "10.0.0.210",
         "action_url": "http://10.0.0.210:44177/upnp/dev/a60615c5-028f-b8c7-b168-dcf161ba2609/svc/upnp-org/AVTransport/action",
-        "video_file": "/Users/abdulrehmanbhidya/PycharmProjects/nano-dlna/door6.mp4",
+        "video_file": "door6.mp4",
         "friendly_name": "AS-Projector[DMR]",
         "mime_type": "video/mp4"
     }

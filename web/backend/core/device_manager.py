@@ -704,7 +704,7 @@ class DeviceManager:
                             new_location = device_info.get("location")
                             
                             if old_hostname != new_hostname or old_location != new_location:
-                                logger.info(f"Device {device_name} parameters changed")
+                                logger.debug(f"Device {device_name} parameters changed")
                                 is_changed_device = True
                     finally:
                         self._release_device_lock()
@@ -724,11 +724,11 @@ class DeviceManager:
                         # Atomic device registration/update - no unregister needed
                         # register_device() handles updating existing devices safely
                         if is_changed_device:
-                            logger.info(f"Device {device_name} parameters changed, updating atomically")
+                            logger.debug(f"Device {device_name} parameters changed, updating atomically")
                         
                         device = self.register_device(device_info)
                         if device:
-                            logger.info(f"Successfully registered device: {device_name}")
+                            logger.debug(f"Successfully registered device: {device_name}")
                             self.update_device_status(device_name, "connected")
                             with self.device_state_lock:
                                 self.last_seen[device_name] = time.time()
@@ -779,7 +779,7 @@ class DeviceManager:
             try:
                 db_device = self.device_service.get_device_by_name(device_name)
                 if db_device and db_device.user_control_mode != 'auto':
-                    logger.info(f"Skipping {device_name} - under user control mode: {db_device.user_control_mode} (reason: {db_device.user_control_reason})")
+                    logger.debug(f"Skipping {device_name} - under user control mode: {db_device.user_control_mode} (reason: {db_device.user_control_reason})")
                     return
                 if db_device and self._process_device_overlay_cast(device_name, db_device):
                     return
@@ -796,14 +796,12 @@ class DeviceManager:
         # Check if there's a configuration for this device
         config = self.config_service.get_device_config(device_name)
         if not config:
-            logger.info(f"No configuration found for {device_name}, skipping video assignment")
+            logger.debug(f"No configuration found for {device_name}, skipping video assignment")
             return
-            
-        logger.info(f"Found configuration for {device_name}")
         
         # Check if this device is configured for airplay mode
         if config.get("airplay_mode"):
-            logger.info(f"Device {device_name} is configured for airplay mode")
+            logger.debug(f"Device {device_name} is configured for airplay mode")
             self._process_airplay_casting(device_name, config)
             return
             
@@ -937,14 +935,14 @@ class DeviceManager:
                 self.video_assignment_priority[device_name] = priority
         
         if not should_override:
-            logger.info(f"Not overriding current video assignment for {device_name} due to priority: {priority} < {current_priority}")
+            logger.debug(f"Not overriding current video assignment for {device_name} due to priority: {priority} < {current_priority}")
             return False
             
         # Proceed with assignment using device_state_lock for assigned videos
         with self.device_state_lock:
             current_video = self.assigned_videos.get(device_name)
             if current_video == video_path and device.is_playing:
-                logger.info(f"Device {device_name} is already playing {video_path}")
+                logger.debug(f"Device {device_name} is already playing {video_path}")
                 return True
                 
             if current_video and current_video != video_path and device.is_playing:
@@ -1340,7 +1338,7 @@ class DeviceManager:
                             limit = extended_grace if is_playing else grace_period
                             
                             if seconds_since_update < limit:
-                                logger.info(f"Skipping disconnect for {device_name}, updated {seconds_since_update:.1f}s ago")
+                                logger.debug(f"Skipping disconnect for {device_name}, updated {seconds_since_update:.1f}s ago")
                                 continue
                     
                     if time_since_last_seen > self.connectivity_timeout:
@@ -1353,7 +1351,7 @@ class DeviceManager:
                             streaming_registry = StreamingSessionRegistry.get_instance()
                             device_sessions = streaming_registry.get_sessions_for_device(device_name)
                             for session in device_sessions:
-                                logger.info(f"Cleaning up streaming session {session.session_id} for disconnected device {device_name}")
+                                logger.debug(f"Cleaning up streaming session {session.session_id} for disconnected device {device_name}")
                                 streaming_registry.unregister_session(session.session_id)
                         except Exception as e:
                             logger.error(f"Error cleaning up streaming sessions for device {device_name}: {e}")
@@ -1368,7 +1366,7 @@ class DeviceManager:
                                 streaming_registry = StreamingSessionRegistry.get_instance()
                                 device_sessions = streaming_registry.get_sessions_for_device(device_name)
                                 for session in device_sessions:
-                                    logger.info(f"Cleaning up streaming session {session.session_id} for removed device {device_name}")
+                                    logger.debug(f"Cleaning up streaming session {session.session_id} for removed device {device_name}")
                                     streaming_registry.unregister_session(session.session_id)
                             except Exception as e:
                                 logger.error(f"Error cleaning up streaming sessions for removed device {device_name}: {e}")

@@ -14,6 +14,16 @@ class MappingMask(BaseModel):
     sort_order: int = 0
 
 
+class MappingPoint(BaseModel):
+    x: float
+    y: float
+
+
+class PolygonMaskCreateRequest(BaseModel):
+    name: str
+    points: List[MappingPoint] = Field(default_factory=list)
+
+
 class MappingGroupTransform(BaseModel):
     scale: float = 1.0
     offset_x: float = 0

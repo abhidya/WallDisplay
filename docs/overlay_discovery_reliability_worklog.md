@@ -36,13 +36,40 @@ These are the cheapest fixes with immediate product value and low architectural 
 - added a frontend `Streaming Diagnostics` page to surface ownership, bandwidth, and stream-type health breakdowns
 - added backend-managed overlay cast sessions using headless Chromium capture, FFmpeg MPEG-TS relay, and the existing DLNA discovery cast path
 - added discovery-driven overlay auto-cast support keyed off persisted device config (`auto_overlay_cast_enabled` + `auto_overlay_config_id`)
+- added device-detail projection health by joining active overlay cast session state with device seen/lost and transition counters
+- split `Discovery Control` into an always-visible operator summary plus expandable diagnostics instead of mixing raw counters into the primary row
+- surfaced projection session state and transition counters on device cards so operators can triage projector health from the list view
+- reduced legacy `device_service` log noise by removing stray `print(...)` debugging and downgrading per-poll manager/discovery chatter to debug
+- reduced repetitive legacy `device_manager` discovery/playback info logs so only actionable state changes remain at info level
+- added actionable streaming diagnostics controls by allowing active registry sessions to be terminated from the diagnostics view
+- expanded `Streaming Diagnostics` so it now explicitly shows overlay capture sessions and their FFmpeg speed/client metrics instead of implying the generic streaming registry is the whole picture
+- added `Reset` controls in `Streaming Diagnostics` alongside `Terminate` for cheaper live-session cleanup
+- added the first structured-lighting module scaffold:
+  - backend session store
+  - session CRUD routes
+  - generated graycode capture-plan API
+  - frontend page and nav entry for DLNA step-by-step calibration planning
+- added structured-lighting status/summary surfacing:
+  - backend `/api/structured-lighting/status`
+  - worker-state placeholder
+  - session/frame/time summary cards in the frontend
+- added the first structured-lighting runtime/control path:
+  - backend session start/runtime endpoints
+  - worker heartbeat and next-step claim endpoints
+  - capture upload endpoint
+  - local worker script scaffold for host-side polling/heartbeat
+- added real structured-lighting pattern asset generation:
+  - backend step-image endpoint for reference and GrayCode frames
+  - frontend current-step pattern preview
+  - worker download path for current pattern image assets
+- added direct polygon mask authoring in `Mappings`, allowing operators to click points on the stage and save new blackout masks as white-on-black scene PNGs without leaving the site
 - worklog expanded into a more opinionated design brief
 
 ### Next low-risk wins
 
 1. Push derived availability into more backend endpoints so it becomes the default status language.
-2. Add expandable discovery diagnostics instead of mixing operator summary and low-level counters in one row.
-3. Connect the new streaming diagnostics view to actionable controls or drill-down session cleanup tools.
+2. Add device-scoped cleanup actions in streaming diagnostics rather than only per-session controls.
+3. Replace the structured-lighting placeholder worker behavior with real camera capture, projector pattern presentation, and image validation before upload.
 
 ## Current Problems
 
@@ -67,6 +94,13 @@ These are the cheapest fixes with immediate product value and low architectural 
 - This must tolerate projectors disappearing and reappearing from the discovery list.
 - Projection launch should not assume the target projector is continuously discoverable.
 - Projection automation should track availability and retry appropriately.
+
+### Structured lighting / calibration
+
+- The GrayCode capture and decode workflow has been validated in notebooks but is not yet productized.
+- Pattern presentation over DLNA should advance one pattern at a time after the previous capture is complete.
+- Camera capture remains host-side, but the website should own the session model, capture plan, and operator workflow.
+- The first scaffold now exists, but it still lacks the host worker, actual pattern generation assets, capture upload flow, and decode/export pipeline.
 
 ### Mapping UI
 

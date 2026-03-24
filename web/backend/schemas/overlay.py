@@ -85,12 +85,12 @@ class OverlayCastStartRequest(BaseModel):
     config_id: int
     overlay_base_url: Optional[str] = None
     controls_hidden: bool = True
-    viewport_width: int = 1920
-    viewport_height: int = 1080
+    viewport_width: int = 1280
+    viewport_height: int = 720
     capture_width: int = 1280
     capture_height: int = 720
-    quality: int = 30
-    frame_rate: int = 15
+    quality: int = 50
+    frame_rate: int = 20
     stream_port: Optional[int] = None
 
 
@@ -109,6 +109,7 @@ class OverlayCastSessionResponse(BaseModel):
     ffmpeg_speed: Optional[float] = None
     ffmpeg_fps: Optional[float] = None
     ffmpeg_bitrate_kbps: Optional[float] = None
+    encoder: Optional[str] = None
     last_client_connected_at: Optional[datetime] = None
     last_client_disconnected_at: Optional[datetime] = None
     last_client_activity_at: Optional[datetime] = None

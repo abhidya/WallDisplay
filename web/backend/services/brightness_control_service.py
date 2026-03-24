@@ -4,11 +4,13 @@ Brightness control service that manages DLNA devices based on brightness setting
 import logging
 import os
 import time
+from urllib.parse import urlparse
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 
 from routers.device_router import device_manager
 from services.device_service import DeviceService
+from services.overlay_cast_service import get_overlay_cast_service
 from database.database import get_db
 from utils.create_black_video import create_black_video
 
@@ -27,6 +29,34 @@ class BrightnessControlService:
         self.device_state_backup = {}  # Store device states before blackout
         self.is_blackout_active = False
         self._ensure_black_video()
+
+    def _is_overlay_cast_device(self, device) -> bool:
+        return self._get_overlay_cast_session(device) is not None
+
+    def _get_overlay_cast_session(self, device) -> Optional[Dict[str, Any]]:
+        if not getattr(device, "hostname", None):
+            return None
+
+        overlay_cast_service = get_overlay_cast_service()
+        device_action_url = getattr(device, "action_url", None)
+        action_port = None
+        if device_action_url:
+            parsed = urlparse(device_action_url)
+            action_port = parsed.port
+
+        for session in overlay_cast_service.list_sessions():
+            if session.get("archived"):
+                continue
+            if session.get("status") not in {"queued", "preparing", "running"}:
+                continue
+            device_id = session.get("device_id") or ""
+            expected_prefix = f"dlna_{device.hostname}_"
+            if device_id.startswith(expected_prefix):
+                if action_port is None:
+                    return session
+                if device_id == f"dlna_{device.hostname}_{action_port}":
+                    return session
+        return None
     
     def _ensure_black_video(self):
         """Ensure black video file exists"""
@@ -77,17 +107,10 @@ class BrightnessControlService:
     def _activate_blackout(self) -> Dict[str, Any]:
         """Activate blackout mode - display black video on all playing devices"""
         logger.info("Activating blackout mode")
-        
-        if not self.black_video_path or not os.path.exists(self.black_video_path):
-            logger.error("Black video not available")
-            return {
-                "brightness": 0,
-                "status": "error",
-                "error": "Black video file not available"
-            }
-        
+
         affected_devices = []
         errors = []
+        overlay_cast_devices = []
         
         # Clean up any stalled streaming sessions before starting blackout
         try:
@@ -104,11 +127,32 @@ class BrightnessControlService:
         
         # Get all devices
         devices = self.device_manager.get_devices()
+        eligible_non_overlay_devices = [
+            device for device in devices
+            if device.status == "connected" and not self._is_overlay_cast_device(device)
+        ]
+
+        if eligible_non_overlay_devices and (not self.black_video_path or not os.path.exists(self.black_video_path)):
+            logger.error("Black video not available")
+            return {
+                "brightness": 0,
+                "status": "error",
+                "error": "Black video file not available"
+            }
         
         for device in devices:
             try:
                 # Affect all connected DLNA devices (playing or idle)
                 if device.status == "connected":
+                    overlay_session = self._get_overlay_cast_session(device)
+                    if overlay_session:
+                        overlay_cast_devices.append(device.name)
+                        logger.info(
+                            "Skipping blackout video for overlay cast device %s; overlay window will dim in-page",
+                            device.name,
+                        )
+                        continue
+
                     # Backup current state (even for idle devices)
                     # Get the actual file path (not the streaming URL) if device was playing
                     actual_video_path = None
@@ -176,9 +220,14 @@ class BrightnessControlService:
             "status": "blackout_activated",
             "blackout_active": True,
             "affected_devices": affected_devices,
+            "overlay_cast_devices": overlay_cast_devices,
             "device_count": len(affected_devices),
             "errors": errors if errors else None,
-            "message": f"Blackout activated on {len(affected_devices)} devices"
+            "message": (
+                f"Blackout activated on {len(affected_devices)} devices"
+                if affected_devices
+                else "Brightness dimming delegated to active overlay projections"
+            )
         }
     
     def _deactivate_blackout(self) -> Dict[str, Any]:
@@ -288,6 +337,10 @@ class BrightnessControlService:
                     else:
                         errors.append(f"Original video not found for {device.name}: {video_path}")
                         logger.error(f"Original video not found: {video_path}")
+                elif self._is_overlay_cast_device(device):
+                    restored_devices.append(f"{device.name} (overlay cast dimming only)")
+                    logger.info(f"Overlay cast device {device.name} did not require blackout restore")
+                    continue
                         
             except Exception as e:
                 error_msg = f"Error restoring device {device.name}: {e}"
@@ -325,6 +378,9 @@ class BrightnessControlService:
             "black_video_path": self.black_video_path,
             "playing_devices": playing_devices,
             "backed_up_devices": list(self.device_state_backup.keys()),
+            "overlay_cast_devices": [
+                device.name for device in devices if self._is_overlay_cast_device(device)
+            ],
             "total_devices": len(devices),
             "playing_count": len(playing_devices)
         }

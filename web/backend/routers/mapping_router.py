@@ -7,7 +7,12 @@ from sqlalchemy.orm import Session
 
 from database.database import get_db
 from models.mapping_scene import MappingScene
-from schemas.mapping_scene import MappingSceneCreate, MappingSceneResponse, MappingSceneUpdate
+from schemas.mapping_scene import (
+    MappingSceneCreate,
+    MappingSceneResponse,
+    MappingSceneUpdate,
+    PolygonMaskCreateRequest,
+)
 from services.mapping_scene_service import MappingSceneService
 
 
@@ -54,6 +59,16 @@ async def upload_mapping_masks(scene_id: int, masks: List[UploadFile] = File(...
         return await MappingSceneService(db).upload_masks(scene_id, masks)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/scenes/{scene_id}/masks/polygon", response_model=MappingSceneResponse)
+def create_polygon_mask(scene_id: int, payload: PolygonMaskCreateRequest, db: Session = Depends(get_db)):
+    try:
+        return MappingSceneService(db).create_polygon_mask(scene_id, payload.name, payload.points)
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 404 if detail == "Scene not found" else 400
+        raise HTTPException(status_code=status_code, detail=detail) from exc
 
 
 @router.get("/scenes/{scene_id}/masks/{mask_id}/file")

@@ -132,6 +132,18 @@ const overlayApi = {
   stopCastSession: (sessionId) => api.delete(`/overlay/cast/sessions/${sessionId}`),
 };
 
+const structuredLightingApi = {
+  getCapabilities: () => api.get('/structured-lighting/capabilities'),
+  getStatus: () => api.get('/structured-lighting/status'),
+  listSessions: () => api.get('/structured-lighting/sessions'),
+  createSession: (payload) => api.post('/structured-lighting/sessions', payload),
+  deleteSession: (sessionId) => api.delete(`/structured-lighting/sessions/${sessionId}`),
+  getCapturePlan: (sessionId) => api.get(`/structured-lighting/sessions/${sessionId}/capture-plan`),
+  getRuntime: (sessionId) => api.get(`/structured-lighting/sessions/${sessionId}/runtime`),
+  startSession: (sessionId) => api.post(`/structured-lighting/sessions/${sessionId}/start`),
+  getStepImageUrl: (sessionId, stepIndex) => `/api/structured-lighting/sessions/${sessionId}/steps/${stepIndex}/image`,
+};
+
 // Video API
 const videoApi = {
   getVideos: (params = {}) => api.get('/videos/', { params }),
@@ -158,6 +170,7 @@ const mappingsApi = {
   createScene: (data) => api.post('/mappings/scenes', data),
   updateScene: (id, data) => api.put(`/mappings/scenes/${id}`, data),
   deleteScene: (id) => api.delete(`/mappings/scenes/${id}`),
+  createPolygonMask: (id, data) => api.post(`/mappings/scenes/${id}/masks/polygon`, data),
   uploadMasks: (id, formData) => api.post(`/mappings/scenes/${id}/masks/upload`, formData, {
     headers: {
       'Content-Type': 'multipart/form-data',
@@ -246,6 +259,7 @@ const streamingApi = {
     api.post('/streaming/start', { device_id: deviceId, video_path: videoPath }),
   getSessions: () => api.get('/streaming/sessions'),
   getSession: (sessionId) => api.get(`/streaming/sessions/${sessionId}`),
+  deleteSession: (sessionId) => api.delete(`/streaming/sessions/${sessionId}`),
   getSessionsForDevice: (deviceName) => api.get(`/streaming/device/${deviceName}`),
   completeSession: (sessionId) => api.post(`/streaming/sessions/${sessionId}/complete`),
   resetSession: (sessionId) => api.post(`/streaming/sessions/${sessionId}/reset`),
@@ -278,4 +292,5 @@ export {
   settingsApi,
   discoveryV2Api,
   overlayApi,
+  structuredLightingApi,
 };

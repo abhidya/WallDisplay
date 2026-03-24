@@ -64,6 +64,9 @@ The web dashboard provides a user-friendly interface for managing devices and vi
 #### Starting the Dashboard
 
 ```bash
+# Pick the env file for this machine once, then edit if needed
+cp .env.dev-laptop.example .env
+
 # Start the dashboard
 ./run_dashboard.sh
 
@@ -141,6 +144,98 @@ The primary configuration file is `my_device_config.json`, which maps devices to
     }
 ]
 ```
+
+`video_file` now supports:
+
+- Relative paths, resolved from the config file location
+- Environment variables such as `${HOME}` or `${NANODLNA_MEDIA_ROOT}`
+- Absolute paths when you really need them
+
+For each machine, keep machine-specific settings in `.env` instead of editing source:
+
+```bash
+cp .env.dev-laptop.example .env
+```
+
+Committed templates:
+
+```bash
+./.env.dev-laptop.example
+./.env.mac-mini.example
+```
+
+Use the laptop template on:
+
+```bash
+/Users/abdulrehmanbhidya/PycharmProjects/nano-dlna
+```
+
+Use the Mac mini template on:
+
+```bash
+/Users/mannybhidya/PycharmProjects/WallMapper
+```
+
+Both templates assume:
+
+- `my_device_config.json` is the active device config
+- `NANODLNA_MEDIA_ROOT` points at the machine's `Movies` folder
+- the Python venv lives in repo-local `.venv`
+
+If your media lives elsewhere, change `NANODLNA_MEDIA_ROOT` in the copied `.env`.
+
+## Dev Workflow
+
+Laptop dev:
+
+```bash
+cp .env.dev-laptop.example .env
+./run_dashboard.sh
+```
+
+Mac mini dev / manual run:
+
+```bash
+cp .env.mac-mini.example .env
+./run_dashboard.sh
+```
+
+## macOS Service
+
+For an always-on Mac mini, use `launchd`:
+
+```bash
+cp .env.mac-mini.example .env
+./service/install_launchd.sh
+```
+
+What this gives you:
+
+- Starts automatically at login / machine startup for that user
+- Restarts if backend or frontend exits
+- Writes logs under `logs/`
+- Optionally fast-forwards the repo and restarts the service every 5 minutes when `NANODLNA_GIT_AUTO_UPDATE=1`
+
+Useful commands:
+
+```bash
+launchctl print gui/$UID/com.nanodlna.dashboard
+launchctl kickstart -k gui/$UID/com.nanodlna.dashboard
+tail -f logs/service-supervisor.log
+tail -f logs/backend.stderr.log
+```
+
+Two-machine workflow:
+
+```bash
+# On the dev laptop
+cp .env.dev-laptop.example .env
+
+# On the Mac mini
+cp .env.mac-mini.example .env
+```
+
+The `.env` file itself stays local and is ignored by git. Commit the two example files instead.
 
 ### Auto-Play Configuration
 
