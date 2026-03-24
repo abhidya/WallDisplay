@@ -1,9 +1,12 @@
+import json
 import math
 import os
+import shutil
 import threading
 import uuid
-from io import BytesIO
+import zipfile
 from datetime import datetime
+from io import BytesIO
 from typing import Dict, List, Optional
 
 from PIL import Image
@@ -30,6 +33,7 @@ class StructuredLightingService:
             "uploads",
             "structured_lighting",
         )
+        os.makedirs(self._upload_root, exist_ok=True)
 
     def list_sessions(self) -> List[Dict]:
         with self._lock:
@@ -83,12 +87,17 @@ class StructuredLightingService:
             session = self._sessions.get(session_id)
             if not session:
                 return None
+            self._clear_derived_outputs(session_id)
             session["status"] = "waiting_for_worker" if not self._worker_is_connected() else "ready"
             session["current_step_index"] = 0
             session["captured_frames"] = 0
             session["last_capture_at"] = None
             session["captured_step_indices"] = []
+            session["decode"] = self._default_decode_state()
+            session["calibration"] = self._default_calibration_state()
+            session["review"] = self._default_review_state()
             session["updated_at"] = datetime.utcnow().isoformat()
+            self._persist_session(session)
             return dict(session)
 
     def get_runtime(self, session_id: str) -> Optional[Dict]:
@@ -124,9 +133,11 @@ class StructuredLightingService:
                 if current_step_index >= len(plan["steps"]):
                     session["status"] = "completed"
                     session["updated_at"] = datetime.utcnow().isoformat()
+                    self._persist_session(session)
                     continue
                 session["status"] = "capturing"
                 session["updated_at"] = datetime.utcnow().isoformat()
+                self._persist_session(session)
                 return {
                     "session_id": session["session_id"],
                     "session_name": session["name"],
@@ -152,12 +163,29 @@ class StructuredLightingService:
             session = self._sessions.get(session_id)
             if not session:
                 return None
+            self._clear_derived_outputs(session_id)
             capture_dir = self._ensure_capture_dir(session_id)
+            step = self._get_step(session, step_index)
             extension = os.path.splitext(original_filename or "")[1].lower() or ".png"
-            stored_name = f"step_{step_index:03d}{extension}"
+            if step and step["kind"] == "reference_white":
+                stored_name = f"img_white{extension}"
+            elif step and step["kind"] == "reference_black":
+                stored_name = f"img_black{extension}"
+            else:
+                stored_name = f"img_{step_index:04d}{extension}"
             stored_path = os.path.join(capture_dir, stored_name)
             with open(stored_path, "wb") as handle:
                 handle.write(file_bytes)
+
+            captures = dict(session.get("captures", {}))
+            captures[str(step_index)] = {
+                "step_index": step_index,
+                "step_kind": step["kind"] if step else "unknown",
+                "filename": stored_name,
+                "stored_path": stored_path,
+                "captured_at": datetime.utcnow().isoformat(),
+            }
+            session["captures"] = captures
 
             captured_steps = list(session.get("captured_step_indices", []))
             if step_index not in captured_steps:
@@ -168,31 +196,200 @@ class StructuredLightingService:
             session["last_capture_at"] = datetime.utcnow().isoformat()
             session["current_step_index"] = step_index + 1
             session["status"] = "ready" if session["captured_frames"] < session["pattern_frame_count"] else "completed"
+            session["decode"] = self._default_decode_state()
+            session["calibration"] = self._default_calibration_state()
+            session["review"] = self._default_review_state()
             session["updated_at"] = datetime.utcnow().isoformat()
+            self._persist_session(session)
             return dict(session)
 
-    def _worker_is_connected(self) -> bool:
-        last_seen = self._worker.get("last_seen_at")
-        if not last_seen:
-            return False
+    def list_captures(self, session_id: str) -> Optional[Dict]:
+        session = self.get_session(session_id)
+        if not session:
+            return None
+        captures = sorted(
+            session.get("captures", {}).values(),
+            key=lambda capture: capture["step_index"],
+        )
+        return {
+            "session_id": session_id,
+            "captures": captures,
+            "captured_frames": session.get("captured_frames", 0),
+            "expected_frames": session["pattern_frame_count"],
+        }
+
+    def decode_session(self, session_id: str, sample_step: int = 1) -> Optional[Dict]:
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return None
+            self._clear_derived_outputs(session_id)
+            session["decode"] = {
+                **self._default_decode_state(),
+                "status": "running",
+                "started_at": datetime.utcnow().isoformat(),
+            }
+            session["calibration"] = self._default_calibration_state()
+            session["review"] = self._default_review_state()
+            session["updated_at"] = datetime.utcnow().isoformat()
+            self._persist_session(session)
+
         try:
-            last_seen_dt = datetime.fromisoformat(last_seen)
-        except ValueError:
-            return False
-        return (datetime.utcnow() - last_seen_dt).total_seconds() <= WORKER_TIMEOUT_SECONDS
+            result = self._decode_graycode_session(session_id, sample_step=max(1, sample_step))
+        except Exception as exc:
+            with self._lock:
+                session = self._sessions.get(session_id)
+                if session:
+                    session["decode"] = {
+                        **self._default_decode_state(),
+                        "status": "failed",
+                        "started_at": session.get("decode", {}).get("started_at"),
+                        "finished_at": datetime.utcnow().isoformat(),
+                        "message": str(exc),
+                    }
+                    session["updated_at"] = datetime.utcnow().isoformat()
+                    self._persist_session(session)
+                    return dict(session)
+            raise
 
-    def _get_worker_status(self) -> Dict:
-        worker = dict(self._worker)
-        if not self._worker_is_connected():
-            worker["connected"] = False
-            worker["state"] = "unavailable"
-            worker["message"] = "Host capture worker not connected yet."
-        return worker
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return None
+            session["decode"] = result
+            session["calibration"] = self._build_calibration_record(session, result)
+            session["review"] = self._build_review_state(result)
+            session["updated_at"] = datetime.utcnow().isoformat()
+            self._persist_session(session)
+            return dict(session)
 
-    def _ensure_capture_dir(self, session_id: str) -> str:
-        capture_dir = os.path.join(self._upload_root, session_id, "captures")
-        os.makedirs(capture_dir, exist_ok=True)
-        return capture_dir
+    def get_calibration(self, session_id: str) -> Optional[Dict]:
+        session = self.get_session(session_id)
+        if not session:
+            return None
+        return {
+            "session_id": session_id,
+            "calibration": session.get("calibration", self._default_calibration_state()),
+        }
+
+    def update_review(
+        self,
+        session_id: str,
+        verdict: str,
+        notes: Optional[str] = None,
+        reviewed_by: Optional[str] = None,
+    ) -> Optional[Dict]:
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return None
+            review = dict(session.get("review", self._default_review_state()))
+            review["status"] = verdict
+            review["notes"] = notes or ""
+            review["reviewed_by"] = reviewed_by or ""
+            review["updated_at"] = datetime.utcnow().isoformat()
+            review["accepted_at"] = review["updated_at"] if verdict == "accepted" else None
+            review["message"] = (
+                "Session accepted for export." if verdict == "accepted"
+                else "Session marked for recapture."
+            )
+            session["review"] = review
+            session["updated_at"] = datetime.utcnow().isoformat()
+            self._persist_session(session)
+            return dict(session)
+
+    def export_session_bundle(self, session_id: str) -> Optional[Dict]:
+        session = self.get_session(session_id)
+        if not session:
+            return None
+        if session.get("review", {}).get("status") != "accepted":
+            raise RuntimeError("Session must be accepted in artifact review before export.")
+
+        bundle_dir = self._session_dir(session_id)
+        export_path = os.path.join(bundle_dir, "export_bundle.zip")
+
+        with zipfile.ZipFile(export_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            session_json = os.path.join(bundle_dir, "session.json")
+            if os.path.exists(session_json):
+                archive.write(session_json, arcname="session.json")
+
+            calibration_path = os.path.join(bundle_dir, "calibration.json")
+            if os.path.exists(calibration_path):
+                archive.write(calibration_path, arcname="calibration.json")
+
+            decode_dir = os.path.join(bundle_dir, "decode")
+            if os.path.isdir(decode_dir):
+                for entry in sorted(os.listdir(decode_dir)):
+                    full_path = os.path.join(decode_dir, entry)
+                    if os.path.isfile(full_path):
+                        archive.write(full_path, arcname=f"decode/{entry}")
+
+            capture_dir = os.path.join(bundle_dir, "captures")
+            if os.path.isdir(capture_dir):
+                for entry in sorted(os.listdir(capture_dir)):
+                    full_path = os.path.join(capture_dir, entry)
+                    if os.path.isfile(full_path):
+                        archive.write(full_path, arcname=f"captures/{entry}")
+
+        return {
+            "session_id": session_id,
+            "export_path": export_path,
+            "filename": f"structured_lighting_{session_id}.zip",
+        }
+
+    def get_artifact_review(self, session_id: str) -> Optional[Dict]:
+        session = self.get_session(session_id)
+        if not session:
+            return None
+
+        decode = session.get("decode", self._default_decode_state())
+        calibration = session.get("calibration", self._default_calibration_state())
+        previews = []
+        for preview_id, label, description in self._artifact_preview_specs():
+            if self._can_render_artifact_preview(session_id, preview_id):
+                previews.append(
+                    {
+                        "id": preview_id,
+                        "label": label,
+                        "description": description,
+                        "url": f"/api/structured-lighting/sessions/{session_id}/artifacts/previews/{preview_id}",
+                    }
+                )
+
+        coverage_ratio = decode.get("metrics", {}).get("coverage_ratio")
+        coverage_status = "unknown"
+        if isinstance(coverage_ratio, (int, float)):
+            if coverage_ratio >= 0.7:
+                coverage_status = "good"
+            elif coverage_ratio >= 0.45:
+                coverage_status = "review"
+            else:
+                coverage_status = "poor"
+
+        return {
+            "session_id": session_id,
+            "decode_status": decode.get("status"),
+            "calibration_status": calibration.get("status"),
+            "review": session.get("review", self._default_review_state()),
+            "coverage_status": coverage_status,
+            "metrics": decode.get("metrics", {}),
+            "previews": previews,
+        }
+
+    def get_session(self, session_id: str) -> Optional[Dict]:
+        with self._lock:
+            session = self._sessions.get(session_id)
+            return dict(session) if session else None
+
+    def delete_session(self, session_id: str) -> bool:
+        with self._lock:
+            session = self._sessions.pop(session_id, None)
+            if not session:
+                return False
+            session["status"] = "deleted"
+            session["updated_at"] = datetime.utcnow().isoformat()
+            self._persist_session(session)
+            return True
 
     def create_session(
         self,
@@ -222,21 +419,20 @@ class StructuredLightingService:
             "bit_planes_x": bit_planes_x,
             "bit_planes_y": bit_planes_y,
             "pattern_frame_count": 2 + (bit_planes_x + bit_planes_y) * 2,
+            "current_step_index": 0,
+            "captured_frames": 0,
+            "captured_step_indices": [],
+            "captures": {},
+            "decode": self._default_decode_state(),
+            "calibration": self._default_calibration_state(),
+            "review": self._default_review_state(),
             "created_at": now,
             "updated_at": now,
         }
         with self._lock:
             self._sessions[session["session_id"]] = session
+            self._persist_session(session)
         return dict(session)
-
-    def get_session(self, session_id: str) -> Optional[Dict]:
-        with self._lock:
-            session = self._sessions.get(session_id)
-            return dict(session) if session else None
-
-    def delete_session(self, session_id: str) -> bool:
-        with self._lock:
-            return self._sessions.pop(session_id, None) is not None
 
     def get_capture_plan(self, session_id: str) -> Optional[Dict]:
         session = self.get_session(session_id)
@@ -337,6 +533,320 @@ class StructuredLightingService:
         buffer = BytesIO()
         image.save(buffer, format="PNG")
         return buffer.getvalue()
+
+    def render_artifact_preview(self, session_id: str, preview_id: str) -> Optional[bytes]:
+        if not self._can_render_artifact_preview(session_id, preview_id):
+            return None
+
+        try:
+            import numpy as np
+        except ImportError as exc:
+            raise RuntimeError("Artifact preview generation requires numpy in the backend environment.") from exc
+
+        session = self.get_session(session_id)
+        if not session:
+            return None
+
+        decode_artifacts = session.get("decode", {}).get("artifacts", {})
+        image = None
+
+        if preview_id == "valid-mask":
+            valid_mask = np.load(decode_artifacts["valid_mask_cam"])
+            preview = (valid_mask > 0).astype(np.uint8) * 255
+            image = Image.fromarray(preview, mode="L")
+        elif preview_id == "projector-coverage":
+            proj2cam_x = np.load(decode_artifacts["proj2cam_x"])
+            coverage = np.isfinite(proj2cam_x).astype(np.uint8) * 255
+            image = Image.fromarray(coverage, mode="L")
+        elif preview_id == "cam2proj-xy":
+            cam2proj = np.load(decode_artifacts["cam2proj"])
+            valid = (cam2proj[:, :, 0] >= 0) & (cam2proj[:, :, 1] >= 0)
+            preview = np.zeros((cam2proj.shape[0], cam2proj.shape[1], 3), dtype=np.uint8)
+            if valid.any():
+                proj_w = max(1, session["projector_width"] - 1)
+                proj_h = max(1, session["projector_height"] - 1)
+                preview[:, :, 0] = np.where(valid, np.clip((cam2proj[:, :, 0] * 255) / proj_w, 0, 255), 0).astype(np.uint8)
+                preview[:, :, 1] = np.where(valid, np.clip((cam2proj[:, :, 1] * 255) / proj_h, 0, 255), 0).astype(np.uint8)
+                preview[:, :, 2] = np.where(valid, 255, 0).astype(np.uint8)
+            image = Image.fromarray(preview, mode="RGB")
+        else:
+            return None
+
+        buffer = BytesIO()
+        image.save(buffer, format="PNG")
+        return buffer.getvalue()
+
+    def _decode_graycode_session(self, session_id: str, sample_step: int) -> Dict:
+        session = self.get_session(session_id)
+        if not session:
+            raise RuntimeError("Structured lighting session not found")
+
+        capture_dir = self._ensure_capture_dir(session_id)
+        white_path = self._find_capture_file(capture_dir, ("img_white.png", "img_white.jpg", "img_white.jpeg"))
+        black_path = self._find_capture_file(capture_dir, ("img_black.png", "img_black.jpg", "img_black.jpeg"))
+        if not white_path or not black_path:
+            raise RuntimeError("Reference white/black captures are missing.")
+
+        try:
+            import cv2
+            import numpy as np
+        except ImportError as exc:
+            raise RuntimeError("Decoding requires opencv-contrib-python and numpy in the backend environment.") from exc
+
+        plan = self.get_capture_plan(session_id)
+        graycode_steps = [step for step in plan["steps"] if step["kind"] == "graycode"]
+        pattern_images = []
+        for step in graycode_steps:
+            capture_meta = session.get("captures", {}).get(str(step["index"]))
+            if not capture_meta:
+                raise RuntimeError(f"Missing capture for graycode step {step['index']}.")
+            image = cv2.imread(capture_meta["stored_path"], cv2.IMREAD_GRAYSCALE)
+            if image is None:
+                raise RuntimeError(f"Failed to load capture {capture_meta['stored_path']}.")
+            pattern_images.append(image)
+
+        white_img = cv2.imread(white_path, cv2.IMREAD_GRAYSCALE)
+        black_img = cv2.imread(black_path, cv2.IMREAD_GRAYSCALE)
+        if white_img is None or black_img is None:
+            raise RuntimeError("Failed to read reference captures.")
+
+        if hasattr(cv2, "structured_light_GrayCodePattern"):
+            graycode = cv2.structured_light_GrayCodePattern.create(session["projector_width"], session["projector_height"])
+        elif hasattr(cv2, "structured_light") and hasattr(cv2.structured_light, "GrayCodePattern_create"):
+            graycode = cv2.structured_light.GrayCodePattern_create(session["projector_width"], session["projector_height"])
+        else:
+            raise RuntimeError("OpenCV structured light module is unavailable.")
+
+        graycode.setWhiteThreshold(5)
+        graycode.setBlackThreshold(40)
+
+        imgs = pattern_images
+        h, w = imgs[0].shape
+        cam2proj = np.full((h, w, 2), -1, dtype=np.int32)
+        valid = 0
+
+        for y in range(0, h, sample_step):
+            for x in range(0, w, sample_step):
+                ok, p = graycode.getProjPixel(imgs, x, y)
+                if ok:
+                    cam2proj[y, x, 0] = int(p[0])
+                    cam2proj[y, x, 1] = int(p[1])
+                    valid += 1
+
+        if sample_step > 1:
+            cam2proj_u = cv2.resize(cam2proj.astype(np.float32), (w, h), interpolation=cv2.INTER_NEAREST).astype(np.int32)
+        else:
+            cam2proj_u = cam2proj
+
+        valid_mask_cam = (cam2proj_u[:, :, 0] >= 0) & (cam2proj_u[:, :, 1] >= 0)
+        proj_w = session["projector_width"]
+        proj_h = session["projector_height"]
+        proj2cam_x = np.full((proj_h, proj_w), np.nan, dtype=np.float32)
+        proj2cam_y = np.full((proj_h, proj_w), np.nan, dtype=np.float32)
+
+        ys, xs = np.where(valid_mask_cam)
+        px = cam2proj_u[ys, xs, 0]
+        py = cam2proj_u[ys, xs, 1]
+        in_bounds = (px >= 0) & (px < proj_w) & (py >= 0) & (py < proj_h)
+        ys, xs, px, py = ys[in_bounds], xs[in_bounds], px[in_bounds], py[in_bounds]
+        proj2cam_x[py, px] = xs.astype(np.float32)
+        proj2cam_y[py, px] = ys.astype(np.float32)
+
+        decode_dir = self._ensure_decode_dir(session_id)
+        np.save(os.path.join(decode_dir, "cam2proj.npy"), cam2proj_u)
+        np.save(os.path.join(decode_dir, "valid_mask_cam.npy"), valid_mask_cam.astype(np.uint8))
+        np.save(os.path.join(decode_dir, "proj2cam_x.npy"), proj2cam_x)
+        np.save(os.path.join(decode_dir, "proj2cam_y.npy"), proj2cam_y)
+
+        white_delta = float(white_img.mean() - black_img.mean())
+        coverage = float(valid_mask_cam.sum()) / float(valid_mask_cam.size) if valid_mask_cam.size else 0.0
+        manifest = {
+            "status": "completed",
+            "started_at": datetime.utcnow().isoformat(),
+            "finished_at": datetime.utcnow().isoformat(),
+            "message": "Gray-code decode completed.",
+            "metrics": {
+                "camera_width": int(w),
+                "camera_height": int(h),
+                "valid_camera_pixels": int(valid_mask_cam.sum()),
+                "valid_projector_samples": int(np.isfinite(proj2cam_x).sum()),
+                "coverage_ratio": round(coverage, 4),
+                "white_black_mean_delta": round(white_delta, 2),
+                "sample_step": sample_step,
+            },
+            "artifacts": {
+                "decode_dir": decode_dir,
+                "cam2proj": os.path.join(decode_dir, "cam2proj.npy"),
+                "valid_mask_cam": os.path.join(decode_dir, "valid_mask_cam.npy"),
+                "proj2cam_x": os.path.join(decode_dir, "proj2cam_x.npy"),
+                "proj2cam_y": os.path.join(decode_dir, "proj2cam_y.npy"),
+            },
+        }
+        with open(os.path.join(decode_dir, "decode_manifest.json"), "w", encoding="utf-8") as handle:
+            json.dump(manifest, handle, indent=2, sort_keys=True)
+        return manifest
+
+    def _worker_is_connected(self) -> bool:
+        last_seen = self._worker.get("last_seen_at")
+        if not last_seen:
+            return False
+        try:
+            last_seen_dt = datetime.fromisoformat(last_seen)
+        except ValueError:
+            return False
+        return (datetime.utcnow() - last_seen_dt).total_seconds() <= WORKER_TIMEOUT_SECONDS
+
+    def _get_worker_status(self) -> Dict:
+        worker = dict(self._worker)
+        if not self._worker_is_connected():
+            worker["connected"] = False
+            worker["state"] = "unavailable"
+            worker["message"] = "Host capture worker not connected yet."
+        return worker
+
+    def _session_dir(self, session_id: str) -> str:
+        path = os.path.join(self._upload_root, session_id)
+        os.makedirs(path, exist_ok=True)
+        return path
+
+    def _ensure_capture_dir(self, session_id: str) -> str:
+        capture_dir = os.path.join(self._session_dir(session_id), "captures")
+        os.makedirs(capture_dir, exist_ok=True)
+        return capture_dir
+
+    def _ensure_decode_dir(self, session_id: str) -> str:
+        decode_dir = os.path.join(self._session_dir(session_id), "decode")
+        os.makedirs(decode_dir, exist_ok=True)
+        return decode_dir
+
+    def _clear_derived_outputs(self, session_id: str) -> None:
+        session_dir = self._session_dir(session_id)
+        decode_dir = os.path.join(session_dir, "decode")
+        if os.path.isdir(decode_dir):
+            shutil.rmtree(decode_dir)
+        for filename in ("calibration.json", "export_bundle.zip"):
+            path = os.path.join(session_dir, filename)
+            if os.path.exists(path):
+                os.remove(path)
+
+    def _persist_session(self, session: Dict) -> None:
+        session_dir = self._session_dir(session["session_id"])
+        with open(os.path.join(session_dir, "session.json"), "w", encoding="utf-8") as handle:
+            json.dump(session, handle, indent=2, sort_keys=True)
+        calibration_path = os.path.join(session_dir, "calibration.json")
+        calibration = session.get("calibration")
+        if calibration and calibration.get("status") == "completed":
+            with open(calibration_path, "w", encoding="utf-8") as handle:
+                json.dump(calibration, handle, indent=2, sort_keys=True)
+        elif os.path.exists(calibration_path):
+            os.remove(calibration_path)
+
+    def _get_step(self, session: Dict, step_index: int) -> Optional[Dict]:
+        plan = self.get_capture_plan(session["session_id"])
+        if not plan:
+            return None
+        for step in plan["steps"]:
+            if step["index"] == step_index:
+                return step
+        return None
+
+    def _find_capture_file(self, capture_dir: str, names: tuple[str, ...]) -> Optional[str]:
+        for name in names:
+            candidate = os.path.join(capture_dir, name)
+            if os.path.exists(candidate):
+                return candidate
+        return None
+
+    def _artifact_preview_specs(self) -> List[tuple[str, str, str]]:
+        return [
+            ("valid-mask", "Camera Valid Mask", "White pixels decoded to projector coordinates."),
+            ("projector-coverage", "Projector Coverage", "Projector pixels hit by at least one camera sample."),
+            ("cam2proj-xy", "Camera To Projector Map", "Red and green encode projector X/Y for valid camera pixels."),
+        ]
+
+    def _can_render_artifact_preview(self, session_id: str, preview_id: str) -> bool:
+        session = self.get_session(session_id)
+        if not session:
+            return False
+        artifacts = session.get("decode", {}).get("artifacts", {})
+        required = {
+            "valid-mask": ("valid_mask_cam",),
+            "projector-coverage": ("proj2cam_x",),
+            "cam2proj-xy": ("cam2proj",),
+        }.get(preview_id)
+        if not required:
+            return False
+        for artifact_key in required:
+            artifact_path = artifacts.get(artifact_key)
+            if not artifact_path or not os.path.exists(artifact_path):
+                return False
+        return True
+
+    def _default_decode_state(self) -> Dict:
+        return {
+            "status": "not_started",
+            "started_at": None,
+            "finished_at": None,
+            "message": "Decode has not run yet.",
+            "metrics": {},
+            "artifacts": {},
+        }
+
+    def _default_calibration_state(self) -> Dict:
+        return {
+            "status": "not_started",
+            "message": "Calibration record has not been generated yet.",
+            "generated_at": None,
+            "summary": {},
+            "artifacts": {},
+        }
+
+    def _default_review_state(self) -> Dict:
+        return {
+            "status": "pending",
+            "message": "Artifact review has not been completed yet.",
+            "notes": "",
+            "reviewed_by": "",
+            "accepted_at": None,
+            "updated_at": None,
+        }
+
+    def _build_calibration_record(self, session: Dict, decode_result: Dict) -> Dict:
+        artifacts = decode_result.get("artifacts", {})
+        summary = {
+            "projector_width": session["projector_width"],
+            "projector_height": session["projector_height"],
+            "camera_index": session["camera_index"],
+            "presentation_mode": session["presentation_mode"],
+            **decode_result.get("metrics", {}),
+        }
+        return {
+            "status": "completed",
+            "message": "Calibration record generated from Gray-code decode.",
+            "generated_at": datetime.utcnow().isoformat(),
+            "summary": summary,
+            "artifacts": {
+                "cam2proj": artifacts.get("cam2proj"),
+                "proj2cam_x": artifacts.get("proj2cam_x"),
+                "proj2cam_y": artifacts.get("proj2cam_y"),
+                "valid_mask_cam": artifacts.get("valid_mask_cam"),
+                "decode_manifest": os.path.join(artifacts.get("decode_dir", ""), "decode_manifest.json") if artifacts.get("decode_dir") else None,
+            },
+        }
+
+    def _build_review_state(self, decode_result: Dict) -> Dict:
+        coverage_ratio = decode_result.get("metrics", {}).get("coverage_ratio")
+        message = "Review coverage and projector correspondence previews before export."
+        if isinstance(coverage_ratio, (int, float)) and coverage_ratio < 0.45:
+            message = "Coverage is low. Recapture is recommended before export."
+        return {
+            "status": "pending",
+            "message": message,
+            "notes": "",
+            "reviewed_by": "",
+            "accepted_at": None,
+            "updated_at": datetime.utcnow().isoformat(),
+        }
 
 
 _service = StructuredLightingService()

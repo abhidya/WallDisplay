@@ -140,8 +140,15 @@ const structuredLightingApi = {
   deleteSession: (sessionId) => api.delete(`/structured-lighting/sessions/${sessionId}`),
   getCapturePlan: (sessionId) => api.get(`/structured-lighting/sessions/${sessionId}/capture-plan`),
   getRuntime: (sessionId) => api.get(`/structured-lighting/sessions/${sessionId}/runtime`),
+  listCaptures: (sessionId) => api.get(`/structured-lighting/sessions/${sessionId}/captures`),
+  decodeSession: (sessionId, payload = {}) => api.post(`/structured-lighting/sessions/${sessionId}/decode`, payload),
+  getCalibration: (sessionId) => api.get(`/structured-lighting/sessions/${sessionId}/calibration`),
+  getArtifactReview: (sessionId) => api.get(`/structured-lighting/sessions/${sessionId}/artifacts/review`),
+  updateReview: (sessionId, payload) => api.post(`/structured-lighting/sessions/${sessionId}/review`, payload),
   startSession: (sessionId) => api.post(`/structured-lighting/sessions/${sessionId}/start`),
   getStepImageUrl: (sessionId, stepIndex) => `/api/structured-lighting/sessions/${sessionId}/steps/${stepIndex}/image`,
+  getArtifactPreviewUrl: (sessionId, previewId) => `/api/structured-lighting/sessions/${sessionId}/artifacts/previews/${previewId}`,
+  getExportUrl: (sessionId) => `/api/structured-lighting/sessions/${sessionId}/export`,
 };
 
 // Video API

@@ -62,6 +62,21 @@ These are the cheapest fixes with immediate product value and low architectural 
   - backend step-image endpoint for reference and GrayCode frames
   - frontend current-step pattern preview
   - worker download path for current pattern image assets
+- replaced the structured-lighting placeholder worker with a real host-side capture loop:
+  - OpenCV camera preview and operator arming
+  - fullscreen projector pattern presentation
+  - real frame capture and upload per pattern
+- added structured-lighting decode/calibration/export pipeline:
+  - capture persistence using notebook-compatible filenames
+  - GrayCode decode into `cam2proj`, `proj2cam_x`, `proj2cam_y`, and `valid_mask_cam`
+  - persisted calibration records and export bundles
+- added structured-lighting artifact review:
+  - backend artifact review endpoint and preview PNG rendering
+  - frontend coverage/status summary and inline artifact preview cards
+- added structured-lighting operator review controls:
+  - explicit `accepted` vs `needs_recapture` verdicts
+  - export gated on accepted review state
+  - reviewer metadata, acceptance timestamp, and active/archive queue split
 - added direct polygon mask authoring in `Mappings`, allowing operators to click points on the stage and save new blackout masks as white-on-black scene PNGs without leaving the site
 - worklog expanded into a more opinionated design brief
 
@@ -69,7 +84,7 @@ These are the cheapest fixes with immediate product value and low architectural 
 
 1. Push derived availability into more backend endpoints so it becomes the default status language.
 2. Add device-scoped cleanup actions in streaming diagnostics rather than only per-session controls.
-3. Replace the structured-lighting placeholder worker behavior with real camera capture, projector pattern presentation, and image validation before upload.
+3. Add structured-lighting artifact quality thresholds and batch actions so operators can process multiple recapture sessions faster.
 
 ## Current Problems
 
@@ -97,10 +112,13 @@ These are the cheapest fixes with immediate product value and low architectural 
 
 ### Structured lighting / calibration
 
-- The GrayCode capture and decode workflow has been validated in notebooks but is not yet productized.
+- The GrayCode capture and decode workflow is now productized end-to-end, but operator throughput still depends on review speed and batch triage.
 - Pattern presentation over DLNA should advance one pattern at a time after the previous capture is complete.
 - Camera capture remains host-side, but the website should own the session model, capture plan, and operator workflow.
-- The first scaffold now exists, but it still lacks the host worker, actual pattern generation assets, capture upload flow, and decode/export pipeline.
+- The current gaps are now mostly around operator ergonomics:
+  - batch triage
+  - quality thresholds / auto-warnings
+  - better archive/search for accepted calibrations
 
 ### Mapping UI
 
@@ -190,6 +208,41 @@ Current scope:
 - it restarts/replaces any existing overlay cast on the same target renderer
 - it does not yet implement delayed retry intent after discovery loss
 - it intentionally takes precedence over legacy auto-play for that device
+
+### Implemented structured-lighting workflow
+
+The original notebook POC has now been translated into the product flow:
+
+1. create a structured-lighting session in the web app
+2. generate and expose the reference + GrayCode capture plan
+3. run the host worker on the camera/projector machine
+4. preview the camera feed, arm the run, and present each pattern fullscreen
+5. capture and upload real camera frames back to the backend
+6. decode the capture set into projector/camera correspondence artifacts
+7. review generated coverage and mapping previews in the UI
+8. explicitly accept the session or mark it for recapture
+9. export the session bundle only after operator acceptance
+
+Implemented pieces include:
+
+- backend session model, runtime API, capture persistence, decode, calibration record, and export bundle
+- backend artifact review summaries and preview rendering for:
+  - valid camera mask
+  - projector coverage
+  - camera-to-projector XY map
+- frontend session/runtime/review page with:
+  - capture counts
+  - decode metrics
+  - calibration summary
+  - artifact previews
+  - operator review notes / reviewer / acceptance state
+  - active queue vs archive separation
+
+Current remaining gaps:
+
+- batch actions for multiple recapture sessions
+- explicit quality thresholds and warnings beyond simple coverage heuristics
+- richer search/history for accepted calibration sessions
 
 ### Current overlay cast limitations
 

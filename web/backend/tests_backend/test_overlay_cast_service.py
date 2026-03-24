@@ -1,5 +1,4 @@
 import asyncio
-import queue
 import time
 
 import pytest
@@ -38,7 +37,7 @@ async def test_start_cast_returns_after_relay_ready(monkeypatch):
     await service.stop_cast(session["session_id"])
 
 
-def test_enqueue_frame_drops_oldest_when_queue_is_full():
+def test_latest_frame_overwrites_older_frame():
     service = OverlayCastService()
     session = OverlayCastSession(
         session_id="session-1",
@@ -48,10 +47,7 @@ def test_enqueue_frame_drops_oldest_when_queue_is_full():
         relay_url="http://localhost/live.ts",
         stream_port=5000,
     )
-    session.frame_queue = queue.Queue(maxsize=1)
+    session.latest_frame = b"frame-1"
+    session.latest_frame = b"frame-2"
 
-    service._enqueue_frame(session, b"frame-1")
-    service._enqueue_frame(session, b"frame-2")
-
-    assert session.frame_queue.qsize() == 1
-    assert session.frame_queue.get_nowait() == b"frame-2"
+    assert session.latest_frame == b"frame-2"

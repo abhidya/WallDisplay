@@ -1,7 +1,7 @@
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
 from services.structured_lighting_service import get_structured_lighting_service
@@ -27,6 +27,16 @@ class StructuredLightingWorkerHeartbeat(BaseModel):
     camera_indices: List[int] = Field(default_factory=list)
     state: str = "idle"
     message: Optional[str] = None
+
+
+class StructuredLightingDecodeRequest(BaseModel):
+    sample_step: int = Field(1, ge=1, le=16, description="Decode every Nth camera pixel")
+
+
+class StructuredLightingReviewUpdate(BaseModel):
+    verdict: str = Field(..., pattern="^(accepted|needs_recapture)$")
+    notes: Optional[str] = Field(None, description="Optional operator notes about the review verdict")
+    reviewed_by: Optional[str] = Field(None, description="Operator name or identifier")
 
 
 @router.get("/capabilities")
@@ -110,6 +120,81 @@ def get_runtime(session_id: str) -> Dict:
     if not runtime:
         raise HTTPException(status_code=404, detail="Structured lighting session not found")
     return runtime
+
+
+@router.get("/sessions/{session_id}/captures")
+def list_captures(session_id: str) -> Dict:
+    service = get_structured_lighting_service()
+    captures = service.list_captures(session_id)
+    if not captures:
+        raise HTTPException(status_code=404, detail="Structured lighting session not found")
+    return captures
+
+
+@router.post("/sessions/{session_id}/decode")
+def decode_session(session_id: str, payload: StructuredLightingDecodeRequest) -> Dict:
+    service = get_structured_lighting_service()
+    session = service.decode_session(session_id, sample_step=payload.sample_step)
+    if not session:
+        raise HTTPException(status_code=404, detail="Structured lighting session not found")
+    return session
+
+
+@router.get("/sessions/{session_id}/calibration")
+def get_calibration(session_id: str) -> Dict:
+    service = get_structured_lighting_service()
+    calibration = service.get_calibration(session_id)
+    if not calibration:
+        raise HTTPException(status_code=404, detail="Structured lighting session not found")
+    return calibration
+
+
+@router.get("/sessions/{session_id}/artifacts/review")
+def get_artifact_review(session_id: str) -> Dict:
+    service = get_structured_lighting_service()
+    review = service.get_artifact_review(session_id)
+    if not review:
+        raise HTTPException(status_code=404, detail="Structured lighting session not found")
+    return review
+
+
+@router.get("/sessions/{session_id}/artifacts/previews/{preview_id}")
+def get_artifact_preview(session_id: str, preview_id: str) -> Response:
+    service = get_structured_lighting_service()
+    preview_bytes = service.render_artifact_preview(session_id, preview_id)
+    if preview_bytes is None:
+        raise HTTPException(status_code=404, detail="Structured lighting artifact preview not found")
+    return Response(content=preview_bytes, media_type="image/png")
+
+
+@router.post("/sessions/{session_id}/review")
+def update_review(session_id: str, payload: StructuredLightingReviewUpdate) -> Dict:
+    service = get_structured_lighting_service()
+    session = service.update_review(
+        session_id,
+        verdict=payload.verdict,
+        notes=payload.notes,
+        reviewed_by=payload.reviewed_by,
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="Structured lighting session not found")
+    return session
+
+
+@router.get("/sessions/{session_id}/export")
+def export_session(session_id: str):
+    service = get_structured_lighting_service()
+    try:
+        export_info = service.export_session_bundle(session_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not export_info:
+        raise HTTPException(status_code=404, detail="Structured lighting session not found")
+    return FileResponse(
+        export_info["export_path"],
+        media_type="application/zip",
+        filename=export_info["filename"],
+    )
 
 
 @router.get("/sessions/{session_id}/steps/{step_index}/image")
