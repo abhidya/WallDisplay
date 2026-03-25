@@ -8,10 +8,8 @@ from urllib.parse import urlparse
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 
-from routers.device_router import device_manager
-from services.device_service import DeviceService
+from services.app_runtime import get_app_runtime
 from services.overlay_cast_service import get_overlay_cast_service
-from database.database import get_db
 from utils.create_black_video import create_black_video
 
 logger = logging.getLogger(__name__)
@@ -24,7 +22,7 @@ class BrightnessControlService:
     """
     
     def __init__(self):
-        self.device_manager = device_manager
+        self.runtime = get_app_runtime()
         self.black_video_path = None
         self.device_state_backup = {}  # Store device states before blackout
         self.is_blackout_active = False
@@ -126,7 +124,7 @@ class BrightnessControlService:
             logger.warning(f"Could not clean up streaming sessions: {e}")
         
         # Get all devices
-        devices = self.device_manager.get_devices()
+        devices = self.runtime.get_devices()
         eligible_non_overlay_devices = [
             device for device in devices
             if device.status == "connected" and not self._is_overlay_cast_device(device)
@@ -166,15 +164,14 @@ class BrightnessControlService:
                             logger.info(f"Using current_video_path for backup: {actual_video_path}")
                         else:
                             # Fallback to assigned_videos
-                            with self.device_manager.device_state_lock:
-                                assigned_path = self.device_manager.assigned_videos.get(device.name)
-                                if assigned_path and os.path.exists(assigned_path):
-                                    actual_video_path = assigned_path
-                                    logger.info(f"Using assigned_videos for backup: {actual_video_path}")
-                                else:
-                                    # Last resort - use current_video (which is the URL)
-                                    actual_video_path = device.current_video
-                                    logger.warning(f"Using current_video URL for backup: {actual_video_path}")
+                            assigned_path = self.runtime.get_assigned_video(device.name)
+                            if assigned_path and os.path.exists(assigned_path):
+                                actual_video_path = assigned_path
+                                logger.info(f"Using assigned_videos for backup: {actual_video_path}")
+                            else:
+                                # Last resort - use current_video (which is the URL)
+                                actual_video_path = device.current_video
+                                logger.warning(f"Using current_video URL for backup: {actual_video_path}")
                     
                     self.device_state_backup[device.name] = {
                         "was_playing": was_playing,
@@ -194,7 +191,7 @@ class BrightnessControlService:
                     # Display black video
                     # We'll use the auto_play_video method to play the black video
                     # The black video will loop continuously
-                    success = self.device_manager.auto_play_video(
+                    success = self.runtime.auto_play_video(
                         device, 
                         self.black_video_path, 
                         loop=True  # Loop the black video
@@ -238,7 +235,7 @@ class BrightnessControlService:
         errors = []
         
         # Get all devices
-        devices = self.device_manager.get_devices()
+        devices = self.runtime.get_devices()
         
         for device in devices:
             try:
@@ -304,7 +301,7 @@ class BrightnessControlService:
                                 errors.append(f"Could not locate original file for {device.name}")
                                 continue
                         
-                        success = self.device_manager.auto_play_video(
+                        success = self.runtime.auto_play_video(
                             device,
                             video_path,
                             loop=backup.get("is_looping", True)
@@ -363,7 +360,7 @@ class BrightnessControlService:
         """Get current brightness control status"""
         playing_devices = []
         
-        devices = self.device_manager.get_devices()
+        devices = self.runtime.get_devices()
         for device in devices:
             if device.is_playing:
                 playing_devices.append({

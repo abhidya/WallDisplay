@@ -83,6 +83,34 @@ These are the cheapest fixes with immediate product value and low architectural 
   - quick queue counters for pending, recapture, and accepted sessions
 - added direct polygon mask authoring in `Mappings`, allowing operators to click points on the stage and save new blackout masks as white-on-black scene PNGs without leaving the site
 - worklog expanded into a more opinionated design brief
+- narrowed `PlaybackOrchestrator` and `PlaybackMonitoringService` so they retain explicit runtime dependencies instead of reaching arbitrarily through `DeviceManager`
+- updated the shared streaming service to resolve recovery targets through `AppRuntime` first, keeping `DeviceManager` only as a compatibility fallback
+- moved startup-time inventory inspection behind `AppRuntime` helpers and made `DiscoveryCoordinator` inventory-aware instead of assuming a raw `device_manager.devices` dict
+- changed the discovery migration bridge so it consumes the runtime facade instead of hard-coding old-system access to `DeviceManager`, with dedicated tests for runtime-based migration status and bootstrap
+- shifted more `AppRuntime` helpers onto extracted inventory/registry/intent services and moved startup `DeviceService` wiring fully behind the runtime facade, while preserving manager fallback behavior for compatibility tests and older call shapes
+- moved `DeviceManager`’s DB-backed missing-device recovery and autoplay stream-reuse path behind `AppRuntime` helpers, shrinking another direct `self.device_service` dependency out of the manager hot path
+- moved playback-progress DB persistence behind `AppRuntime` and switched runtime discovery lifecycle methods to target the extracted discovery coordinator directly, further reducing `DeviceManager` to a compatibility shell around extracted services
+- extracted runtime device registration/lookup/cleanup/unregister logic into `DeviceLifecycleService` and switched `DeviceManager` to delegate to it, with focused lifecycle/inventory/runtime tests passing after the move
+- made unified-discovery authority answer the existing discovery-control contract too: pause/resume/status now route through the runtime-owned unified lifecycle service in unified mode while preserving the same `/api/devices/discovery/status` payload shape the frontend already polls
+- removed one more startup-time legacy coupling by letting the shared streaming service recover runtime devices through `AppRuntime` fallback lookup instead of requiring a direct `DeviceManager` injection
+- moved more of the runtime facade off raw manager passthroughs: `AppRuntime` now performs get/register/unregister/cleanup/status/progress operations through extracted lifecycle and registry services directly, and `DeviceService` no longer keeps a direct `DeviceManager` handle as its internal primary dependency
+- removed the leftover startup-time `DeviceManager.set_device_service(...)` injection because DB-backed recovery/playback handoff now lives behind runtime helpers instead of a manager-held service reference
+- moved more shared runtime metadata onto `AppRuntime` itself, so callers now get the device-state lock, connectivity timeout, and discovery coordinator from the runtime bundle rather than reaching back through `DeviceManager`
+- extracted `RuntimePlaybackService` so autoplay/direct stream-and-play execution no longer lives inside `DeviceManager.auto_play_video(...)`; the manager now delegates that work through the runtime bundle
+- fixed the orchestration/monitoring DB lookup path so user-control-mode checks and manual-stop suppression now read persisted device records through `AppRuntime` instead of depending on a manager-held `device_service`
+- removed another runtime fallback by making `AppRuntime.auto_play_video(...)` self-bootstrap `RuntimePlaybackService` instead of bouncing normal autoplay back through `DeviceManager`
+- moved AirPlay casting onto `AppRuntime.process_airplay_casting(...)`, so the manager now only exposes a compatibility wrapper and no longer owns the broken status-update call shape on that path
+- fixed `RuntimePlaybackService` so remote `http(s)` URLs are played directly instead of failing the local-file existence check, which makes the runtime-owned AirPlay / overlay URL path actually usable
+- fixed disconnect evaluation in `DiscoveryCoordinator` so DB freshness checks come from runtime DB helpers instead of a nonexistent `manager.device_service` reference
+- moved streaming-issue recovery onto `AppRuntime.handle_streaming_issue(...)`, reducing `DeviceManager._handle_streaming_issue(...)` to a compatibility delegate instead of the owner of that recovery path
+- added runtime-owned playback-monitoring helper methods for start/stop health checks, playback result tracking, and playback stats lookup, shrinking another cluster of manager-only wrappers
+- added explicit streaming health-handler unregister support and rebound the stalled-session callback from `DeviceManager` to `AppRuntime` during runtime construction, so the runtime now owns that callback at registration time too
+- removed the dead `device_manager` fallback from the shared streaming singleton so stalled-session recovery now depends on runtime lookup only
+- removed `DLNADevice`’s direct manager snapshot for assigned-video fallback and switched that lookup to `AppRuntime.get_assigned_video(...)`
+- removed dead manager-shaped fields from `BrightnessControlService` and `OverlayCastService`, tightening those services to the runtime/discovery surfaces they actually use
+- changed `main.py` to export the runtime bundle itself as the startup-time `device_manager` compatibility surface, with `AppRuntime` now carrying the small discovery-control wrapper methods needed for that contract
+- tightened `DeviceService` constructor normalization so legacy manager-shaped inputs are normalized back to `AppRuntime` instead of being treated as ad hoc runtime objects
+- reduced implicit manager dependence inside `AppRuntime`’s property layer by letting lock/timeout/controller access fall back to explicit runtime fields or safe defaults instead of assuming the legacy manager is always present
 
 ### Next low-risk wins
 
@@ -888,9 +916,9 @@ Use this prompt for the next engineering pass:
 
 ## Working Checklist
 
-- [ ] Audit discovery backends and polling cadence
-- [ ] Document current device-state transition bugs
-- [ ] Split stream ownership semantics
+- [x] Audit discovery backends and polling cadence
+- [x] Document current device-state transition bugs
+- [x] Split initial read/intent/orchestration seams out of `DeviceManager`
 - [ ] Stop overlay-mapping sessions from hitting device recovery
 - [ ] Add projector cast session model/service
 - [ ] Prototype automated DLNA overlay cast path
@@ -906,3 +934,64 @@ Use this prompt for the next engineering pass:
 - The projector cast pipeline should be treated as session orchestration, not as a one-off utility script.
 - A projector not appearing in a discovery pass is not sufficient proof that it is unavailable.
 - Synthetic internal consumers like `overlay-mapping` should not be modeled as physical render devices.
+
+## Refactor Progress
+
+The runtime refactor work now in code includes:
+
+- extracted `DeviceViewService` from `DeviceService` for device list/detail DTO assembly
+- extracted `PlaybackIntentService` from `DeviceManager` for assignment, priority, retry, and scheduled-intent state
+- extracted `PlaybackOrchestrator` and moved discovery-time assignment decisions and overlay auto-cast decisions behind it
+- routed stalled-session and playback-restart recovery through orchestrator helpers instead of duplicating that policy inside the manager
+- extracted `DeviceInventoryService` for the live in-memory device inventory while keeping `device_manager.devices` as a compatibility property
+- extracted `RuntimeRegistryService` for live device status, last-seen, and connection timestamp state
+- extracted `DiscoveryCoordinator` for DLNA scan, reconciliation, and discovery loop lifecycle delegation
+- extracted `PlaybackMonitoringService` for playback health threads, playback history, and stalled-session monitoring/restart loops
+- added `AppRuntime` so backend startup now wires the extracted services through one runtime bundle instead of assembling them ad hoc in `main.py`
+- switched several production call sites to `AppRuntime`, including device/streaming routers, overlay-cast legacy fallback, DLNA device manager resolution, and the depth projection cast path
+- moved background-service startup/shutdown and DB-device hydration into `AppRuntime` so `main.py` is less of a runtime orchestrator
+- extracted `DeviceRuntimeSyncService` so `DeviceService` no longer hand-builds as many DB-to-runtime registration/update flows inline
+- extracted `DevicePlaybackService` so manual play/stop/pause/seek and playback-progress persistence no longer live inline in `DeviceService`
+- extracted `DeviceDiscoveryService` so discovery-triggered DB sync, config-file load/save, and discovery-status reconciliation no longer live inline in `DeviceService`
+- moved discovery pause/resume/status routing behind `AppRuntime` so routers no longer need to reach directly into `DeviceManager` for discovery control
+- moved the device playback-progress API path off a direct manager call and into `DeviceService` / `DevicePlaybackService`
+- moved `DeviceService` construction behind `AppRuntime.build_device_service(...)` so routers and projection flows no longer instantiate it with a raw manager dependency
+- moved brightness-control bootstrap off a router-level manager import and onto `AppRuntime`
+- moved overlay sync inventory reads onto an `AppRuntime` accessor instead of pulling devices directly off the manager in the router
+- added small runtime-compatibility helpers on `AppRuntime` for inventory, autoplay, assigned-video lookup, and cleanup so legacy consumers can stop treating `DeviceManager` as their direct API
+- moved overlay-cast legacy device fallback to use runtime inventory access instead of iterating manager devices directly
+- narrowed `DeviceViewService` so it keeps only the read-side runtime dependencies it actually needs instead of holding the whole `DeviceManager`
+- moved `DeviceRuntimeSyncService` onto the runtime facade in production so register/update/get/discover flows no longer need a raw manager dependency
+- moved `DevicePlaybackService` and `DeviceDiscoveryService` onto the runtime facade for serve-IP lookup, cleanup, autoplay, save-config, and runtime-progress updates
+- changed production `DeviceService` construction so the runtime builds it with `AppRuntime` directly instead of passing `DeviceManager` as the primary constructor dependency
+- moved `AppRuntime`’s raw discovery invocation, config export, and serve-IP lookup off direct `DeviceManager` passthroughs so those low-level helpers now live on the runtime boundary itself
+- moved discovery-v2 singleton ownership onto `AppRuntime` and updated the discovery router, overlay cast service, and legacy discovery-device resolution path to obtain unified discovery state from the runtime bundle instead of reaching for `DiscoveryManager.get_instance()` directly
+- reconciled the checked discovery-v2 manager/router surface by adding manager compatibility methods for `get_device`, one-shot `discover_devices`, backend re-registration, and `is_running`
+- tightened discovery-v2 casting control compatibility so stop/pause/resume/seek/status can resolve by either session ID or device ID, matching the existing router path shape more safely
+- removed duplicated backend-bootstrap logic by making the migration adapter use `DiscoveryManager.register_enabled_backends()` and the runtime-owned discovery manager instead of hard-coding a second backend registration path
+- moved unified-discovery backend registration into `AppRuntime.start_background_services()` and made the migration adapter only start/stop unified discovery if it actually owns that lifecycle, reducing another hidden startup/control overlap
+- added `UnifiedDiscoveryLifecycleService` so discovery-v2 backend start/stop now runs under an explicit runtime-owned background loop instead of relying on the migration thread to host that lifecycle
+- made the migration adapter sync-only for unified discovery lifecycle, so it no longer starts or stops discovery-v2 backends itself
+- added an explicit runtime discovery-authority mode so the service can run with unified discovery as the authority: in that mode the legacy discovery loop is not started and manual DLNA discovery requests are routed through the unified backend path
+- tightened unified-authority behavior in the migration bridge so it no longer seeds discovery-v2 from legacy devices or mirrors legacy status back into v2; in that mode the bridge only feeds unified discoveries back into the old runtime for compatibility
+- added event-driven bridge updates from unified discovery into the legacy runtime surface, reducing reliance on the periodic sync loop and making compatibility-state updates more immediate
+- in unified-authority mode the bridge now does an initial backfill from current unified devices into the legacy runtime and then relies on callbacks instead of continuing the periodic sync loop
+- the migration thread is now effectively one-shot in unified mode: it performs startup migration/backfill work and exits instead of running as an ongoing polling worker
+- fixed renderer-service DLNA code paths that were constructing `DeviceService()` with no dependencies and looking up devices incorrectly by name through an ID-based helper; they now resolve devices through the runtime/device-name path
+- moved more core adapter calls onto runtime helpers, including assigned-video lookup and playback-progress updates in `dlna_device` and device lookup in `twisted_streaming`
+- moved stalled-session recovery ownership onto `AppRuntime`, including the registered streaming health callback, so `StreamingSessionRegistry` now notifies the runtime surface directly instead of the legacy manager callback path
+- removed dead manager-shaped fallbacks from shared services such as `StreamingService`, `BrightnessControlService`, and `OverlayCastService`, so those subsystems now rely on the runtime bundle instead of cached `DeviceManager` references
+- made startup export `AppRuntime` itself as the process-wide `device_manager` compatibility surface in `main.py`, which means the live singleton exposed to routers/startup code is now the runtime bundle rather than the raw legacy manager object
+- moved runtime autoplay execution fully into `RuntimePlaybackService`, including direct remote `http(s)` URL playback for AirPlay/overlay cases; that also fixed the real bug where remote URLs were incorrectly treated as missing local files
+- re-bound runtime device registration so devices created through the runtime compatibility surface are now owned by `AppRuntime` rather than being rebound back to the legacy manager object during registration
+- collapsed the discovery migration bridge onto the runtime contract itself, so migration no longer carries explicit fallback logic for a raw `DeviceManager` shape when reading inventory, status, registration, or counts
+- simplified `DeviceService` constructor normalization so legacy callers now either pass the runtime surface directly or fall back to `get_app_runtime()`, instead of trying to preserve arbitrary raw-manager identity
+- stopped `AppRuntime` from consulting `DeviceManager` for steady-state lock/timeout access and legacy health-handler rebinding; those runtime references are now captured explicitly during runtime composition
+- updated shutdown flow in `main.py` so runtime background-service teardown now keys off the runtime bundle itself rather than the old `device_manager` global guard
+
+The current state is still transitional:
+
+- `AppRuntime` now fronts the live startup/global compatibility surface
+- `DeviceManager` still exists behind that runtime bundle as a bootstrap and compatibility shell
+- routers and frontend payloads are intentionally unchanged
+- unified discovery can now be authoritative, but the legacy compatibility layer is still present underneath for older code paths

@@ -14,11 +14,10 @@ from typing import List, Dict, Any, Optional
 from database.database import init_db, get_db
 from routers import device_router, video_router, streaming_router, renderer_router, overlay_router, projection_router, log_router, mapping_router, media_library_router, structured_lighting_router
 from api.discovery_router import router as discovery_router
-from core.device_manager import get_device_manager
-from core.streaming_registry import StreamingSessionRegistry
 from core.twisted_streaming import get_instance as get_twisted_streaming
 from core.streaming_service import get_streaming_service
 from services.overlay_cast_service import get_overlay_cast_service
+from services.app_runtime import get_app_runtime
 
 # Configure logging - check if already configured by run.py
 import logging.handlers
@@ -194,15 +193,16 @@ async def startup_event():
         logger.error(f"Failed to start log aggregation service: {e}")
     
     # Initialize services here to prevent multiple executions during imports  
-    device_manager = get_device_manager()  # Use singleton
     # Stop any existing streaming servers to prevent port conflicts
     streaming_service = get_twisted_streaming()
     streaming_service.stop_server()  # Explicitly stop any existing servers
-    streaming_registry = StreamingSessionRegistry.get_instance()
-    
-    # Inject device_manager into the StreamingService singleton
+    app_runtime = get_app_runtime()
+    config_service = app_runtime.config_service
+    streaming_registry = app_runtime.streaming_registry
+    device_manager = app_runtime
+
     overlay_streaming_service = get_streaming_service()
-    overlay_streaming_service.set_device_manager(device_manager)
+    overlay_streaming_service.set_runtime(app_runtime)
 
     # Get or create the renderer service
     try:
@@ -227,12 +227,7 @@ async def startup_event():
         db = next(db_generator)
         try:
             # Create a device service instance
-            from services.device_service import DeviceService
-            device_service = DeviceService(db, device_manager)
-            
-            # Set the device service in device manager for recovery operations
-            device_manager.set_device_service(device_service)
-            logger.info("Device service set in device manager")
+            device_service = app_runtime.build_device_service(db)
         finally:
             db_generator.close()
     except Exception as e:
@@ -264,72 +259,28 @@ async def startup_event():
         if not loaded:
             logger.warning("No configuration files found or loaded. Using sample data.")
         
-        # Initialize all devices from database into device_manager memory
+        # Initialize all devices from database into runtime memory
         # This ensures devices are immediately available even before discovery
-        logger.info("Initializing devices from database into device_manager")
+        logger.info("Initializing devices from database into runtime inventory")
         try:
             db_devices = device_service.get_devices()
             logger.info(f"Found {len(db_devices)} devices in database")
-            
-            for device_dict in db_devices:
-                device_name = device_dict.get("name")
-                if not device_name:
-                    continue
-                    
-                # Create device_info for registration
-                device_info = {
-                    "device_name": device_name,
-                    "type": device_dict.get("type", "dlna"),
-                    "hostname": device_dict.get("hostname", ""),
-                    "action_url": device_dict.get("action_url", ""),
-                    "friendly_name": device_dict.get("friendly_name", device_name),
-                    "manufacturer": device_dict.get("manufacturer", ""),
-                    "location": device_dict.get("location", ""),
-                }
-                
-                # Add any additional config from the database
-                if device_dict.get("config"):
-                    device_info.update(device_dict["config"])
-                
-                # Register the device with device_manager
-                registered_device = device_manager.register_device(device_info)
-                if registered_device:
-                    logger.info(f"Initialized device {device_name} from database")
-                    
-                    # Initialize device status as disconnected until discovery confirms
-                    device_manager.update_device_status(
-                        device_name=device_name,
-                        status="disconnected",  # Will be updated by discovery if online
-                        is_playing=device_dict.get("is_playing", False),
-                        current_video=device_dict.get("current_video")
-                    )
-                else:
-                    logger.warning(f"Failed to initialize device {device_name} from database")
+            app_runtime.hydrate_database_devices(db_devices)
                     
         except Exception as e:
             logger.error(f"Error initializing devices from database: {e}")
             logger.error(f"Exception details: {traceback.format_exc()}")
         
-        # Start device discovery to find devices on the network
-        # This will automatically play videos on devices when they are discovered
-        # based on the configuration files loaded above
-        logger.info("Starting device discovery")
-        device_manager.start_discovery()
+        # Start runtime background services after initial device hydration.
+        app_runtime.start_background_services()
+        migration_adapter = app_runtime.migration_adapter
         
-        # Start the migration adapter to bridge old and new discovery systems
-        try:
-            from discovery.migration import start_discovery_migration
-            migration_adapter = start_discovery_migration(device_manager)
-            logger.info("Started discovery system migration adapter")
-        except Exception as e:
-            logger.error(f"Failed to start discovery migration: {e}")
-        
-        # Log the number of devices in the device manager
-        logger.info(f"Device manager has {len(device_manager.devices)} devices")
-        
-        # Log all devices in the device manager
-        for device_name, device in device_manager.devices.items():
-            logger.info(f"Device in manager: {device_name}, type: {device.type}, hostname: {device.hostname}, action_url: {device.action_url}")
+        # Log the number of devices in the runtime inventory
+        logger.info(f"Runtime has {app_runtime.get_device_count()} devices")
+
+        # Log all devices in the runtime inventory
+        for device_name, device in app_runtime.get_device_items():
+            logger.info(f"Device in runtime: {device_name}, type: {device.type}, hostname: {device.hostname}, action_url: {device.action_url}")
 
         # Start the renderer service's streaming server
         if renderer_service:
@@ -345,6 +296,7 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event():
+    global migration_adapter
     logger.info("Shutting down nano-dlna Dashboard API")
     
     # Stop log aggregation service
@@ -370,17 +322,11 @@ async def shutdown_event():
     if streaming_service:
         streaming_service.stop_server()
     
-    # Stop device discovery
-    if device_manager:
-        device_manager.stop_discovery()
-    
-    # Stop migration adapter
-    if migration_adapter:
-        try:
-            migration_adapter.stop_migration()
-            logger.info("Discovery migration adapter stopped")
-        except Exception as e:
-            logger.error(f"Error stopping migration adapter: {e}")
+    # Stop runtime background services
+    app_runtime = get_app_runtime()
+    if app_runtime:
+        app_runtime.stop_background_services()
+        migration_adapter = app_runtime.migration_adapter
     
     # Stop renderer service if it's running
     if renderer_service:

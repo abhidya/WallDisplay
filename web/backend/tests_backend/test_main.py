@@ -82,13 +82,22 @@ class TestMainWithMocks:
     @patch("web.backend.main.device_manager")
     @patch("web.backend.main.init_db")
     @patch("web.backend.main.get_db")
+    @patch("web.backend.main.get_app_runtime")
     @patch("web.backend.services.device_service.DeviceService")
-    def test_startup_event(self, mock_device_service, mock_get_db, mock_init_db, mock_device_manager):
+    def test_startup_event(self, mock_device_service, mock_get_app_runtime, mock_get_db, mock_init_db, mock_device_manager):
         """Test the startup event."""
         # Mock the database session
         mock_db = MagicMock()
         mock_get_db.return_value = iter([mock_db])
-        
+
+        mock_streaming_registry = MagicMock()
+        mock_runtime = MagicMock(
+            config_service=MagicMock(),
+            streaming_registry=mock_streaming_registry,
+            device_manager=mock_device_manager,
+        )
+        mock_get_app_runtime.return_value = mock_runtime
+
         # Mock the device service
         mock_device_service_instance = MagicMock()
         mock_device_service.return_value = mock_device_service_instance
@@ -103,16 +112,20 @@ class TestMainWithMocks:
         # Check that the database was initialized
         mock_init_db.assert_called_once()
         
-        # Check that device discovery was started
-        mock_device_manager.start_discovery.assert_called_once()
+        # Check that runtime background services were started
+        mock_runtime.start_background_services.assert_called_once()
     
     @patch("web.backend.main.device_manager")
     @patch("web.backend.main.streaming_registry")
     @patch("web.backend.main.streaming_service")
     @patch("web.backend.main.renderer_service")
-    def test_shutdown_event(self, mock_renderer_service, mock_streaming_service, 
+    @patch("web.backend.main.get_app_runtime")
+    def test_shutdown_event(self, mock_get_app_runtime, mock_renderer_service, mock_streaming_service, 
                            mock_streaming_registry, mock_device_manager):
         """Test the shutdown event."""
+        mock_runtime = MagicMock(device_manager=mock_device_manager)
+        mock_get_app_runtime.return_value = mock_runtime
+
         # Manually trigger the shutdown event
         from web.backend.main import shutdown_event
         
@@ -123,7 +136,7 @@ class TestMainWithMocks:
         # Check that resources were properly cleaned up
         mock_streaming_registry.stop_monitoring.assert_called_once()
         mock_streaming_service.stop_server.assert_called_once()
-        mock_device_manager.stop_discovery.assert_called_once()
+        mock_runtime.stop_background_services.assert_called_once()
         
         # Check that the renderer service was shut down if it exists
         if mock_renderer_service:

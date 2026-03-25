@@ -2,14 +2,21 @@ import json
 import math
 import os
 import shutil
+import subprocess
+import sys
 import threading
 import uuid
 import zipfile
+import asyncio
 from datetime import datetime
 from io import BytesIO
 from typing import Dict, List, Optional
+from urllib.parse import urlparse
 
 from PIL import Image
+from core.streaming_service import get_streaming_service
+from discovery.base import CastingMethod, Device, DeviceCapability
+from services.app_runtime import get_app_runtime
 
 
 WORKER_TIMEOUT_SECONDS = 15
@@ -27,7 +34,19 @@ class StructuredLightingService:
             "camera_indices": [],
             "hostname": None,
             "message": "Host capture worker not connected yet.",
+            "process_state": "stopped",
+            "process_pid": None,
+            "process_started_at": None,
+            "process_exited_at": None,
+            "last_exit_code": None,
+            "log_path": None,
+            "operator_ready": False,
+            "launch_config": {},
         }
+        self._worker_process: Optional[subprocess.Popen] = None
+        self._worker_log_handle = None
+        self._active_step_stream_server = None
+        self._active_step_cast_session_id: Optional[str] = None
         self._upload_root = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             "uploads",
@@ -71,7 +90,8 @@ class StructuredLightingService:
     ) -> Dict:
         now = datetime.utcnow()
         with self._lock:
-            self._worker = {
+            self._refresh_worker_process_state_locked()
+            self._worker.update({
                 "worker_id": worker_id,
                 "state": state,
                 "connected": True,
@@ -79,8 +99,127 @@ class StructuredLightingService:
                 "camera_indices": camera_indices,
                 "hostname": hostname,
                 "message": message or "Host capture worker connected.",
-            }
+            })
         return self._get_worker_status()
+
+    def start_worker(
+        self,
+        base_url: str,
+        camera_index: int,
+        projector_screen_x: int,
+        projector_screen_y: int,
+        projector_width: int,
+        projector_height: int,
+        settle_seconds: float = 0.8,
+        flush_count: int = 20,
+        pump_ms: int = 250,
+        poll_seconds: float = 1.0,
+    ) -> Dict:
+        with self._lock:
+            self._refresh_worker_process_state_locked()
+            if self._worker_process and self._worker_process.poll() is None:
+                return self._get_worker_status()
+
+            worker_id = str(uuid.uuid4())
+            log_path = os.path.join(self._upload_root, "worker.log")
+            self._close_worker_log_handle_locked()
+            self._worker_log_handle = open(log_path, "ab")
+            worker_script = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                "structured_lighting_worker.py",
+            )
+            cmd = [
+                sys.executable,
+                worker_script,
+                "--base-url", base_url,
+                "--camera-index", str(camera_index),
+                "--projector-screen-x", str(projector_screen_x),
+                "--projector-screen-y", str(projector_screen_y),
+                "--projector-width", str(projector_width),
+                "--projector-height", str(projector_height),
+                "--settle-seconds", str(settle_seconds),
+                "--flush-count", str(flush_count),
+                "--pump-ms", str(pump_ms),
+                "--poll-seconds", str(poll_seconds),
+                "--worker-id", worker_id,
+            ]
+            self._worker_process = subprocess.Popen(
+                cmd,
+                stdout=self._worker_log_handle,
+                stderr=subprocess.STDOUT,
+                cwd=os.path.dirname(worker_script),
+                start_new_session=True,
+            )
+            now = datetime.utcnow().isoformat()
+            self._worker.update({
+                "worker_id": worker_id,
+                "state": "starting",
+                "connected": False,
+                "last_seen_at": None,
+                "camera_indices": [camera_index],
+                "hostname": None,
+                "message": "Starting host capture worker.",
+                "process_state": "starting",
+                "process_pid": self._worker_process.pid,
+                "process_started_at": now,
+                "process_exited_at": None,
+                "last_exit_code": None,
+                "log_path": log_path,
+                "operator_ready": False,
+                "launch_config": {
+                    "base_url": base_url,
+                    "camera_index": camera_index,
+                    "projector_screen_x": projector_screen_x,
+                    "projector_screen_y": projector_screen_y,
+                    "projector_width": projector_width,
+                    "projector_height": projector_height,
+                    "settle_seconds": settle_seconds,
+                    "flush_count": flush_count,
+                    "pump_ms": pump_ms,
+                    "poll_seconds": poll_seconds,
+                },
+            })
+            return self._get_worker_status()
+
+    def stop_worker(self) -> Dict:
+        with self._lock:
+            proc = self._worker_process
+            if proc and proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=5)
+            self._worker_process = None
+            self._close_worker_log_handle_locked()
+            self._worker.update({
+                "state": "stopped",
+                "connected": False,
+                "message": "Host capture worker stopped.",
+                "process_state": "stopped",
+                "process_pid": None,
+                "process_exited_at": datetime.utcnow().isoformat(),
+                "operator_ready": False,
+            })
+            return self._get_worker_status()
+
+    def confirm_worker_ready(self, worker_id: str) -> Dict:
+        with self._lock:
+            if self._worker.get("worker_id") != worker_id:
+                raise RuntimeError("Structured-lighting worker is not available for confirmation.")
+            self._worker["operator_ready"] = True
+            self._worker["message"] = "Operator confirmed camera framing. Worker is arming capture."
+            return self._get_worker_status()
+
+    def get_worker_control(self, worker_id: str) -> Dict:
+        with self._lock:
+            if self._worker.get("worker_id") != worker_id:
+                return {"worker_id": worker_id, "operator_ready": False}
+            return {
+                "worker_id": worker_id,
+                "operator_ready": bool(self._worker.get("operator_ready")),
+            }
 
     def start_session(self, session_id: str) -> Optional[Dict]:
         with self._lock:
@@ -135,13 +274,16 @@ class StructuredLightingService:
                     session["updated_at"] = datetime.utcnow().isoformat()
                     self._persist_session(session)
                     continue
+                step = plan["steps"][current_step_index]
+                if session["presentation_mode"] == "dlna_step":
+                    self._present_step_via_dlna(session, step)
                 session["status"] = "capturing"
                 session["updated_at"] = datetime.utcnow().isoformat()
                 self._persist_session(session)
                 return {
                     "session_id": session["session_id"],
                     "session_name": session["name"],
-                    "step": plan["steps"][current_step_index],
+                    "step": step,
                     "projector_device_id": session.get("projector_device_id"),
                     "camera_index": session["camera_index"],
                     "presentation_mode": session["presentation_mode"],
@@ -534,6 +676,23 @@ class StructuredLightingService:
         image.save(buffer, format="PNG")
         return buffer.getvalue()
 
+    def render_step_image_for_dlna(self, session_id: str, step_index: int) -> Optional[bytes]:
+        plan = self.get_capture_plan(session_id)
+        if not plan:
+            return None
+        steps = plan["steps"]
+        if step_index < 0 or step_index >= len(steps):
+            return None
+
+        image_bytes = self.render_step_image(session_id, step_index)
+        if image_bytes is None:
+            return None
+
+        image = Image.open(BytesIO(image_bytes)).convert("RGB")
+        buffer = BytesIO()
+        image.save(buffer, format="JPEG", quality=95, subsampling=0)
+        return buffer.getvalue()
+
     def render_artifact_preview(self, session_id: str, preview_id: str) -> Optional[bytes]:
         if not self._can_render_artifact_preview(session_id, preview_id):
             return None
@@ -697,12 +856,232 @@ class StructuredLightingService:
         return (datetime.utcnow() - last_seen_dt).total_seconds() <= WORKER_TIMEOUT_SECONDS
 
     def _get_worker_status(self) -> Dict:
-        worker = dict(self._worker)
-        if not self._worker_is_connected():
-            worker["connected"] = False
-            worker["state"] = "unavailable"
-            worker["message"] = "Host capture worker not connected yet."
+        with self._lock:
+            self._refresh_worker_process_state_locked()
+            worker = dict(self._worker)
+            if not self._worker_is_connected():
+                worker["connected"] = False
+                if worker.get("process_state") in {"starting", "running"}:
+                    worker["state"] = worker.get("state") if worker.get("state") in {"starting", "awaiting_operator"} else "starting"
+                    worker["message"] = worker.get("message") or "Host capture worker is starting."
+                elif worker.get("state") in {"stopped", "error"}:
+                    pass
+                else:
+                    worker["state"] = "unavailable"
+                    worker["message"] = "Host capture worker not connected yet."
         return worker
+
+    def _refresh_worker_process_state_locked(self) -> None:
+        proc = self._worker_process
+        if not proc:
+            return
+        return_code = proc.poll()
+        if return_code is None:
+            if self._worker.get("process_state") not in {"running", "awaiting_operator"}:
+                self._worker["process_state"] = "running"
+            return
+
+        self._worker["process_state"] = "stopped"
+        self._worker["connected"] = False
+        self._worker["state"] = "stopped"
+        self._worker["process_exited_at"] = datetime.utcnow().isoformat()
+        self._worker["last_exit_code"] = return_code
+        self._worker["process_pid"] = None
+        self._worker["operator_ready"] = False
+        self._worker["message"] = f"Host capture worker exited with code {return_code}."
+        self._worker_process = None
+        self._close_worker_log_handle_locked()
+
+    def _close_worker_log_handle_locked(self) -> None:
+        if self._worker_log_handle:
+            self._worker_log_handle.close()
+            self._worker_log_handle = None
+
+    def _present_step_via_dlna(self, session: Dict, step: Dict) -> None:
+        projector_device_id = session.get("projector_device_id")
+        if not projector_device_id:
+            raise RuntimeError("DLNA presentation mode requires a selected projector device.")
+
+        step_dir = os.path.join(self._session_dir(session["session_id"]), "step_images")
+        os.makedirs(step_dir, exist_ok=True)
+        step_filename = f"step_{step['index']:04d}.jpg"
+        step_path = os.path.join(step_dir, step_filename)
+        step_bytes = self.render_step_image_for_dlna(session["session_id"], step["index"])
+        if step_bytes is None:
+            raise RuntimeError(f"Failed to render structured-lighting step {step['index']} for DLNA presentation.")
+        with open(step_path, "wb") as handle:
+            handle.write(step_bytes)
+
+        runtime = get_app_runtime()
+        discovery_manager = runtime.discovery_manager
+        resolved_device = self._resolve_dlna_projector(projector_device_id, discovery_manager, runtime)
+        if not resolved_device or not getattr(resolved_device, "action_url", None):
+            raise RuntimeError("Selected DLNA projector is unavailable or missing an action URL.")
+
+        serve_ip = runtime.get_serve_ip()
+        streaming_service = get_streaming_service()
+        if self._active_step_stream_server is not None:
+            try:
+                streaming_service.stop_server(self._active_step_stream_server)
+            except Exception:
+                pass
+            self._active_step_stream_server = None
+
+        files_urls, server = streaming_service.start_server(
+            files={step_filename: step_path},
+            serve_ip=serve_ip,
+            port_range=(9010, 9100),
+            device_name=projector_device_id,
+            stream_type="structured_lighting_step",
+            consumer_id=session["session_id"],
+        )
+        self._active_step_stream_server = server
+
+        if self._active_step_cast_session_id:
+            try:
+                self._run_async(discovery_manager.stop_casting(self._active_step_cast_session_id))
+            except Exception:
+                pass
+            self._active_step_cast_session_id = None
+
+        cast_session = self._run_async(
+            self._cast_to_resolved_device(
+                discovery_manager=discovery_manager,
+                target_device=resolved_device,
+                selected_device_id=projector_device_id,
+                content_url=files_urls[step_filename],
+                content_type="image/jpeg",
+                title=f"{session['name']} - {step['label']}",
+            )
+        )
+        if not cast_session:
+            raise RuntimeError("Failed to cast structured-lighting step to the selected DLNA projector.")
+        self._active_step_cast_session_id = cast_session.id
+
+    async def _cast_to_resolved_device(
+        self,
+        *,
+        discovery_manager,
+        target_device: Device,
+        selected_device_id: str,
+        content_url: str,
+        content_type: str,
+        title: str,
+    ):
+        registered_device = discovery_manager.get_device_by_id(target_device.id)
+        if registered_device is not None:
+            return await discovery_manager.cast_content(
+                device_id=registered_device.id,
+                content_url=content_url,
+                content_type=content_type,
+                metadata={"title": title},
+            )
+
+        backend = discovery_manager._get_backend_for_device(target_device)
+        if backend is None:
+            return None
+
+        cast_session = await backend.cast_content(
+            target_device,
+            content_url,
+            content_type,
+            {"title": title},
+        )
+        with discovery_manager._device_lock:
+            discovery_manager.device_sessions.setdefault(selected_device_id, []).append(cast_session)
+        return cast_session
+
+    def _resolve_dlna_projector(self, projector_device_id: str, discovery_manager, runtime) -> Optional[Device]:
+        device = discovery_manager.get_device_by_id(projector_device_id)
+        if device and getattr(device, "action_url", None):
+            return device
+
+        host, port = self._parse_dlna_device_identity(projector_device_id)
+        for candidate in discovery_manager.get_all_devices():
+            if candidate.casting_method != CastingMethod.DLNA:
+                continue
+            if host and candidate.hostname != host:
+                continue
+            if port is not None and candidate.port != port:
+                continue
+            if getattr(candidate, "action_url", None):
+                return candidate
+
+        for legacy_device in runtime.get_devices():
+            candidate = self._build_unified_dlna_device(projector_device_id, legacy_device, host, port)
+            if candidate is not None:
+                return candidate
+
+        return device
+
+    def _parse_dlna_device_identity(self, projector_device_id: str):
+        if not projector_device_id.startswith("dlna_"):
+            return None, None
+        parts = projector_device_id.split("_")
+        if len(parts) < 3:
+            return None, None
+        host = parts[1]
+        try:
+            port = int(parts[2])
+        except ValueError:
+            port = None
+        return host, port
+
+    def _build_unified_dlna_device(
+        self,
+        projector_device_id: str,
+        legacy_device,
+        host: Optional[str],
+        port: Optional[int],
+    ) -> Optional[Device]:
+        action_url = getattr(legacy_device, "action_url", None)
+        if not action_url:
+            return None
+
+        legacy_name = getattr(legacy_device, "name", None)
+        legacy_friendly_name = getattr(legacy_device, "friendly_name", None) or legacy_name or projector_device_id
+        legacy_hostname = getattr(legacy_device, "hostname", None)
+        parsed = urlparse(action_url)
+        action_host = parsed.hostname or legacy_hostname
+        action_port = parsed.port or (443 if parsed.scheme == "https" else 80)
+
+        if host and action_host != host:
+            return None
+        if port is not None and action_port != port:
+            return None
+        if host is None and projector_device_id not in {legacy_name, legacy_friendly_name}:
+            return None
+
+        return Device(
+            id=projector_device_id,
+            name=legacy_friendly_name,
+            friendly_name=legacy_friendly_name,
+            casting_method=CastingMethod.DLNA,
+            hostname=action_host or host or "unknown",
+            port=action_port,
+            capabilities=[
+                DeviceCapability.IMAGE_DISPLAY,
+                DeviceCapability.VIDEO_PLAYBACK,
+                DeviceCapability.AUDIO_PLAYBACK,
+                DeviceCapability.VOLUME_CONTROL,
+                DeviceCapability.SEEK_CONTROL,
+            ],
+            metadata={},
+            action_url=action_url,
+            location=getattr(legacy_device, "location", None),
+            manufacturer=getattr(legacy_device, "manufacturer", None),
+        )
+
+    def _run_async(self, coro):
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(coro)
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
 
     def _session_dir(self, session_id: str) -> str:
         path = os.path.join(self._upload_root, session_id)

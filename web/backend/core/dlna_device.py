@@ -55,8 +55,8 @@ class DLNADevice(Device):
         self.playback_progress = 0
         
         # Get device manager reference
-        from .device_manager import get_device_manager
-        self.device_manager = get_device_manager()
+        from services.app_runtime import get_app_runtime
+        self.runtime = get_app_runtime()
         
         # Try to infer missing fields
         if not self.action_url and self.hostname:
@@ -814,14 +814,13 @@ class DLNADevice(Device):
                     video_path = self.current_video_path
                     logger.debug(f"[{self.name}] Using stored video path: {video_path}")
                 
-                # Method 2: Check device_manager assigned videos
-                elif hasattr(self, 'device_manager') and self.device_manager:
-                    logger.debug(f"[{self.name}] Has device_manager, checking assigned_videos")
-                    if hasattr(self.device_manager, 'assigned_videos'):
-                        video_path = self.device_manager.assigned_videos.get(self.name)
-                        logger.debug(f"[{self.name}] Found in assigned_videos: {video_path}")
+                # Method 2: Check runtime-assigned videos
+                elif hasattr(self, 'runtime') and self.runtime:
+                    logger.debug(f"[{self.name}] Checking runtime assigned_videos")
+                    video_path = self.runtime.get_assigned_video(self.name)
+                    logger.debug(f"[{self.name}] Found in assigned_videos: {video_path}")
                 else:
-                    logger.debug(f"[{self.name}] No device_manager available")
+                    logger.debug(f"[{self.name}] No runtime available for assigned_videos lookup")
                 
                 # Method 3: Try common paths if not found
                 if not video_path or not os.path.exists(video_path):
@@ -873,8 +872,8 @@ class DLNADevice(Device):
         self.duration_formatted = self._format_time(self.current_video_duration)
         progress_logger.info(f"[PROGRESS_DEBUG] [{self.name}] Final duration: {self.duration_formatted} ({self.current_video_duration}s)")
         
-        if hasattr(self, 'device_manager') and self.device_manager:
-            self.device_manager.update_device_playback_progress(self.name, "00:00:00", self.duration_formatted, 0)
+        if hasattr(self, 'runtime') and self.runtime:
+            self.runtime.update_device_playback_progress(self.name, "00:00:00", self.duration_formatted, 0)
             progress_logger.debug(f"[PROGRESS_DEBUG] [{self.name}] Initial progress update sent to device manager")
 
         progress_logger.info(f"[PROGRESS_DEBUG] [{self.name}] Entering main monitoring loop")
@@ -970,8 +969,8 @@ class DLNADevice(Device):
                         self.playback_progress = progress
                         progress_logger.debug(f"[PROGRESS_DEBUG] [{self.name}] Final progress calculation: position={self.current_position}, progress={self.playback_progress}%")
                         
-                        if hasattr(self, 'device_manager') and self.device_manager:
-                            self.device_manager.update_device_playback_progress(self.name, self.current_position, self.duration_formatted, self.playback_progress)
+                        if hasattr(self, 'runtime') and self.runtime:
+                            self.runtime.update_device_playback_progress(self.name, self.current_position, self.duration_formatted, self.playback_progress)
                             progress_logger.debug(f"[PROGRESS_DEBUG] [{self.name}] Updated device manager with progress")
                     else:
                         progress_logger.warning(f"[PROGRESS_DEBUG] [{self.name}] Cannot calculate progress: duration={self.current_video_duration}")
@@ -1060,8 +1059,8 @@ class DLNADevice(Device):
                             if not self.current_video_duration: self.current_video_duration = 60
                             self.duration_formatted = self._format_time(self.current_video_duration)
 
-                            if hasattr(self, 'device_manager') and self.device_manager: # Reset progress display
-                                self.device_manager.update_device_playback_progress(self.name, "00:00:00", self.duration_formatted, 0)
+                            if hasattr(self, 'runtime') and self.runtime: # Reset progress display
+                                self.runtime.update_device_playback_progress(self.name, "00:00:00", self.duration_formatted, 0)
                             continue # Restart loop immediately
                         else:
                             logger.error(f"[{self.name}] Failed to restart video (v2). Will retry.")

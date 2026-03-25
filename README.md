@@ -1,343 +1,363 @@
 # nano-dlna
 
-[![Build Status](https://travis-ci.org/gabrielmagno/nano-dlna.svg?branch=master)](https://travis-ci.org/gabrielmagno/nano-dlna)
-[![PyPI](https://img.shields.io/pypi/v/nanodlna.svg)](https://pypi.python.org/pypi/nanodlna)
-[![License](https://img.shields.io/github/license/gabrielmagno/nano-dlna.svg)](https://github.com/gabrielmagno/nano-dlna/blob/master/LICENSE)
+`nano-dlna` is a local media control and projection workspace built around a FastAPI backend, a React dashboard, legacy DLNA playback/runtime code, and newer discovery/projection tooling.
 
-A minimal UPnP/DLNA media streamer with web dashboard for managing and streaming videos to DLNA devices.
+This README is based on the current code layout and entry points in this repo. It does not assume the older product shape is still fully accurate.
 
-## Overview
+## What Is In This Repo
 
-nano-dlna lets you play local media files on your DLNA-compatible devices (TVs, projectors, etc.) with both CLI and web-based interfaces. It's designed to be simple, reliable, and flexible.
+The repo currently contains several related systems:
 
-🦀 **Note**: Also check out [crab-dlna](https://github.com/gabrielmagno/crab-dlna), a Rust implementation of nano-dlna.
+- a legacy DLNA device runtime centered on `web/backend/core/device_manager.py`
+- a FastAPI backend in `web/backend/main.py`
+- a React dashboard in `web/frontend`
+- a newer discovery-v2 subsystem in `web/backend/discovery`
+- overlay/projection tooling and overlay-to-DLNA cast support
+- renderer and projection-mapping pages/services
+- structured-lighting capture/decode/calibration workflows
+- the original `nanodlna` CLI package in `nanodlna/`
 
-## Features
+The current runtime is transitional: the legacy `DeviceManager` loop is still active, while discovery-v2 and newer subsystems are also live.
 
-- **Device Management**:
-  - Auto-discover DLNA devices on your network
-  - Manual configuration of devices
-  - View device status and connection info
+## Main Operator Surfaces
 
-- **Video Management**:
-  - Stream videos to any DLNA device
-  - Upload and manage video files
-  - Scan directories for videos
+The dashboard routes in `web/frontend/src/App.js` currently expose:
 
-- **Playback Control**:
-  - Play, pause, stop video playback
-  - Seek to specific positions
-  - Loop videos automatically
+- `/` dashboard
+- `/devices` device list and discovery controls
+- `/devices/:id` device detail
+- `/videos` video library and uploads
+- `/settings` config/settings
+- `/renderer` renderer service pages
+- `/projection` projection mapping
+- `/mappings` mapping scenes
+- `/overlay` overlay projection and cast control
+- `/streaming` streaming diagnostics
+- `/structured-lighting` structured-lighting sessions, decode, review, export
+- `/depth` depth-processing tools
+- `/projection-animation` projection animation tools
 
-- **Auto-Play**:
-  - Automatically play videos on specific devices
-  - Device-video mapping via configuration files
-  - Continuous monitoring and reconnection
+## Runtime Shape
 
-- **Multiple Interfaces**:
-  - Web dashboard for visual management
-  - CLI for command-line operations
-  - REST API for integration with other tools
+The backend currently starts these major pieces from `web/backend/main.py`:
 
-## Installation
+- FastAPI routers under `/api`
+- the legacy singleton `DeviceManager`
+- database initialization
+- streaming services
+- overlay cast service integration
+- renderer service integration
+- structured-lighting routes
+- discovery-v2 routes under `/api/v2/discovery`
+- a migration bridge between legacy discovery and discovery-v2
 
-### Method 1: Using pip
+The important architectural reality is:
+
+- legacy device discovery/playback state still matters
+- discovery-v2 is present but not yet the only control plane
+- frontend pages consume both legacy `/api/devices` and newer `/api/v2/discovery/*` data
+
+## Quick Start
+
+### 1. Prepare environment
+
+Copy one of the checked-in env templates to `.env` and adjust paths if needed:
 
 ```bash
-pip install nanodlna
-```
-
-### Method 2: From source
-
-```bash
-git clone https://github.com/gabrielmagno/nano-dlna.git
-cd nano-dlna
-pip install -e .
-```
-
-## Usage
-
-### Web Dashboard
-
-The web dashboard provides a user-friendly interface for managing devices and videos.
-
-#### Starting the Dashboard
-
-```bash
-# Pick the env file for this machine once, then edit if needed
 cp .env.dev-laptop.example .env
+```
 
-# Start the dashboard
+or
+
+```bash
+cp .env.mac-mini.example .env
+```
+
+Important environment values are loaded by `scripts/common_env.sh`:
+
+- `NANODLNA_HOST`
+- `NANODLNA_BACKEND_PORT`
+- `NANODLNA_FRONTEND_PORT`
+- `NANODLNA_FRONTEND_ENABLED`
+- `NANODLNA_CONFIG_FILE`
+- `NANODLNA_DB_PATH`
+- `NANODLNA_INSTALL_PLAYWRIGHT`
+
+### 2. Start the dashboard
+
+```bash
 ./run_dashboard.sh
+```
 
-# Stop the dashboard
+What this script does today:
+
+- stops any existing dashboard processes
+- cleans the database video entries
+- imports videos from the selected config file
+- starts backend and frontend via `web/run_direct.sh`
+- waits for backend health
+- POSTs `/api/devices/load-config` with the selected config file
+
+Default URLs:
+
+- frontend: `http://localhost:3000`
+- backend: `http://localhost:8000`
+- OpenAPI docs: `http://localhost:8000/docs`
+
+### 3. Stop the dashboard
+
+```bash
 ./stop_dashboard.sh
 ```
 
-This will start both the backend API and the frontend web interface:
+## Direct Web Start
 
-- Frontend: http://localhost:3000
-- Backend API: http://localhost:8000
-- API Documentation: http://localhost:8000/docs
-
-#### Dashboard Features
-
-1. **Devices Page**: View and manage discovered DLNA devices
-2. **Videos Page**: Upload, scan, and manage your video library
-3. **Play Page**: Select a device and video to play
-4. **Device Configuration**: Set up automatic video assignments
-
-### Command Line Interface
-
-The CLI allows you to manage devices and videos directly from the terminal.
-
-#### Basic Commands
+If you want to run the web app without the higher-level wrapper:
 
 ```bash
-# List available DLNA devices
+cd web
+./run_direct.sh
+```
+
+This path:
+
+- creates a venv if needed
+- installs backend requirements
+- optionally installs Playwright Chromium if `NANODLNA_INSTALL_PLAYWRIGHT=1`
+- starts the FastAPI backend
+- installs frontend npm dependencies
+- starts the React dev server if `NANODLNA_FRONTEND_ENABLED=1`
+
+Stop it with:
+
+```bash
+cd web
+./stop_direct.sh
+```
+
+## CLI
+
+The original CLI still exists under `nanodlna/cli.py`.
+
+Typical usage:
+
+```bash
 nanodlna list
-
-# Play a video on a device
 nanodlna play video.mp4 -q "TV"
-
-# Play with device URL (faster, no scan)
 nanodlna play video.mp4 -d "http://192.168.1.13:1082/"
-
-# Seek to a specific position
 nanodlna seek -q "TV" "00:17:25"
 ```
 
-#### Using Scripts
+The CLI and the dashboard are related but not identical runtime paths. The web stack adds database-backed state, newer discovery services, projection tooling, and operator workflows that do not exist in the original CLI package.
 
-Several helper scripts are available:
+## Config Files
 
-```bash
-# Run the auto-play functionality
-./run_nanodlna.sh
+Device/video bootstrap config is typically provided through:
 
-# Cast to a specific transcreen projector
-./cast_to_transcreen.sh
+- `my_device_config.json`
+- `web/backend/my_device_config.json`
+- `NANODLNA_CONFIG_FILE`
+- `NANODLNA_CONFIG_FILES`
 
-# Run both the nanodlna app and web interface
-./run_all.sh
-```
+`run_dashboard.sh` defaults to `my_device_config.json` unless overridden.
 
-## Configuration
+These config files are used to seed:
 
-### Device-Video Mapping
+- persisted device rows
+- video mappings
+- auto-play and related runtime behavior
 
-The primary configuration file is `my_device_config.json`, which maps devices to videos:
+## Key Backend APIs
 
-```json
-[
-    {
-        "device_name": "LivingRoomTV",
-        "type": "dlna",
-        "hostname": "192.168.1.100",
-        "video_file": "/path/to/video.mp4"
-    },
-    {
-        "device_name": "BedroomTV",
-        "type": "dlna",
-        "hostname": "192.168.1.101",
-        "video_file": "/path/to/another_video.mp4"
-    }
-]
-```
+The backend currently exposes several API groups:
 
-`video_file` now supports:
+- `/api/devices`
+  - legacy device CRUD, discovery, playback control, discovery pause/resume/status
+- `/api/videos`
+  - video library management
+- `/api/streaming`
+  - streaming diagnostics/session views
+- `/api/renderer`
+  - renderer service routes
+- `/api/overlay`
+  - overlay config and overlay cast routes
+- `/api/projection`
+  - projection window/mapping routes
+- `/api/mappings`
+  - mapping scene routes
+- `/api/media-library`
+  - media library routes
+- `/api/structured-lighting`
+  - session, capture, decode, review, calibration, export routes
+- `/api/logs`
+  - log streaming routes
+- `/api/v2/discovery`
+  - newer unified discovery/cast routes
 
-- Relative paths, resolved from the config file location
-- Environment variables such as `${HOME}` or `${NANODLNA_MEDIA_ROOT}`
-- Absolute paths when you really need them
-
-For each machine, keep machine-specific settings in `.env` instead of editing source:
-
-```bash
-cp .env.dev-laptop.example .env
-```
-
-Committed templates:
+For the exact current route set, use:
 
 ```bash
-./.env.dev-laptop.example
-./.env.mac-mini.example
+open http://localhost:8000/docs
 ```
 
-Use the laptop template on:
+or inspect:
+
+- `web/backend/main.py`
+- `web/backend/routers/`
+- `web/backend/api/discovery_router.py`
+
+## Overlay, Projection, And Renderer Features
+
+This repo is no longer just “play a file to a TV”.
+
+Current code supports:
+
+- overlay configuration persistence
+- overlay projection pages
+- backend-managed overlay cast sessions
+- discovery-backed cast target selection
+- projection mapping pages and mapping scenes
+- renderer service pages
+- streaming diagnostics for both media and overlay sessions
+
+The overlay cast path depends on:
+
+- Playwright/Chromium
+- FFmpeg
+- discovery/cast integration
+
+If you use overlay casting, ensure those local dependencies exist on the host machine.
+
+## Structured Lighting
+
+Structured lighting is now a first-class subsystem in this repo.
+
+The backend and frontend support:
+
+- session creation and status
+- Gray-code pattern planning
+- capture upload workflow
+- a host-side worker at `web/backend/structured_lighting_worker.py`
+- decode artifacts
+- artifact review
+- operator accept/recapture workflow
+- calibration/export outputs
+
+The operator page is:
+
+- `/structured-lighting`
+
+The worker is intended to run on the host connected to the projector/camera.
+
+## Current Architecture Caveat
+
+The codebase is in the middle of a migration.
+
+Today:
+
+- legacy discovery/playback still runs through `DeviceManager`
+- discovery-v2 exists in parallel
+- frontend pages already consume both systems
+- some APIs are newer and service-oriented, others still depend on blended legacy state
+
+If you are changing runtime behavior, inspect the code before assuming one single source of truth.
+
+Good starting files:
+
+- `web/backend/main.py`
+- `web/backend/core/device_manager.py`
+- `web/backend/services/device_service.py`
+- `web/backend/discovery/discovery_manager.py`
+- `web/backend/discovery/migration.py`
+- `web/backend/services/overlay_cast_service.py`
+- `web/backend/services/structured_lighting_service.py`
+
+## Development Notes
+
+### Backend tests
 
 ```bash
-/Users/abdulrehmanbhidya/PycharmProjects/nano-dlna
+pytest
 ```
 
-Use the Mac mini template on:
+The pytest configuration lives in `pyproject.toml` and currently includes backend test paths under `web/backend/tests_backend`.
+
+### Frontend
 
 ```bash
-/Users/mannybhidya/PycharmProjects/WallMapper
+cd web/frontend
+npm install
+npm start
 ```
 
-Both templates assume:
-
-- `my_device_config.json` is the active device config
-- `NANODLNA_MEDIA_ROOT` points at the machine's `Movies` folder
-- the Python venv lives in repo-local `.venv`
-- Playwright Chromium is auto-installed on startup when `NANODLNA_INSTALL_PLAYWRIGHT=1`
-
-If your media lives elsewhere, change `NANODLNA_MEDIA_ROOT` in the copied `.env`.
-
-## Dev Workflow
-
-Laptop dev:
+Other frontend scripts:
 
 ```bash
-cp .env.dev-laptop.example .env
-./run_dashboard.sh
+npm test
+npm run build
 ```
 
-Mac mini dev / manual run:
+### Database and media helpers
+
+Common repo scripts include:
 
 ```bash
-cp .env.mac-mini.example .env
-./run_dashboard.sh
+python clean_videos.py
+python add_config_videos.py
+python scan_videos.py --directory "/path/to/videos" --recursive
+python fix_device.py --device "DeviceName"
 ```
 
-## macOS Service
+## macOS Service Mode
 
-For an always-on Mac mini, use `launchd`:
+For an always-on macOS install:
 
 ```bash
-cp .env.mac-mini.example .env
 ./service/install_launchd.sh
 ```
 
-What this gives you:
-
-- Starts automatically at login / machine startup for that user
-- Restarts if backend or frontend exits
-- Writes logs under `logs/`
-- Optionally fast-forwards the repo and restarts the service every 5 minutes when `NANODLNA_GIT_AUTO_UPDATE=1`
+This renders and installs launch agents based on the current `.env` values and service label.
 
 Useful commands:
 
 ```bash
-launchctl print gui/$UID/com.nanodlna.dashboard
 launchctl kickstart -k gui/$UID/com.nanodlna.dashboard
-tail -f logs/service-supervisor.log
+launchctl print gui/$UID/com.nanodlna.dashboard
 tail -f logs/backend.stderr.log
+tail -f logs/frontend.stderr.log
 ```
 
-Two-machine workflow:
+## Logs
 
-```bash
-# On the dev laptop
-cp .env.dev-laptop.example .env
+Current startup scripts write logs under `logs/`, including:
 
-# On the Mac mini
-cp .env.mac-mini.example .env
-```
+- `logs/backend.stdout.log`
+- `logs/backend.stderr.log`
+- `logs/frontend.stdout.log`
+- `logs/frontend.stderr.log`
+- `logs/dashboard_run.log`
 
-The `.env` file itself stays local and is ignored by git. Commit the two example files instead.
+There is also a log streaming API and UI surface under `/api/logs`.
 
-### Auto-Play Configuration
+## Where To Look Next
 
-You can configure auto-play behavior in several ways:
+If you are working on specific areas, start here:
 
-1. **Manual Assignment** via the web interface
-2. **Configuration Files** with device-video mappings
-3. **Scheduled Playback** using the web dashboard
+- legacy playback/discovery runtime:
+  - `web/backend/core/device_manager.py`
+- device API/read models:
+  - `web/backend/services/device_service.py`
+- unified discovery:
+  - `web/backend/discovery/`
+- overlay cast runtime:
+  - `web/backend/services/overlay_cast_service.py`
+- structured lighting:
+  - `web/backend/services/structured_lighting_service.py`
+  - `web/backend/structured_lighting_worker.py`
+- frontend pages:
+  - `web/frontend/src/App.js`
+  - `web/frontend/src/pages/`
 
-## Utility Scripts
+## Status
 
-Several utility scripts are available to help manage the system:
-
-### clean_videos.py
-
-```bash
-python clean_videos.py
-```
-
-Cleans up the database by removing non-existent videos and handling duplicates.
-
-### add_config_videos.py
-
-```bash
-python add_config_videos.py
-```
-
-Adds videos from the configuration files to the database.
-
-### scan_videos.py
-
-```bash
-python scan_videos.py --directory "/path/to/videos" --recursive
-```
-
-Scans a directory for videos and adds them to the database.
-
-### fix_device.py
-
-```bash
-python fix_device.py --device "DeviceName"
-```
-
-Attempts to fix issues with a specific device.
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Devices not discovered**
-   - Ensure devices are on the same network
-   - Check firewall settings
-   - Try increasing discovery timeout: `nanodlna -t 20 list`
-
-2. **Videos won't play**
-   - Check that file paths in configuration are correct
-   - Verify video format is compatible (H.264 MP4 is most reliable)
-   - Check network connectivity
-
-3. **Web Dashboard Issues**
-   - Clear browser cache
-   - Restart the dashboard
-   - Check backend logs for errors
-
-### Advanced Troubleshooting
-
-For more serious issues:
-
-1. Enable verbose logging:
-   ```bash
-   export NANODLNA_DEBUG=1
-   ```
-
-2. Check the log files:
-   ```bash
-   cat nanodlna.log
-   ```
-
-3. Clean the database:
-   ```bash
-   python clean_videos.py
-   ```
-
-## Technical Details
-
-nano-dlna functions as both a DLNA MediaServer (to serve your media files) and a MediaController (to send commands to your devices).
-
-The auto-play system works by:
-1. Loading device configurations from JSON files
-2. Discovering devices on the network
-3. Matching discovered devices with configurations
-4. Starting media servers for video streaming
-5. Sending play commands to matched devices
-6. Continuously monitoring playback and reconnecting as needed
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+This repo is active and evolving, but the architecture is not fully unified yet. Treat the code as the source of truth, especially for runtime ownership and control flow.

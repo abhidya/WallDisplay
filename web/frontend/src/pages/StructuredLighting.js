@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Box,
@@ -33,6 +33,14 @@ function SummaryCard({ title, value, subtitle }) {
   );
 }
 
+function getProjectorOptionId(projector) {
+  return projector?.device_id || projector?.id || '';
+}
+
+function getProjectorOptionLabel(projector) {
+  return projector?.name || projector?.friendly_name || getProjectorOptionId(projector);
+}
+
 function StructuredLighting() {
   const [capabilities, setCapabilities] = useState(null);
   const [status, setStatus] = useState(null);
@@ -61,20 +69,45 @@ function StructuredLighting() {
     hold_ms: 1200,
     notes: '',
   });
+  const [workerForm, setWorkerForm] = useState({
+    base_url: 'http://localhost:8000',
+    camera_index: 1,
+    projector_screen_x: 1280,
+    projector_screen_y: 0,
+    projector_width: 1280,
+    projector_height: 720,
+  });
+  const runtimeRefreshInFlightRef = useRef(false);
 
   const refreshSessions = useCallback(async () => {
     const sessionsRes = await structuredLightingApi.listSessions();
     const nextSessions = sessionsRes.data || [];
     setSessions(nextSessions);
-    if (!selectedSessionId && nextSessions.length > 0) {
-      setSelectedSessionId(nextSessions[0].session_id);
-    }
+    setSelectedSessionId((current) => current || nextSessions[0]?.session_id || '');
     return nextSessions;
-  }, [selectedSessionId]);
+  }, []);
 
   const refreshStatus = useCallback(async () => {
     const response = await structuredLightingApi.getStatus();
     setStatus(response.data);
+  }, []);
+
+  const syncSessionSnapshot = useCallback((nextSession) => {
+    if (!nextSession?.session_id) {
+      return;
+    }
+
+    setSessions((current) => {
+      let found = false;
+      const nextSessions = current.map((session) => {
+        if (session.session_id !== nextSession.session_id) {
+          return session;
+        }
+        found = true;
+        return { ...session, ...nextSession };
+      });
+      return found ? nextSessions : current;
+    });
   }, []);
 
   useEffect(() => {
@@ -93,7 +126,16 @@ function StructuredLighting() {
         }
         setCapabilities(capabilitiesRes.data);
         setStatus(statusRes.data);
-        setProjectors(projectorRes.data || []);
+        const nextProjectors = Array.isArray(projectorRes.data) ? projectorRes.data : [];
+        setProjectors(nextProjectors);
+        setForm((current) => {
+          const currentProjectorId = current.projector_device_id || '';
+          if (!currentProjectorId) {
+            return current;
+          }
+          const stillExists = nextProjectors.some((projector) => getProjectorOptionId(projector) === currentProjectorId);
+          return stillExists ? current : { ...current, projector_device_id: '' };
+        });
         await refreshSessions();
         setError('');
       } catch (err) {
@@ -137,6 +179,7 @@ function StructuredLighting() {
           setRuntime(runtimeResponse.data);
           setCaptures(capturesResponse.data);
           setArtifactReview(reviewResponse.data);
+          syncSessionSnapshot(runtimeResponse.data?.session || planResponse.data?.session);
           setReviewNotes(reviewResponse.data?.review?.notes || '');
           setReviewedBy(reviewResponse.data?.review?.reviewed_by || '');
         }
@@ -156,13 +199,30 @@ function StructuredLighting() {
     return () => {
       active = false;
     };
-  }, [selectedSessionId]);
+  }, [selectedSessionId, syncSessionSnapshot]);
+
+  const selectedSession = sessions.find((session) => session.session_id === selectedSessionId) || null;
+  const selectedSessionStatus = runtime?.session?.status || selectedSession?.status || '';
+  const shouldPollRuntime = Boolean(selectedSessionId) && ['waiting_for_worker', 'ready', 'capturing'].includes(selectedSessionStatus);
 
   useEffect(() => {
-    if (!selectedSessionId) {
+    if (!selectedSessionId || !shouldPollRuntime) {
       return undefined;
     }
-    const intervalId = window.setInterval(async () => {
+
+    let cancelled = false;
+    let timeoutId = null;
+
+    const pollRuntime = async () => {
+      if (cancelled) {
+        return;
+      }
+      if (runtimeRefreshInFlightRef.current) {
+        timeoutId = window.setTimeout(pollRuntime, 3000);
+        return;
+      }
+
+      runtimeRefreshInFlightRef.current = true;
       try {
         const [statusResponse, runtimeResponse, capturesResponse, reviewResponse] = await Promise.all([
           structuredLightingApi.getStatus(),
@@ -170,18 +230,34 @@ function StructuredLighting() {
           structuredLightingApi.listCaptures(selectedSessionId),
           structuredLightingApi.getArtifactReview(selectedSessionId),
         ]);
+        if (cancelled) {
+          return;
+        }
         setStatus(statusResponse.data);
         setRuntime(runtimeResponse.data);
         setCaptures(capturesResponse.data);
         setArtifactReview(reviewResponse.data);
+        syncSessionSnapshot(runtimeResponse.data?.session);
         setReviewNotes((current) => current || reviewResponse.data?.review?.notes || '');
         setReviewedBy((current) => current || reviewResponse.data?.review?.reviewed_by || '');
       } catch (err) {
         console.error('Failed to refresh structured-lighting runtime', err);
+      } finally {
+        runtimeRefreshInFlightRef.current = false;
+        if (!cancelled) {
+          timeoutId = window.setTimeout(pollRuntime, 3000);
+        }
       }
-    }, 3000);
-    return () => window.clearInterval(intervalId);
-  }, [selectedSessionId]);
+    };
+
+    pollRuntime();
+    return () => {
+      cancelled = true;
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [selectedSessionId, shouldPollRuntime, syncSessionSnapshot]);
 
   const handleCreateSession = async () => {
     try {
@@ -202,6 +278,58 @@ function StructuredLighting() {
     } catch (err) {
       console.error('Failed to create structured lighting session', err);
       setError('Failed to create structured lighting session.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleStartWorker = async () => {
+    try {
+      setActionLoading(true);
+      await structuredLightingApi.startWorker({
+        ...workerForm,
+        camera_index: Number(workerForm.camera_index),
+        projector_screen_x: Number(workerForm.projector_screen_x),
+        projector_screen_y: Number(workerForm.projector_screen_y),
+        projector_width: Number(workerForm.projector_width),
+        projector_height: Number(workerForm.projector_height),
+      });
+      await refreshStatus();
+      setError('');
+    } catch (err) {
+      console.error('Failed to start structured lighting worker', err);
+      setError('Failed to start structured lighting worker.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleStopWorker = async () => {
+    try {
+      setActionLoading(true);
+      await structuredLightingApi.stopWorker();
+      await refreshStatus();
+      setError('');
+    } catch (err) {
+      console.error('Failed to stop structured lighting worker', err);
+      setError('Failed to stop structured lighting worker.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleConfirmWorkerReady = async () => {
+    try {
+      if (!status?.worker?.worker_id) {
+        return;
+      }
+      setActionLoading(true);
+      await structuredLightingApi.confirmWorkerReady(status.worker.worker_id);
+      await refreshStatus();
+      setError('');
+    } catch (err) {
+      console.error('Failed to confirm structured lighting camera framing', err);
+      setError('Failed to confirm structured lighting camera framing.');
     } finally {
       setActionLoading(false);
     }
@@ -327,7 +455,10 @@ function StructuredLighting() {
     visibleSessions.some((session) => session.session_id === id)
   ));
   const allVisibleSelected = Boolean(visibleSessions.length) && selectedVisibleSessionIds.length === visibleSessions.length;
-  const someVisibleSelected = selectedVisibleSessionIds.length > 0 && !allVisibleSelected;
+  const workerState = status?.worker?.state || 'unknown';
+  const workerProcessState = status?.worker?.process_state || 'stopped';
+  const workerCanConfirm = workerState === 'awaiting_operator' && Boolean(status?.worker?.worker_id);
+  const workerCanStartSession = workerState === 'idle';
 
   useEffect(() => {
     if (!visibleSessions.length) {
@@ -472,6 +603,101 @@ function StructuredLighting() {
       </Grid>
 
       <Grid container spacing={2}>
+        <Grid item xs={12}>
+          <Paper sx={{ p: 2 }}>
+            <Typography variant="h6" gutterBottom>Worker Control</Typography>
+            <Stack spacing={2}>
+              <Typography variant="body2" color="text.secondary">
+                Start the local host worker, verify the native camera preview, then confirm framing before capture.
+              </Typography>
+              <Grid container spacing={2}>
+                <Grid item xs={12} md={3}>
+                  <TextField
+                    label="Backend URL"
+                    value={workerForm.base_url}
+                    onChange={(e) => setWorkerForm({ ...workerForm, base_url: e.target.value })}
+                    fullWidth
+                  />
+                </Grid>
+                <Grid item xs={6} md={2}>
+                  <TextField
+                    label="Camera Index"
+                    type="number"
+                    value={workerForm.camera_index}
+                    onChange={(e) => setWorkerForm({ ...workerForm, camera_index: e.target.value })}
+                    fullWidth
+                  />
+                </Grid>
+                <Grid item xs={6} md={2}>
+                  <TextField
+                    label="Projector X"
+                    type="number"
+                    value={workerForm.projector_screen_x}
+                    onChange={(e) => setWorkerForm({ ...workerForm, projector_screen_x: e.target.value })}
+                    fullWidth
+                  />
+                </Grid>
+                <Grid item xs={6} md={2}>
+                  <TextField
+                    label="Projector Y"
+                    type="number"
+                    value={workerForm.projector_screen_y}
+                    onChange={(e) => setWorkerForm({ ...workerForm, projector_screen_y: e.target.value })}
+                    fullWidth
+                  />
+                </Grid>
+                <Grid item xs={6} md={1}>
+                  <TextField
+                    label="Width"
+                    type="number"
+                    value={workerForm.projector_width}
+                    onChange={(e) => setWorkerForm({ ...workerForm, projector_width: e.target.value })}
+                    fullWidth
+                  />
+                </Grid>
+                <Grid item xs={6} md={2}>
+                  <TextField
+                    label="Height"
+                    type="number"
+                    value={workerForm.projector_height}
+                    onChange={(e) => setWorkerForm({ ...workerForm, projector_height: e.target.value })}
+                    fullWidth
+                  />
+                </Grid>
+              </Grid>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                <Chip label={`worker ${workerState}`} size="small" />
+                <Chip label={`process ${workerProcessState}`} size="small" variant="outlined" />
+                {status?.worker?.process_pid ? (
+                  <Chip label={`pid ${status.worker.process_pid}`} size="small" variant="outlined" />
+                ) : null}
+                {status?.worker?.camera_indices?.length ? (
+                  <Chip label={`camera ${status.worker.camera_indices.join(', ')}`} size="small" variant="outlined" />
+                ) : null}
+              </Box>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                <Button variant="contained" onClick={handleStartWorker} disabled={actionLoading || workerProcessState !== 'stopped'}>
+                  Start Worker
+                </Button>
+                <Button variant="outlined" color="error" onClick={handleStopWorker} disabled={actionLoading || workerProcessState === 'stopped'}>
+                  Stop Worker
+                </Button>
+                <Button variant="contained" color="success" onClick={handleConfirmWorkerReady} disabled={actionLoading || !workerCanConfirm}>
+                  Confirm Camera Ready
+                </Button>
+              </Stack>
+              <Alert severity={workerCanConfirm ? 'warning' : workerCanStartSession ? 'success' : 'info'}>
+                {status?.worker?.message || 'No worker status yet.'}
+              </Alert>
+              {status?.worker?.log_path ? (
+                <Typography variant="body2" color="text.secondary">
+                  Worker log: {status.worker.log_path}
+                </Typography>
+              ) : null}
+            </Stack>
+          </Paper>
+        </Grid>
+
         <Grid item xs={12} md={5}>
           <Paper sx={{ p: 2, height: '100%' }}>
             <Typography variant="h6" gutterBottom>New Session</Typography>
@@ -485,14 +711,14 @@ function StructuredLighting() {
               <TextField
                 select
                 label="Projector"
-                value={form.projector_device_id}
-                onChange={(e) => setForm({ ...form, projector_device_id: e.target.value })}
+                value={form.projector_device_id || ''}
+                onChange={(e) => setForm({ ...form, projector_device_id: e.target.value || '' })}
                 fullWidth
               >
                 <MenuItem value="">Unassigned</MenuItem>
                 {projectors.map((projector) => (
-                  <MenuItem key={projector.device_id} value={projector.device_id}>
-                    {projector.name || projector.device_id}
+                  <MenuItem key={getProjectorOptionId(projector)} value={getProjectorOptionId(projector)}>
+                    {getProjectorOptionLabel(projector)}
                   </MenuItem>
                 ))}
               </TextField>
@@ -758,6 +984,7 @@ function StructuredLighting() {
                         <Button
                           size="small"
                           variant="outlined"
+                          disabled={!workerCanStartSession}
                           onClick={(event) => {
                             event.stopPropagation();
                             handleStartSession(session.session_id);

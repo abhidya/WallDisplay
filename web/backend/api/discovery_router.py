@@ -13,6 +13,7 @@ from database.database import get_db
 from discovery.discovery_manager import DiscoveryManager
 from discovery.config import ConfigurationManager
 from discovery.base import CastingMethod, DeviceCapability
+from services.app_runtime import get_app_runtime
 from discovery.config.schema import (
     DeviceConfig, 
     GlobalConfig, 
@@ -29,9 +30,14 @@ router = APIRouter(
     responses={404: {"description": "Not found"}}
 )
 
-# Initialize managers
-discovery_manager = DiscoveryManager.get_instance()
 config_manager = ConfigurationManager.get_instance()
+
+
+def _get_discovery_manager() -> DiscoveryManager:
+    try:
+        return get_app_runtime().discovery_manager
+    except Exception:
+        return DiscoveryManager.get_instance()
 
 
 # Device Discovery Endpoints
@@ -45,7 +51,7 @@ async def get_all_devices(
 ):
     """Get all discovered devices with optional filters."""
     try:
-        devices = discovery_manager.get_all_devices()
+        devices = _get_discovery_manager().get_all_devices()
         
         # Apply filters
         if casting_method:
@@ -78,7 +84,7 @@ async def get_all_devices(
 async def get_device(device_id: str):
     """Get details of a specific device."""
     try:
-        device = discovery_manager.get_device(device_id)
+        device = _get_discovery_manager().get_device(device_id)
         if not device:
             raise HTTPException(status_code=404, detail="Device not found")
             
@@ -99,7 +105,7 @@ async def trigger_discovery(
     """Manually trigger device discovery."""
     try:
         # Run discovery
-        devices = await discovery_manager.discover_devices(
+        devices = await _get_discovery_manager().discover_devices(
             backend_name=backend,
             timeout=timeout
         )
@@ -125,7 +131,7 @@ async def cast_content(
 ):
     """Cast content to a device."""
     try:
-        session = await discovery_manager.cast_content(
+        session = await _get_discovery_manager().cast_content(
             device_id=device_id,
             content_url=content_url,
             content_type=content_type,
@@ -152,7 +158,7 @@ async def cast_content(
 async def stop_casting(device_id: str):
     """Stop casting on a device."""
     try:
-        success = await discovery_manager.stop_casting(device_id)
+        success = await _get_discovery_manager().stop_casting(device_id)
         
         if not success:
             raise HTTPException(status_code=400, detail="Failed to stop casting")
@@ -170,7 +176,7 @@ async def stop_casting(device_id: str):
 async def pause_casting(device_id: str):
     """Pause casting on a device."""
     try:
-        success = await discovery_manager.pause_casting(device_id)
+        success = await _get_discovery_manager().pause_casting(device_id)
         
         if not success:
             raise HTTPException(status_code=400, detail="Failed to pause casting")
@@ -188,7 +194,7 @@ async def pause_casting(device_id: str):
 async def resume_casting(device_id: str):
     """Resume casting on a device."""
     try:
-        success = await discovery_manager.resume_casting(device_id)
+        success = await _get_discovery_manager().resume_casting(device_id)
         
         if not success:
             raise HTTPException(status_code=400, detail="Failed to resume casting")
@@ -206,7 +212,7 @@ async def resume_casting(device_id: str):
 async def get_active_sessions():
     """Get all active casting sessions."""
     try:
-        sessions = discovery_manager.get_active_sessions()
+        sessions = _get_discovery_manager().get_active_sessions()
         
         return {
             "total": len(sessions),
@@ -340,7 +346,7 @@ async def update_global_config(
 async def get_backends():
     """Get information about all registered discovery backends."""
     try:
-        status = discovery_manager.get_backend_status()
+        status = _get_discovery_manager().get_backend_status()
         return status
         
     except Exception as e:
@@ -361,7 +367,7 @@ async def enable_backend(backend_name: str):
         config_manager.update_global_config(current_config)
         
         # Re-register backend if needed
-        await discovery_manager._register_enabled_backends()
+        await _get_discovery_manager()._register_enabled_backends()
         
         return {"status": "enabled", "backend": backend_name}
         
@@ -383,7 +389,7 @@ async def disable_backend(backend_name: str):
         config_manager.update_global_config(current_config)
         
         # Unregister backend
-        discovery_manager.unregister_backend(backend_name)
+        _get_discovery_manager().unregister_backend(backend_name)
         
         return {"status": "disabled", "backend": backend_name}
         
@@ -398,6 +404,7 @@ async def disable_backend(backend_name: str):
 async def get_system_status():
     """Get overall discovery system status."""
     try:
+        discovery_manager = _get_discovery_manager()
         discovery_status = discovery_manager.get_backend_status()
         device_count = len(discovery_manager.get_all_devices())
         online_count = len([d for d in discovery_manager.get_all_devices() if d.is_online])
@@ -438,6 +445,7 @@ async def get_capabilities():
 async def health_check():
     """Check health of discovery system."""
     try:
+        discovery_manager = _get_discovery_manager()
         is_healthy = discovery_manager.is_running
         backend_status = discovery_manager.get_backend_status()
         

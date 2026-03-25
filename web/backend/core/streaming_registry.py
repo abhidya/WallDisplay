@@ -220,7 +220,21 @@ class StreamingSessionRegistry:
         Args:
             handler: Function that takes a session and returns a healing action
         """
-        self.health_check_handlers.append(handler)
+        if handler not in self.health_check_handlers:
+            self.health_check_handlers.append(handler)
+
+    def unregister_health_check_handler(self, handler) -> None:
+        """
+        Unregister a previously registered health check handler.
+
+        Args:
+            handler: Handler to remove
+        """
+        self.health_check_handlers = [
+            existing_handler
+            for existing_handler in self.health_check_handlers
+            if existing_handler != handler
+        ]
         
     def register_device_handler(self, device_name: str, handler) -> None:
         """

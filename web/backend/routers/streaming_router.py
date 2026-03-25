@@ -10,9 +10,9 @@ import os
 
 # Fix the import causing startup errors
 from core.streaming_registry import StreamingSessionRegistry
-from core.device_manager import DeviceManager, get_device_manager # Import get_device_manager
 from core.twisted_streaming import get_instance as get_twisted_streaming
 from services.device_service import DeviceService # Import DeviceService class
+from services.app_runtime import get_app_runtime
 # DO NOT Import get_device_service from services.device_service
 from services.video_service import VideoService, get_video_service # This is fine
 from database.database import get_db
@@ -29,9 +29,7 @@ logger = logging.getLogger(__name__)
 
 # Dependency to get the device service, defined locally
 def get_device_service_local(db: Session = Depends(get_db)) -> DeviceService:
-    # Use get_device_manager to obtain the singleton instance
-    device_manager_instance = get_device_manager()
-    return DeviceService(db, device_manager_instance)
+    return get_app_runtime().build_device_service(db)
 
 @router.get("/")
 async def get_streaming_stats() -> Dict[str, Any]:

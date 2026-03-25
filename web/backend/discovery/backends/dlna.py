@@ -404,11 +404,20 @@ class DLNADiscoveryBackend(DiscoveryBackend):
     def _create_didl_lite(self, content_url: str, content_type: str, 
                          metadata: Optional[Dict[str, Any]] = None) -> str:
         """Create DIDL-Lite metadata for content."""
-        title = "Video" if metadata is None else metadata.get("title", "Video")
+        if content_type.startswith("image/"):
+            default_title = "Image"
+            upnp_class = "object.item.imageItem.photo"
+        elif content_type.startswith("audio/"):
+            default_title = "Audio"
+            upnp_class = "object.item.audioItem.musicTrack"
+        else:
+            default_title = "Video"
+            upnp_class = "object.item.videoItem"
+        title = default_title if metadata is None else metadata.get("title", default_title)
         
         # Escape XML special characters
         import html
         title = html.escape(title)
         content_url = html.escape(content_url)
         
-        return f"""&lt;DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/"&gt;&lt;item id="1" parentID="0" restricted="1"&gt;&lt;dc:title&gt;{title}&lt;/dc:title&gt;&lt;res protocolInfo="http-get:*:{content_type}:*"&gt;{content_url}&lt;/res&gt;&lt;upnp:class&gt;object.item.videoItem&lt;/upnp:class&gt;&lt;/item&gt;&lt;/DIDL-Lite&gt;"""
+        return f"""&lt;DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/"&gt;&lt;item id="1" parentID="0" restricted="1"&gt;&lt;dc:title&gt;{title}&lt;/dc:title&gt;&lt;res protocolInfo="http-get:*:{content_type}:*"&gt;{content_url}&lt;/res&gt;&lt;upnp:class&gt;{upnp_class}&lt;/upnp:class&gt;&lt;/item&gt;&lt;/DIDL-Lite&gt;"""

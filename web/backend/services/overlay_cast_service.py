@@ -156,8 +156,12 @@ class OverlayCastService:
         return cls._instance
 
     def __init__(self):
-        self.discovery_manager = DiscoveryManager.get_instance()
-        self.legacy_device_manager = None
+        try:
+            from services.app_runtime import get_app_runtime
+
+            self.discovery_manager = get_app_runtime().discovery_manager
+        except Exception:
+            self.discovery_manager = DiscoveryManager.get_instance()
         self.sessions: Dict[str, OverlayCastSession] = {}
         self.device_sessions: Dict[str, str] = {}
         self.session_history: list[dict] = []
@@ -480,9 +484,9 @@ class OverlayCastService:
         return f"{base}/backend-static/overlay_window.html?{urlencode(params)}"
 
     def _resolve_dlna_device(self, device_id: str):
-        if self.legacy_device_manager is None:
-            from core.device_manager import get_device_manager
-            self.legacy_device_manager = get_device_manager()
+        from services.app_runtime import get_app_runtime
+
+        runtime = get_app_runtime()
 
         device = self.discovery_manager.get_device_by_id(device_id)
         if device and device.action_url:
@@ -509,7 +513,7 @@ class OverlayCastService:
             if candidate.action_url:
                 return candidate
 
-        for legacy_device in self.legacy_device_manager.get_devices():
+        for legacy_device in runtime.get_devices():
             if host and getattr(legacy_device, "hostname", None) != host:
                 continue
             action_url = getattr(legacy_device, "action_url", None)

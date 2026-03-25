@@ -1,8 +1,10 @@
 import json
 import os
 import zipfile
+from types import SimpleNamespace
 
 from web.backend.services.structured_lighting_service import StructuredLightingService
+from discovery.base import CastingMethod
 
 
 def test_structured_lighting_session_persists_metadata(tmp_path):
@@ -387,3 +389,99 @@ def test_update_review_acceptance_sets_accepted_at(tmp_path):
     assert updated["review"]["status"] == "accepted"
     assert updated["review"]["reviewed_by"] == "abdul"
     assert updated["review"]["accepted_at"] is not None
+
+
+def test_resolve_dlna_projector_falls_back_to_legacy_runtime_device():
+    service = StructuredLightingService()
+    legacy_device = SimpleNamespace(
+        name="Legacy Projector",
+        friendly_name="Legacy Projector",
+        hostname="10.0.0.45",
+        action_url="http://10.0.0.45:3500/upnp/control/AVTransport1",
+        location="http://10.0.0.45:3500/description.xml",
+        manufacturer="Acme",
+    )
+    discovery_manager = SimpleNamespace(
+        get_device_by_id=lambda _device_id: None,
+        get_all_devices=lambda: [],
+    )
+    runtime = SimpleNamespace(get_devices=lambda: [legacy_device])
+
+    resolved = service._resolve_dlna_projector("dlna_10.0.0.45_3500", discovery_manager, runtime)
+
+    assert resolved is not None
+    assert resolved.id == "dlna_10.0.0.45_3500"
+    assert resolved.casting_method == CastingMethod.DLNA
+    assert resolved.action_url == legacy_device.action_url
+
+
+def test_cast_to_resolved_device_tracks_session_for_unregistered_device():
+    service = StructuredLightingService()
+    cast_calls = []
+
+    async def cast_content(device, content_url, content_type, metadata):
+        cast_calls.append((device.id, content_url, content_type, metadata))
+        return SimpleNamespace(id="session-1")
+
+    backend = SimpleNamespace(cast_content=cast_content)
+
+    class DummyLock:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    target_device = SimpleNamespace(
+        id="dlna_10.0.0.45_3500",
+        casting_method=CastingMethod.DLNA,
+        action_url="http://10.0.0.45:3500/upnp/control/AVTransport1",
+    )
+    discovery_manager = SimpleNamespace(
+        get_device_by_id=lambda _device_id: None,
+        _get_backend_for_device=lambda _device: backend,
+        _device_lock=DummyLock(),
+        device_sessions={},
+    )
+
+    cast_session = service._run_async(
+        service._cast_to_resolved_device(
+            discovery_manager=discovery_manager,
+            target_device=target_device,
+            selected_device_id="dlna_10.0.0.45_3500",
+            content_url="http://127.0.0.1:9010/step.png",
+            title="Wall Calibration - Reference White",
+        )
+    )
+
+    assert cast_session.id == "session-1"
+    assert discovery_manager.device_sessions["dlna_10.0.0.45_3500"][0].id == "session-1"
+    assert cast_calls == [
+        (
+            "dlna_10.0.0.45_3500",
+            "http://127.0.0.1:9010/step.png",
+            "image/png",
+            {"title": "Wall Calibration - Reference White"},
+        )
+    ]
+
+
+def test_render_step_image_for_dlna_returns_jpeg_bytes(tmp_path):
+    service = StructuredLightingService()
+    service._upload_root = str(tmp_path)
+
+    session = service.create_session(
+        name="Wall Calibration",
+        projector_device_id="dlna-projector",
+        camera_index=1,
+        projector_width=16,
+        projector_height=8,
+        presentation_mode="dlna_step",
+        hold_ms=1200,
+        notes="test run",
+    )
+
+    preview = service.render_step_image_for_dlna(session["session_id"], 0)
+
+    assert preview is not None
+    assert preview.startswith(b"\xff\xd8\xff")

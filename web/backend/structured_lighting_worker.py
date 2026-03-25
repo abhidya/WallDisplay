@@ -52,6 +52,15 @@ def claim_next_step(base_url: str, worker_id: str):
     return response.json().get("step")
 
 
+def get_worker_control(base_url: str, worker_id: str):
+    response = requests.get(
+        f"{base_url}/api/structured-lighting/worker/{worker_id}/control",
+        timeout=5,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
 def upload_capture(base_url: str, session_id: str, step_index: int, frame, ext: str = ".png"):
     ok, encoded = cv2.imencode(ext, frame)
     if not ok:
@@ -84,11 +93,13 @@ def open_camera(camera_index: int):
     return cap
 
 
-def wait_for_operator_ready(cap, preview_window: str):
+def wait_for_operator_confirmation(base_url: str, worker_id: str, hostname: str, camera_index: int, cap, preview_window: str):
     cv2.namedWindow(preview_window, cv2.WINDOW_NORMAL)
-    print("Press SPACE in the camera preview window to arm capture.")
+    print("Camera preview is live.")
+    print("Confirm camera framing from the web UI to arm capture.")
     print("Press ESC to abort.")
 
+    last_heartbeat_at = 0.0
     while True:
         ok, frame = cap.read()
         if not ok:
@@ -98,7 +109,21 @@ def wait_for_operator_ready(cap, preview_window: str):
         key = cv2.waitKey(1) & 0xFF
         if key == 27:
             raise SystemExit("Capture worker aborted by operator.")
-        if key == 32:
+
+        now = time.time()
+        if now - last_heartbeat_at >= 1.0:
+            heartbeat(
+                base_url,
+                worker_id,
+                hostname,
+                camera_index,
+                state="awaiting_operator",
+                message="Camera preview is live. Confirm framing in the web UI.",
+            )
+            last_heartbeat_at = now
+
+        control = get_worker_control(base_url, worker_id)
+        if control.get("operator_ready"):
             return
 
 
@@ -128,12 +153,20 @@ def flush_and_read(cap, flush_count: int):
 
 def capture_step(
     cap,
-    projector_window: str,
-    pattern_image_path: Path,
+    projector_window: Optional[str],
+    pattern_image_path: Optional[Path],
+    presentation_mode: str,
     settle_seconds: float,
     flush_count: int,
     pump_ms: int,
 ):
+    if presentation_mode == "dlna_step":
+        time.sleep(max(settle_seconds, 0.0))
+        return flush_and_read(cap, flush_count=flush_count)
+
+    if not projector_window or not pattern_image_path:
+        raise RuntimeError("Local projector presentation requires a projector window and pattern image.")
+
     pattern = cv2.imread(str(pattern_image_path), cv2.IMREAD_GRAYSCALE)
     if pattern is None:
         raise RuntimeError(f"Failed to load projected pattern {pattern_image_path}")
@@ -146,6 +179,7 @@ def capture_step(
 def main():
     parser = argparse.ArgumentParser(description="Structured-lighting host worker")
     parser.add_argument("--base-url", default="http://localhost:8000")
+    parser.add_argument("--worker-id", default="")
     parser.add_argument("--camera-index", type=int, default=1)
     parser.add_argument("--poll-seconds", type=float, default=1.0)
     parser.add_argument("--projector-screen-x", type=int, default=1280)
@@ -159,7 +193,7 @@ def main():
     parser.add_argument("--pump-ms", type=int, default=250)
     args = parser.parse_args()
 
-    worker_id = str(uuid.uuid4())
+    worker_id = args.worker_id or str(uuid.uuid4())
     hostname = get_hostname()
 
     print(f"worker_id={worker_id}")
@@ -168,58 +202,93 @@ def main():
 
     cap = open_camera(args.camera_index)
     try:
-        wait_for_operator_ready(cap, args.preview_window)
-        create_projector_window(
-            args.projector_window,
-            args.projector_screen_x,
-            args.projector_screen_y,
-            args.projector_width,
-            args.projector_height,
+        heartbeat(
+            args.base_url,
+            worker_id,
+            hostname,
+            args.camera_index,
+            state="starting",
+            message="Structured-lighting worker started. Opening camera preview.",
         )
-
+        wait_for_operator_confirmation(
+            args.base_url,
+            worker_id,
+            hostname,
+            args.camera_index,
+            cap,
+            args.preview_window,
+        )
         while True:
-            heartbeat(
-                args.base_url,
-                worker_id,
-                hostname,
-                args.camera_index,
-                state="idle",
-                message="Worker ready for next structured-lighting step.",
-            )
-            step = claim_next_step(args.base_url, worker_id)
-            if not step:
+            try:
+                heartbeat(
+                    args.base_url,
+                    worker_id,
+                    hostname,
+                    args.camera_index,
+                    state="idle",
+                    message="Worker ready for next structured-lighting step.",
+                )
+                step = claim_next_step(args.base_url, worker_id)
+                if not step:
+                    time.sleep(args.poll_seconds)
+                    continue
+
+                step_index = step["step"]["index"]
+                session_id = step["session_id"]
+                label = step["step"]["label"]
+                heartbeat(
+                    args.base_url,
+                    worker_id,
+                    hostname,
+                    args.camera_index,
+                    state="capturing",
+                    message=f"Capturing step {step_index}: {label}",
+                )
+
+                print(f"claimed session={session_id} step={step_index} label={label}")
+                presentation_mode = step.get("presentation_mode", "dlna_step")
+                pattern_path = None
+                projector_window = None
+                if presentation_mode != "dlna_step":
+                    create_projector_window(
+                        args.projector_window,
+                        args.projector_screen_x,
+                        args.projector_screen_y,
+                        args.projector_width,
+                        args.projector_height,
+                    )
+                    projector_window = args.projector_window
+                    pattern_path = download_step_image(
+                        args.base_url,
+                        step["step_image_url"],
+                        session_id,
+                        step_index,
+                    )
+                frame = capture_step(
+                    cap,
+                    projector_window,
+                    pattern_path,
+                    presentation_mode,
+                    settle_seconds=args.settle_seconds,
+                    flush_count=args.flush_count,
+                    pump_ms=args.pump_ms,
+                )
+                upload_capture(args.base_url, session_id, step_index, frame)
+                print(f"captured and uploaded step {step_index} for session {session_id}")
+            except Exception as exc:
+                print(f"structured-lighting step failed: {exc}")
+                try:
+                    heartbeat(
+                        args.base_url,
+                        worker_id,
+                        hostname,
+                        args.camera_index,
+                        state="error",
+                        message=f"Structured-lighting step failed: {exc}",
+                    )
+                except Exception:
+                    pass
                 time.sleep(args.poll_seconds)
-                continue
-
-            step_index = step["step"]["index"]
-            session_id = step["session_id"]
-            label = step["step"]["label"]
-            heartbeat(
-                args.base_url,
-                worker_id,
-                hostname,
-                args.camera_index,
-                state="capturing",
-                message=f"Capturing step {step_index}: {label}",
-            )
-
-            print(f"claimed session={session_id} step={step_index} label={label}")
-            pattern_path = download_step_image(
-                args.base_url,
-                step["step_image_url"],
-                session_id,
-                step_index,
-            )
-            frame = capture_step(
-                cap,
-                args.projector_window,
-                pattern_path,
-                settle_seconds=args.settle_seconds,
-                flush_count=args.flush_count,
-                pump_ms=args.pump_ms,
-            )
-            upload_capture(args.base_url, session_id, step_index, frame)
-            print(f"captured and uploaded step {step_index} for session {session_id}")
     finally:
         cap.release()
         cv2.destroyAllWindows()

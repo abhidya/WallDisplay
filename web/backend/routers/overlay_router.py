@@ -447,9 +447,9 @@ async def trigger_sync(
     synced_devices = []
     failed_devices = []
     try:
-        from routers.device_router import device_manager
-        
-        for device in device_manager.get_devices():
+        from services.app_runtime import get_app_runtime
+
+        for device in get_app_runtime().get_devices():
             if device.is_playing:
                 try:
                     if device.seek("00:00:00"):

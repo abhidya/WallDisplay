@@ -29,6 +29,19 @@ class StructuredLightingWorkerHeartbeat(BaseModel):
     message: Optional[str] = None
 
 
+class StructuredLightingWorkerStartRequest(BaseModel):
+    base_url: str = Field("http://localhost:8000")
+    camera_index: int = Field(0, ge=0)
+    projector_screen_x: int = Field(1280)
+    projector_screen_y: int = Field(0)
+    projector_width: int = Field(1280, ge=2)
+    projector_height: int = Field(720, ge=2)
+    settle_seconds: float = Field(0.8, ge=0.0, le=10.0)
+    flush_count: int = Field(20, ge=0, le=120)
+    pump_ms: int = Field(250, ge=1, le=2000)
+    poll_seconds: float = Field(1.0, ge=0.1, le=10.0)
+
+
 class StructuredLightingDecodeRequest(BaseModel):
     sample_step: int = Field(1, ge=1, le=16, description="Decode every Nth camera pixel")
 
@@ -210,6 +223,33 @@ def get_step_image(session_id: str, step_index: int) -> Response:
 def worker_heartbeat(payload: StructuredLightingWorkerHeartbeat) -> Dict:
     service = get_structured_lighting_service()
     return service.update_worker_status(**payload.model_dump())
+
+
+@router.post("/worker/start")
+def start_worker(payload: StructuredLightingWorkerStartRequest) -> Dict:
+    service = get_structured_lighting_service()
+    return service.start_worker(**payload.model_dump())
+
+
+@router.post("/worker/stop")
+def stop_worker() -> Dict:
+    service = get_structured_lighting_service()
+    return service.stop_worker()
+
+
+@router.get("/worker/{worker_id}/control")
+def get_worker_control(worker_id: str) -> Dict:
+    service = get_structured_lighting_service()
+    return service.get_worker_control(worker_id)
+
+
+@router.post("/worker/{worker_id}/confirm-ready")
+def confirm_worker_ready(worker_id: str) -> Dict:
+    service = get_structured_lighting_service()
+    try:
+        return service.confirm_worker_ready(worker_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/worker/{worker_id}/next-step")

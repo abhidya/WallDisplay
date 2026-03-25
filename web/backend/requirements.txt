@@ -31,10 +31,13 @@ isort>=5.12.0
 flake8>=6.1.0
 mypy>=1.6.0
 
-# Depth processing dependencies - commented out to make the app start without these
-# If you need depth processing, uncomment and install these manually:
-# numpy>=1.20.0
-# opencv-python>=4.5.0
+# Structured-lighting and image-processing dependencies
+numpy>=1.20.0
+opencv-contrib-python>=4.5.0
+matplotlib>=3.5.0
+
+# Optional depth processing dependencies
+# If you need additional depth-processing features, install these as well:
 # scikit-learn>=1.0.0
 
 # Image processing dependencies (required for projection animation)

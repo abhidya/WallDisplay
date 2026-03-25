@@ -9,6 +9,8 @@ from datetime import datetime, timedelta
 import threading
 
 from .base import DiscoveryBackend, Device, CastingMethod, CastingSession, DeviceCapability
+from .backends import DLNADiscoveryBackend, AirPlayDiscoveryBackend, OverlayDiscoveryBackend
+from .config import ConfigurationManager
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +49,10 @@ class DiscoveryManager:
         # Configuration
         self.auto_cast_enabled = True
         self.device_timeout = timedelta(minutes=2)
+
+    @property
+    def is_running(self) -> bool:
+        return self._running
         
     def register_backend(self, backend: DiscoveryBackend):
         """
@@ -167,6 +173,10 @@ class DiscoveryManager:
         """
         with self._device_lock:
             return self.all_devices.get(device_id)
+
+    def get_device(self, device_id: str) -> Optional[Device]:
+        """Compatibility alias for router callers."""
+        return self.get_device_by_id(device_id)
     
     def get_devices_with_capability(self, capability: DeviceCapability,
                                    online_only: bool = True) -> List[Device]:
@@ -229,6 +239,46 @@ class DiscoveryManager:
         except Exception as e:
             logger.error(f"Failed to cast to device {device_id}: {e}")
             return None
+
+    async def discover_devices(
+        self,
+        backend_name: Optional[str] = None,
+        timeout: Optional[int] = None,
+    ) -> List[Device]:
+        """
+        Trigger immediate discovery on one backend or all registered backends.
+
+        This is a compatibility API for the v2 router. It performs a one-shot
+        discovery call rather than changing the long-running backend lifecycle.
+        """
+        backends: List[DiscoveryBackend] = []
+        if backend_name:
+            for candidate_name, backend in self.backends.items():
+                if candidate_name.lower() == backend_name.lower() or backend.name.lower() == backend_name.lower():
+                    backends = [backend]
+                    break
+        else:
+            backends = list(self.backends.values())
+
+        if not backends:
+            return []
+
+        discovered: List[Device] = []
+        for backend in backends:
+            previous_timeout = getattr(backend, "discovery_timeout", None)
+            if timeout is not None and previous_timeout is not None:
+                backend.discovery_timeout = timeout
+            try:
+                devices = await backend.discover_devices()
+                discovered.extend(devices)
+                with self._device_lock:
+                    for device in devices:
+                        self.all_devices[device.id] = device
+            finally:
+                if timeout is not None and previous_timeout is not None:
+                    backend.discovery_timeout = previous_timeout
+
+        return discovered
     
     async def stop_casting(self, session_id: str) -> bool:
         """
@@ -240,7 +290,7 @@ class DiscoveryManager:
         Returns:
             True if successful
         """
-        session = self._find_session(session_id)
+        session = self._find_session_or_device_session(session_id)
         if not session:
             logger.error(f"Session {session_id} not found")
             return False
@@ -276,7 +326,7 @@ class DiscoveryManager:
     
     async def pause_casting(self, session_id: str) -> bool:
         """Pause a casting session"""
-        session = self._find_session(session_id)
+        session = self._find_session_or_device_session(session_id)
         if not session:
             return False
             
@@ -288,7 +338,7 @@ class DiscoveryManager:
     
     async def resume_casting(self, session_id: str) -> bool:
         """Resume a casting session"""
-        session = self._find_session(session_id)
+        session = self._find_session_or_device_session(session_id)
         if not session:
             return False
             
@@ -300,7 +350,7 @@ class DiscoveryManager:
     
     async def seek(self, session_id: str, position: float) -> bool:
         """Seek in a casting session"""
-        session = self._find_session(session_id)
+        session = self._find_session_or_device_session(session_id)
         if not session:
             return False
             
@@ -312,7 +362,7 @@ class DiscoveryManager:
     
     async def get_session_status(self, session_id: str) -> Optional[Dict[str, Any]]:
         """Get status of a casting session"""
-        session = self._find_session(session_id)
+        session = self._find_session_or_device_session(session_id)
         if not session:
             return None
             
@@ -403,6 +453,13 @@ class DiscoveryManager:
     def register_callback(self, callback: Callable):
         """Register callback for discovery events"""
         self._callbacks.append(callback)
+
+    def unregister_callback(self, callback: Callable):
+        """Remove a previously registered callback."""
+        try:
+            self._callbacks.remove(callback)
+        except ValueError:
+            pass
         
     async def _handle_backend_event(self, event_type: str, data: Any):
         """Handle events from backends"""
@@ -443,6 +500,18 @@ class DiscoveryManager:
                     if session.id == session_id:
                         return session
         return None
+
+    def _find_session_or_device_session(self, session_or_device_id: str) -> Optional[CastingSession]:
+        """
+        Compatibility helper for callers that may pass either a session ID or
+        a device ID when addressing session controls.
+        """
+        session = self._find_session(session_or_device_id)
+        if session is not None:
+            return session
+
+        active_sessions = self.get_active_sessions(device_id=session_or_device_id)
+        return active_sessions[0] if active_sessions else None
     
     def get_backend_status(self) -> Dict[str, Dict[str, Any]]:
         """Get status of all backends"""
@@ -457,3 +526,38 @@ class DiscoveryManager:
                 'active_sessions': len(backend.get_active_sessions())
             }
         return status
+
+    def register_enabled_backends(self) -> None:
+        """
+        Reconcile the registered backends with configuration flags.
+
+        This is the shared implementation used by both the migration adapter and
+        the v2 router compatibility hook.
+        """
+        config_manager = ConfigurationManager.get_instance()
+        backend_config = config_manager.get_global_config().get("backends", {})
+        known_backends = {
+            "dlna": DLNADiscoveryBackend,
+            "airplay": AirPlayDiscoveryBackend,
+            "overlay": OverlayDiscoveryBackend,
+        }
+
+        for backend_name, backend_class in known_backends.items():
+            enabled = backend_config.get(backend_name, True)
+            matching_backend = next(
+                (
+                    backend
+                    for backend in self.backends.values()
+                    if backend.name.lower() == backend_name or backend_name == backend.name.lower()
+                ),
+                None,
+            )
+
+            if enabled and matching_backend is None:
+                self.register_backend(backend_class())
+            elif not enabled and matching_backend is not None:
+                self.unregister_backend(matching_backend.name)
+
+    async def _register_enabled_backends(self) -> None:
+        """Compatibility hook for the v2 router."""
+        self.register_enabled_backends()

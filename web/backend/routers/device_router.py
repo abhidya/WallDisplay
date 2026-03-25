@@ -15,14 +15,11 @@ from schemas.device import (
     DeviceActionResponse,
 )
 from services.device_service import DeviceService
-from core.device_manager import get_device_manager
+from services.app_runtime import get_app_runtime
 from routers.video_router import get_video_service
 
 # Set up logger
 logger = logging.getLogger(__name__)
-
-# Get the singleton device manager instance
-device_manager = get_device_manager()
 
 # Create router
 router = APIRouter(
@@ -33,7 +30,7 @@ router = APIRouter(
 
 # Dependency to get the device service
 def get_device_service(db: Session = Depends(get_db)) -> DeviceService:
-    return DeviceService(db, device_manager)
+    return get_app_runtime().build_device_service(db)
 
 @router.get("/discover", response_model=DeviceList)
 @router.post("/discover", response_model=DeviceList)
@@ -56,7 +53,7 @@ def discover_devices(
 @router.post("/discovery/pause", response_model=DeviceActionResponse)
 def pause_discovery():
     """Pause the discovery loop"""
-    device_manager.pause_discovery()
+    get_app_runtime().pause_discovery()
     return {
         "success": True,
         "message": "Discovery loop paused",
@@ -65,7 +62,7 @@ def pause_discovery():
 @router.post("/discovery/resume", response_model=DeviceActionResponse)
 def resume_discovery():
     """Resume the discovery loop"""
-    device_manager.resume_discovery()
+    get_app_runtime().resume_discovery()
     return {
         "success": True,
         "message": "Discovery loop resumed",
@@ -74,7 +71,7 @@ def resume_discovery():
 @router.get("/discovery/status")
 def get_discovery_status():
     """Get discovery loop status"""
-    return device_manager.get_discovery_status()
+    return get_app_runtime().get_discovery_status()
 
 @router.get("/", response_model=DeviceList)
 def get_devices(
@@ -308,33 +305,18 @@ def update_playback_progress(
             detail=f"Device with ID {device_id} not found",
         )
     
-    # Get the device from the device manager
-    core_device = device_service.get_device_instance(device_id)
-    if not core_device:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Device with ID {device_id} not found in device manager",
-        )
-    
     # Update the playback progress
-    try:
-        device_manager.update_device_playback_progress(
-            device_name=core_device.name,
-            position=position,
-            duration=duration,
-            progress=progress
-        )
-        
-        return {
-            "success": True,
-            "message": f"Playback progress updated for device with ID {device_id}",
-        }
-    except Exception as e:
-        logger.error(f"Error updating playback progress: {e}")
+    success = device_service.update_playback_progress(device_id, position, duration, progress)
+    if not success:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update playback progress for device with ID {device_id}: {str(e)}",
+            detail=f"Failed to update playback progress for device with ID {device_id}",
         )
+
+    return {
+        "success": True,
+        "message": f"Playback progress updated for device with ID {device_id}",
+    }
 
 # Move the discover endpoint to the top of the file, before the /{device_id} routes
 

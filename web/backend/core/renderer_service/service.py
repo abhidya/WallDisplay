@@ -14,6 +14,26 @@ from typing import Dict, Any, Optional, List, Tuple
 from .renderer import Renderer, ChromeRenderer
 from ..dlna_device import DLNADevice
 from ..twisted_streaming import TwistedStreamingServer
+from database.database import get_db
+from services.app_runtime import get_app_runtime
+
+
+def _resolve_runtime_device(device_name: str):
+    runtime = get_app_runtime()
+    device = runtime.get_device(device_name)
+    if device:
+        return device
+
+    db_generator = get_db()
+    db = next(db_generator)
+    try:
+        device_service = runtime.build_device_service(db)
+        db_device = device_service.get_device_by_name(device_name)
+        if not db_device:
+            return None
+        return device_service.runtime_sync_service.get_or_register_core_device(db_device)
+    finally:
+        db_generator.close()
 
 
 class RendererService:
@@ -304,12 +324,7 @@ class RendererService:
             True if the content was sent successfully, False otherwise
         """
         try:
-            # Import here to avoid circular imports
-            from ..services.device_service import DeviceService # Changed to relative
-            
-            # Get the device instance
-            device_service = DeviceService() # This instantiation might be problematic if DeviceService expects db/manager
-            device = device_service.get_device_instance(device_name)
+            device = _resolve_runtime_device(device_name)
             
             if not device:
                 self.logger.error(f"DLNA device not found: {device_name}")
@@ -360,12 +375,7 @@ class RendererService:
             # Stop the content on the device
             if sender_type == 'dlna':
                 try:
-                    # Import here to avoid circular imports
-                    from ..services.device_service import DeviceService # Changed to relative
-                    
-                    # Get the device instance
-                    device_service = DeviceService() # This instantiation might be problematic
-                    device = device_service.get_device_instance(target_name)
+                    device = _resolve_runtime_device(target_name)
                     
                     if device:
                         device.stop()

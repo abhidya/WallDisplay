@@ -428,14 +428,14 @@ async def create_projection(config: ProjectionConfig):
         if config.device_id:
             # Import device service
             from services.device_service import DeviceService
+            from services.app_runtime import get_app_runtime
             from database.database import get_db
             
             # Get database session
             db = next(get_db())
             
             # Create device service
-            from core.device_manager import DeviceManager
-            device_service = DeviceService(db, DeviceManager())
+            device_service = get_app_runtime().build_device_service(db)
             
             # Create a projection URL
             base_url = "http://localhost:8000"  # This should be configurable

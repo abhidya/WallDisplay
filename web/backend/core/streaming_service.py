@@ -259,15 +259,29 @@ class StreamingService:
     """
     Service for streaming media files over HTTP
     """
-    def __init__(self, device_manager=None):
+    def __init__(self, runtime=None):
         self.servers = {}
         self.temp_dirs = {}
         self.file_to_session_map = {}  # Map file paths to session IDs
         self.registry = StreamingSessionRegistry.get_instance()
-        self.device_manager = device_manager  # Store reference to device manager
+        self.runtime = runtime
         
         # Register health check handler
         self.registry.register_health_check_handler(self._handle_stalled_session)
+
+    def _get_runtime_device(self, device_name: str):
+        if self.runtime is not None:
+            return self.runtime.get_device(device_name)
+        try:
+            from services.app_runtime import get_app_runtime
+
+            runtime = get_app_runtime()
+            if runtime is not None:
+                self.runtime = runtime
+                return runtime.get_device(device_name)
+        except Exception:
+            pass
+        return None
     
     def normalize_file_name(self, value: str) -> str:
         """
@@ -574,22 +588,21 @@ class StreamingService:
         logger.warning(f"Handling stalled session {session.session_id} for device {session.device_name}")
         
         # Check if this is a false positive before taking action
-        if self.device_manager:
-            device = self.device_manager.get_device(session.device_name)
-            if device:
-                # Get actual device state
-                try:
-                    transport_info = device._get_transport_info() if hasattr(device, '_get_transport_info') else {}
-                    transport_state = transport_info.get("CurrentTransportState", "UNKNOWN")
-                    
-                    if transport_state == "PLAYING":
-                        # Device is actually playing - this is a false positive
-                        logger.info(f"Device {session.device_name} reports PLAYING state - ignoring stall detection")
-                        # Just update activity to reset the stall timer
-                        session.update_activity()
-                        return
-                except Exception as e:
-                    logger.debug(f"Could not check transport state: {e}")
+        device = self._get_runtime_device(session.device_name)
+        if device:
+            # Get actual device state
+            try:
+                transport_info = device._get_transport_info() if hasattr(device, '_get_transport_info') else {}
+                transport_state = transport_info.get("CurrentTransportState", "UNKNOWN")
+                
+                if transport_state == "PLAYING":
+                    # Device is actually playing - this is a false positive
+                    logger.info(f"Device {session.device_name} reports PLAYING state - ignoring stall detection")
+                    # Just update activity to reset the stall timer
+                    session.update_activity()
+                    return
+            except Exception as e:
+                logger.debug(f"Could not check transport state: {e}")
         
         # Record the reconnection attempt
         session.record_reconnection_attempt()
@@ -601,19 +614,15 @@ class StreamingService:
             # If reconnection failed, notify the device manager to take action
             logger.info(f"Reconnection failed for session {session.session_id}, attempting device manager recovery")
             try:
-                # Use the stored device_manager reference
-                if self.device_manager:
-                    device = self.device_manager.get_device(session.device_name)
-                    if device:
-                        # Let the device handle the streaming health check
-                        if hasattr(device, '_handle_streaming_health_check'):
-                            device._handle_streaming_health_check(session.session_id, "streaming_stalled")
-                        else:
-                            logger.warning(f"Device {session.device_name} does not support streaming health checks")
+                device = self._get_runtime_device(session.device_name)
+                if device:
+                    # Let the device handle the streaming health check
+                    if hasattr(device, '_handle_streaming_health_check'):
+                        device._handle_streaming_health_check(session.session_id, "streaming_stalled")
                     else:
-                        logger.warning(f"Device {session.device_name} not found in device manager")
+                        logger.warning(f"Device {session.device_name} does not support streaming health checks")
                 else:
-                    logger.warning("Device manager not available")
+                    logger.warning(f"Device {session.device_name} not found in runtime device inventory")
             except Exception as e:
                 logger.error(f"Error notifying device manager about stalled session: {e}")
                 # Mark session as error to prevent repeated attempts
@@ -721,10 +730,10 @@ class StreamingService:
                 }
             raise
     
-    def set_device_manager(self, device_manager):
-        """Set the device manager reference after initialization"""
-        self.device_manager = device_manager
-        logger.info("Device manager reference updated in StreamingService")
+    def set_runtime(self, runtime):
+        """Set the runtime reference used for device lookup during recovery."""
+        self.runtime = runtime
+        logger.info("App runtime reference updated in StreamingService")
     
     def _cleanup_stale_streams(self):
         """Clean up streams that have no active sessions"""

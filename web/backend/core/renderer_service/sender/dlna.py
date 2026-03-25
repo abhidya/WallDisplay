@@ -9,7 +9,26 @@ from typing import Dict, Optional
 
 from .base import Sender
 from core.twisted_streaming import TwistedStreamingServer
-from services.device_service import DeviceService
+from database.database import get_db
+from services.app_runtime import get_app_runtime
+
+
+def _resolve_runtime_device(target_id: str):
+    runtime = get_app_runtime()
+    device = runtime.get_device(target_id)
+    if device:
+        return device
+
+    db_generator = get_db()
+    db = next(db_generator)
+    try:
+        device_service = runtime.build_device_service(db)
+        db_device = device_service.get_device_by_name(target_id)
+        if not db_device:
+            return None
+        return device_service.runtime_sync_service.get_or_register_core_device(db_device)
+    finally:
+        db_generator.close()
 
 
 class DLNASender(Sender):
@@ -35,7 +54,6 @@ class DLNASender(Sender):
         self.dlna_device = None
         self.target_id = None
         self.streaming_server = None
-        self.device_service = DeviceService()
     
     def connect(self, target_id: str) -> bool:
         """Connect to the DLNA device by ID or name.
@@ -50,8 +68,7 @@ class DLNASender(Sender):
         self.logger.info(f"Connecting to DLNA device: {target_id}")
         
         try:
-            # Get device from device service
-            self.dlna_device = self.device_service.get_device_instance(target_id)
+            self.dlna_device = _resolve_runtime_device(target_id)
             
             if not self.dlna_device:
                 self.logger.error(f"DLNA device not found: {target_id}")

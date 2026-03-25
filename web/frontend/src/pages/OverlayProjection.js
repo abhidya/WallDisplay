@@ -298,7 +298,7 @@ function OverlayProjection() {
         }
     };
     
-    const launchProjection = async () => {
+    const launchProjection = async (usePopupFeatures = true) => {
         if (!selectedConfig) return;
         if (backgroundType === 'video' && !selectedVideo) return;
         if (backgroundType === 'mapping' && !selectedMapping) return;
@@ -307,15 +307,17 @@ function OverlayProjection() {
         setError('');
         
         try {
-            const windowUrl = `/backend-static/overlay_window.html?config_id=${selectedConfig.id}`;
+            const windowUrl = `/backend-static/overlay_window.html?config_id=${selectedConfig.id}&controls=hidden`;
             const windowName = `overlay_projection_${selectedConfig.id}_${Date.now()}`;
 
             // Open projection window
-            const projWindow = window.open(
-                windowUrl,
-                windowName,
-                'width=1920,height=1080'
-            );
+            const projWindow = usePopupFeatures
+                ? window.open(windowUrl, windowName, 'width=1920,height=1080')
+                : window.open(windowUrl, windowName);
+
+            if (!projWindow) {
+                throw new Error('Projection window failed to open');
+            }
             
             setProjectionWindow(projWindow);
             const streamResponsePromise = api.post('/overlay/stream', {
@@ -801,10 +803,20 @@ function OverlayProjection() {
                             color="primary"
                             size="large"
                             startIcon={loading ? <CircularProgress size={20} /> : <LaunchIcon />}
-                            onClick={launchProjection}
+                            onClick={() => launchProjection(true)}
                             disabled={(!selectedConfig) || (backgroundType === 'video' ? !selectedVideo : !selectedMapping) || loading}
                         >
                             Launch Projection Window
+                        </Button>
+                        <Button
+                            variant="outlined"
+                            color="primary"
+                            size="large"
+                            startIcon={loading ? <CircularProgress size={20} /> : <LaunchIcon />}
+                            onClick={() => launchProjection(false)}
+                            disabled={(!selectedConfig) || (backgroundType === 'video' ? !selectedVideo : !selectedMapping) || loading}
+                        >
+                            Open Projection Tab
                         </Button>
                         
                         {projectionWindow && !projectionWindow.closed && (
