@@ -1,0 +1,44 @@
+{
+  "bit_planes_x": 11,
+  "bit_planes_y": 10,
+  "calibration": {
+    "artifacts": {},
+    "generated_at": null,
+    "message": "Calibration record has not been generated yet.",
+    "status": "not_started",
+    "summary": {}
+  },
+  "camera_index": 1,
+  "captured_frames": 0,
+  "captured_step_indices": [],
+  "captures": {},
+  "created_at": "2026-03-25T06:01:41.830074",
+  "current_step_index": 0,
+  "decode": {
+    "artifacts": {},
+    "finished_at": null,
+    "message": "Decode has not run yet.",
+    "metrics": {},
+    "started_at": null,
+    "status": "not_started"
+  },
+  "hold_ms": 1200,
+  "name": "Wall Calibration",
+  "notes": "",
+  "pattern_frame_count": 44,
+  "presentation_mode": "dlna_step",
+  "projector_device_id": "dlna_10.0.0.45_3500",
+  "projector_height": 720,
+  "projector_width": 1280,
+  "review": {
+    "accepted_at": null,
+    "message": "Artifact review has not been completed yet.",
+    "notes": "",
+    "reviewed_by": "",
+    "status": "pending",
+    "updated_at": null
+  },
+  "session_id": "ebe60ae0-89d1-494e-ac5d-348c061f02ba",
+  "status": "draft",
+  "updated_at": "2026-03-25T06:01:41.830074"
+}
