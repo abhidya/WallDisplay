@@ -201,6 +201,34 @@ class OverlayService:
             mapping_scene=stream_info.mapping_scene,
         )
 
+    def get_window_refresh_state(self, config_id: int) -> dict:
+        config = self.db.query(OverlayConfig).filter(OverlayConfig.id == config_id).first()
+        if not config:
+            raise ValueError("Configuration not found")
+
+        revision_parts = [
+            f"config:{config.updated_at.isoformat() if config.updated_at else config.created_at.isoformat() if config.created_at else 'none'}"
+        ]
+
+        if config.mapping_scene_id:
+            scene = self.db.query(MappingScene).filter(MappingScene.id == config.mapping_scene_id).first()
+            if scene:
+                revision_parts.append(
+                    f"scene:{scene.updated_at.isoformat() if scene.updated_at else scene.created_at.isoformat() if scene.created_at else 'none'}"
+                )
+
+        if config.video_id:
+            video = self.db.query(VideoModel).filter(VideoModel.id == config.video_id).first()
+            if video:
+                revision_parts.append(
+                    f"video:{video.updated_at.isoformat() if video.updated_at else video.created_at.isoformat() if video.created_at else 'none'}"
+                )
+
+        return {
+            "config_id": config.id,
+            "revision": "|".join(revision_parts),
+        }
+
     def _to_response(self, config: OverlayConfig) -> OverlayConfigResponse:
         """Convert database model to response schema"""
         return OverlayConfigResponse(

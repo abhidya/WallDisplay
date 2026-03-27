@@ -1,12 +1,11 @@
 from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from typing import List, Optional, Set
+from typing import List, Optional
 import json
 import uuid
 from datetime import datetime
 import asyncio
-from asyncio import Queue
 
 from database.database import get_db
 from schemas.overlay import (
@@ -21,39 +20,10 @@ from schemas.overlay import (
 )
 from services.overlay_service import OverlayService
 from services.overlay_cast_service import get_overlay_cast_service
+from services.overlay_event_bus import overlay_events, notify_overlay_config_update
 from models.overlay import OverlayConfig
 
 router = APIRouter(prefix="/api/overlay", tags=["overlay"])
-
-# SSE Connection Manager
-class OverlayEventManager:
-    def __init__(self):
-        self.connections: Set[Queue] = set()
-    
-    async def connect(self) -> Queue:
-        queue = Queue()
-        self.connections.add(queue)
-        return queue
-    
-    def disconnect(self, queue: Queue):
-        self.connections.discard(queue)
-    
-    async def broadcast(self, event_type: str, data: dict):
-        """Send event to all connected clients"""
-        disconnected = set()
-        for queue in self.connections:
-            try:
-                # Use put_nowait to avoid blocking
-                queue.put_nowait({"type": event_type, "data": data})
-            except asyncio.QueueFull:
-                # Queue is full, client is not consuming events
-                disconnected.add(queue)
-        
-        # Clean up disconnected clients
-        for queue in disconnected:
-            self.disconnect(queue)
-
-overlay_events = OverlayEventManager()
 
 @router.post("/configs", response_model=OverlayConfigResponse)
 async def create_overlay_config(
@@ -64,6 +34,7 @@ async def create_overlay_config(
     try:
         service = OverlayService(db)
         new_config = service.create_config(config)
+        notify_overlay_config_update([new_config.id], "overlay_config_created")
         return new_config
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -113,6 +84,7 @@ async def update_overlay_config(
         updated_config = service.update_config(config_id, config_update)
         if not updated_config:
             raise HTTPException(status_code=404, detail="Configuration not found")
+        notify_overlay_config_update([updated_config.id], "overlay_config_updated")
         return updated_config
     except HTTPException:
         raise
@@ -177,6 +149,20 @@ async def get_overlay_window_init(
     try:
         service = OverlayService(db)
         return service.get_window_init_payload(config_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/window-refresh-state")
+async def get_overlay_window_refresh_state(
+    config_id: int = Query(..., description="Overlay configuration ID"),
+    db: Session = Depends(get_db)
+):
+    try:
+        service = OverlayService(db)
+        return service.get_window_refresh_state(config_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as e:

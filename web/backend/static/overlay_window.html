@@ -632,6 +632,9 @@
         let selectedWidget = null;
         let dataUpdateIntervals = {};
         let initialUrlParams = new URLSearchParams(window.location.search);
+        let currentConfigId = initialUrlParams.get('config_id');
+        let currentConfigRevision = null;
+        let refreshStatePollInterval = null;
 
         function applyUrlOptions(params) {
             const hideControls = (
@@ -647,6 +650,7 @@
 
         function applyInitPayload(payload) {
             config = payload.config;
+            currentConfigId = String(payload.config?.id || currentConfigId || '');
             backgroundType = payload.backgroundType || payload.background_type || config.background_type || 'video';
             mappingScene = payload.mappingScene || payload.mapping_scene || null;
             videoTransform = config.video_transform || { x: 0, y: 0, scale: 1, rotation: 0 };
@@ -692,6 +696,7 @@
                 }
                 const payload = await response.json();
                 applyInitPayload(payload);
+                await refreshCurrentConfigRevision();
                 return true;
             } catch (error) {
                 console.error('Failed to bootstrap overlay window from URL:', error);
@@ -700,16 +705,60 @@
                 return true;
             }
         }
+
+        async function refreshCurrentConfigRevision() {
+            if (!currentConfigId) {
+                currentConfigRevision = null;
+                return;
+            }
+
+            const response = await fetch(`/api/overlay/window-refresh-state?config_id=${encodeURIComponent(currentConfigId)}`);
+            if (!response.ok) {
+                throw new Error(`Failed to fetch overlay refresh state (${response.status})`);
+            }
+            const payload = await response.json();
+            currentConfigRevision = payload.revision || null;
+        }
+
+        function startConfigRefreshPolling() {
+            if (refreshStatePollInterval) {
+                clearInterval(refreshStatePollInterval);
+            }
+
+            refreshStatePollInterval = setInterval(async () => {
+                if (!currentConfigId || !currentConfigRevision) {
+                    return;
+                }
+
+                try {
+                    const response = await fetch(`/api/overlay/window-refresh-state?config_id=${encodeURIComponent(currentConfigId)}`);
+                    if (!response.ok) {
+                        return;
+                    }
+                    const payload = await response.json();
+                    if (payload.revision && payload.revision !== currentConfigRevision) {
+                        console.log(`Overlay config ${currentConfigId} revision changed, reloading window`);
+                        window.location.reload();
+                    }
+                } catch (error) {
+                    console.error('Overlay refresh polling failed:', error);
+                }
+            }, 2000);
+        }
         
         // Initialize from parent window
         window.addEventListener('message', function(event) {
             if (event.data.type === 'init') {
                 applyUrlOptions(initialUrlParams);
                 applyInitPayload(event.data);
+                refreshCurrentConfigRevision().catch((error) => {
+                    console.error('Failed to update overlay revision after init message:', error);
+                });
             }
         });
 
         bootstrapFromUrl();
+        startConfigRefreshPolling();
         
         function loadVideoWithRetry(streamingUrl) {
             document.getElementById('video-container').style.display = 'block';
@@ -1461,6 +1510,14 @@
                                 }).catch(err => {
                                     console.error('Failed to sync video:', err);
                                 });
+                            }
+                        }
+
+                        if (data.type === 'config_updated') {
+                            const affectedConfigIds = (data.data.config_ids || []).map((configId) => String(configId));
+                            if (currentConfigId && affectedConfigIds.includes(String(currentConfigId))) {
+                                console.log(`Overlay config ${currentConfigId} changed (${data.data.reason}), reloading window`);
+                                window.location.reload();
                             }
                         }
                     } catch (error) {
