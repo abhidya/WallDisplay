@@ -120,3 +120,7 @@ class KoiFishAnimation extends BaseAnimation {
         }
     }
 }
+
+if (typeof window !== 'undefined') {
+    window.KoiFishAnimation = KoiFishAnimation;
+}

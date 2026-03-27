@@ -143,3 +143,7 @@ class FishPondAnimation extends BaseAnimation {
         }
     }
 }
+
+if (typeof window !== 'undefined') {
+    window.FishPondAnimation = FishPondAnimation;
+}

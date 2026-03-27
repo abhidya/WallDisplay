@@ -585,7 +585,7 @@ function Mappings() {
   };
 
   const handleStageClick = (event) => {
-    if (!polygonDraft || !sceneDraft || !previewCanvasRef.current) {
+    if (!sceneDraft || !previewCanvasRef.current) {
       return;
     }
 
@@ -596,6 +596,14 @@ function Mappings() {
     const scaleY = height / rect.height;
     const x = Math.max(0, Math.min(width, (event.clientX - rect.left) * scaleX));
     const y = Math.max(0, Math.min(height, (event.clientY - rect.top) * scaleY));
+
+    if (!polygonDraft) {
+      const hitGroupId = hitTestGroupAtPoint(sceneDraft, maskImages, x, y);
+      if (hitGroupId) {
+        setSelectedGroupId(hitGroupId);
+      }
+      return;
+    }
 
     setPolygonDraft((current) => ({
       ...current,
@@ -1415,6 +1423,45 @@ function drawFallbackFill(ctx, group, bounds) {
   gradient.addColorStop(1, group.color_b || '#003049');
   ctx.fillStyle = gradient;
   ctx.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+}
+
+const hitTestCanvas = document.createElement('canvas');
+hitTestCanvas.width = 1;
+hitTestCanvas.height = 1;
+const hitTestCtx = hitTestCanvas.getContext('2d', { willReadFrequently: true });
+
+function maskContainsPoint(image, x, y, width, height) {
+  if (!image || !hitTestCtx) {
+    return false;
+  }
+
+  const sourceX = Math.max(0, Math.min((image.naturalWidth || image.width || width) - 1, Math.round((x / width) * (image.naturalWidth || image.width || width))));
+  const sourceY = Math.max(0, Math.min((image.naturalHeight || image.height || height) - 1, Math.round((y / height) * (image.naturalHeight || image.height || height))));
+  hitTestCtx.clearRect(0, 0, 1, 1);
+  hitTestCtx.drawImage(image, sourceX, sourceY, 1, 1, 0, 0, 1, 1);
+  const data = hitTestCtx.getImageData(0, 0, 1, 1).data;
+  return data[3] > 0 && (data[0] + data[1] + data[2]) > 0;
+}
+
+function hitTestGroupAtPoint(sceneDraft, maskImages, x, y) {
+  const width = sceneDraft.canvas_width || 1280;
+  const height = sceneDraft.canvas_height || 720;
+  const groups = [...(sceneDraft.groups || [])]
+    .filter((group) => group.visible !== false && (group.mask_ids || []).length)
+    .sort((a, b) => (b.z_index || 0) - (a.z_index || 0));
+
+  for (const group of groups) {
+    const images = (group.mask_ids || []).map((maskId) => maskImages[maskId]).filter(Boolean);
+    if (!images.length) {
+      continue;
+    }
+    const hit = images.some((image) => maskContainsPoint(image, x, y, width, height));
+    if (hit) {
+      return group.id;
+    }
+  }
+
+  return '';
 }
 
 function applyLuminanceMasks(ctx, maskImages, width, height) {
