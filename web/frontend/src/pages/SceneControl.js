@@ -426,6 +426,29 @@ function SceneControl() {
     });
   };
 
+  const bubbleRanksUpFrom = (startIndex) => {
+    setGroupAssignments((current) => Object.fromEntries(
+      Object.entries(current).map(([sceneId, assignments]) => {
+        const nextAssignments = (assignments || []).map((bucket) => [...bucket]);
+        if (!nextAssignments[startIndex]) {
+          return [sceneId, nextAssignments];
+        }
+
+        const bubbledIds = nextAssignments
+          .slice(startIndex)
+          .flatMap((bucket) => bucket || []);
+
+        nextAssignments[startIndex] = Array.from(new Set(bubbledIds));
+        for (let index = startIndex + 1; index < nextAssignments.length; index += 1) {
+          nextAssignments[index] = [];
+        }
+
+        return [sceneId, nextAssignments];
+      }),
+    ));
+    setMessage(`Merged rank ${startIndex + 1} with all ranks below it.`);
+  };
+
   const autoAssignSimilar = () => {
     const nextAssignments = createSmartGroupAssignments(selectedScenes);
     setGroupAssignments(nextAssignments);
@@ -509,7 +532,16 @@ function SceneControl() {
                     <CardContent>
                       <Stack spacing={2}>
                         <Box>
-                          <Typography variant="h6">Rank {row.index + 1}</Typography>
+                          <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={1}>
+                            <Typography variant="h6">Rank {row.index + 1}</Typography>
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              onClick={() => bubbleRanksUpFrom(row.index)}
+                            >
+                              Bubble Below Up
+                            </Button>
+                          </Stack>
                           <Grid container spacing={1} sx={{ mt: 1 }}>
                             {row.groups.map(({ sceneId, sceneName, groups }) => (
                               <Grid item xs={12} md={6} lg={4} key={`${sceneId}-${row.index}`}>
