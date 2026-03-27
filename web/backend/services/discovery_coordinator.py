@@ -173,12 +173,17 @@ class DiscoveryCoordinator:
         logger.debug("Searching for DLNA devices on %s", host)
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-        ttl = struct.pack("B", 4)
-        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl)
-        sock.bind((host, 0))
+        try:
+            ttl = struct.pack("B", 4)
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl)
+            sock.bind((host, 0))
 
-        logger.debug("Sending SSDP broadcast message")
-        sock.sendto(SSDP_BROADCAST_MSG.encode("UTF-8"), (SSDP_BROADCAST_ADDR, SSDP_BROADCAST_PORT))
+            logger.debug("Sending SSDP broadcast message")
+            sock.sendto(SSDP_BROADCAST_MSG.encode("UTF-8"), (SSDP_BROADCAST_ADDR, SSDP_BROADCAST_PORT))
+        except OSError as exc:
+            logger.warning("DLNA discovery send failed on host %s: %s", host, exc)
+            sock.close()
+            return []
 
         logger.debug("Waiting for DLNA devices (%s seconds)", timeout)
         sock.settimeout(timeout)
@@ -196,6 +201,8 @@ class DiscoveryCoordinator:
                 devices.append(device)
             except Exception as exc:
                 logger.error("Error parsing DLNA device response: %s", exc)
+
+        sock.close()
 
         devices_urls = [
             dev["location"]
