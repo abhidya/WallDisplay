@@ -84,6 +84,7 @@ class DeviceLifecycleService:
                     if (
                         existing_device.device_info.get("hostname") == device_info.get("hostname")
                         and existing_device.device_info.get("location") == device_info.get("location")
+                        and existing_device.device_info.get("action_url") == device_info.get("action_url")
                     ):
                         logger.info("Device %s already registered with same parameters", device_name)
                         return existing_device

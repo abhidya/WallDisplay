@@ -13,6 +13,8 @@ import threading
 from core.dlna_device import DLNADevice
 from core.transcreen_device import TranscreenDevice
 from core.config_service import ConfigService
+from database.database import get_db
+from models.device import DeviceModel
 
 from .discovery_manager import DiscoveryManager
 from .base import Device, CastingMethod, DeviceCapability
@@ -220,6 +222,65 @@ class DiscoveryMigrationAdapter:
                 "connected" if getattr(device, "is_online", True) else "disconnected",
                 is_playing=False,
             )
+
+    def _persist_device_to_database(self, device: Device, status: str) -> None:
+        db_generator = get_db()
+        db = next(db_generator)
+        try:
+            db_device = db.query(DeviceModel).filter(DeviceModel.name == device.name).first()
+            if db_device is None:
+                db_device = DeviceModel(
+                    name=device.name,
+                    type="dlna",
+                    hostname=device.hostname,
+                    action_url=device.action_url,
+                    friendly_name=device.friendly_name or device.name,
+                    manufacturer=device.manufacturer or "",
+                    location=device.location or "",
+                    status=status,
+                    is_playing=False,
+                    config={
+                        "device_name": device.name,
+                        "type": "dlna",
+                        "hostname": device.hostname,
+                        "action_url": device.action_url,
+                        "friendly_name": device.friendly_name or device.name,
+                        "manufacturer": device.manufacturer,
+                        "location": device.location,
+                    },
+                )
+                db.add(db_device)
+            else:
+                config = dict(db_device.config or {})
+                config.update(
+                    {
+                        "device_name": device.name,
+                        "type": "dlna",
+                        "hostname": device.hostname,
+                        "action_url": device.action_url,
+                        "friendly_name": device.friendly_name or device.name,
+                        "manufacturer": device.manufacturer,
+                        "location": device.location,
+                    }
+                )
+                db_device.type = "dlna"
+                db_device.hostname = device.hostname
+                db_device.action_url = device.action_url
+                db_device.friendly_name = device.friendly_name or device.name
+                db_device.manufacturer = device.manufacturer or ""
+                db_device.location = device.location or ""
+                db_device.status = status
+                db_device.config = config
+
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            logger.error("Failed to persist unified device %s to database: %s", device.name, exc)
+        finally:
+            try:
+                db_generator.close()
+            except Exception:
+                pass
             
     def _convert_old_to_new_device(self, old_device) -> Optional[Device]:
         """Convert old device instance to new unified Device."""
@@ -330,20 +391,20 @@ class DiscoveryMigrationAdapter:
             return
 
         if event_type == "device_discovered":
-            if not self._get_old_device(device.name):
-                self._register_old_device(
-                    {
-                        "device_name": device.name,
-                        "type": "dlna",
-                        "hostname": device.hostname,
-                        "action_url": device.action_url,
-                        "friendly_name": device.friendly_name,
-                        "manufacturer": device.manufacturer,
-                        "location": device.location,
-                    }
-                )
+            device_info = {
+                "device_name": device.name,
+                "type": "dlna",
+                "hostname": device.hostname,
+                "action_url": device.action_url,
+                "friendly_name": device.friendly_name,
+                "manufacturer": device.manufacturer,
+                "location": device.location,
+            }
+            self._register_old_device(device_info)
+            self._persist_device_to_database(device, "connected")
             self._update_old_device_status(device.name, "connected", is_playing=False)
         elif event_type == "device_lost":
+            self._persist_device_to_database(device, "disconnected")
             if self._get_old_device(device.name):
                 self._update_old_device_status(device.name, "disconnected", is_playing=False)
             

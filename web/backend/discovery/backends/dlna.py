@@ -49,9 +49,13 @@ class DLNADiscoveryBackend(DiscoveryBackend):
     def _candidate_discovery_hosts(self) -> List[str]:
         candidates: List[str] = []
         seen = set()
+        local_addresses = self._local_ipv4_addresses()
 
         def add_candidate(value: Optional[str]) -> None:
             if not value or value in seen or value.startswith("127."):
+                return
+            if value != "0.0.0.0" and value not in local_addresses:
+                logger.warning("Skipping non-local unified discovery interface candidate %s", value)
                 return
             seen.add(value)
             candidates.append(value)
@@ -81,6 +85,28 @@ class DLNADiscoveryBackend(DiscoveryBackend):
             add_candidate("0.0.0.0")
 
         return candidates
+
+    def _local_ipv4_addresses(self) -> set[str]:
+        addresses: set[str] = set()
+        try:
+            hostname = socket.gethostname()
+            for family, _, _, _, sockaddr in socket.getaddrinfo(hostname, None, socket.AF_INET):
+                if family == socket.AF_INET and sockaddr:
+                    addresses.add(sockaddr[0])
+        except OSError:
+            logger.debug("Unified DLNA discovery failed to enumerate hostname IPv4 addresses", exc_info=True)
+
+        try:
+            probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                probe.connect(("8.8.8.8", 80))
+                addresses.add(probe.getsockname()[0])
+            finally:
+                probe.close()
+        except OSError:
+            logger.debug("Unified DLNA discovery failed to probe outbound IPv4 address", exc_info=True)
+
+        return addresses
         
     async def discover_devices(self) -> List[Device]:
         """
