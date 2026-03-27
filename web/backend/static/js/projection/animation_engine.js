@@ -51,6 +51,18 @@ class AnimationEngine {
         if (typeof TrainUpInTheCloudSeaAnimation !== 'undefined') {
             this.animationClasses.set('train_up_in_the_cloud_sea', TrainUpInTheCloudSeaAnimation);
         }
+        if (typeof CyberFuji2020Animation !== 'undefined') {
+            this.animationClasses.set('cyber_fuji_2020', CyberFuji2020Animation);
+        }
+        if (typeof WhaleRaymarchingAnimation !== 'undefined') {
+            this.animationClasses.set('whale_raymarching', WhaleRaymarchingAnimation);
+        }
+        if (typeof FractalLandAnimation !== 'undefined') {
+            this.animationClasses.set('fractal_land', FractalLandAnimation);
+        }
+        if (typeof SwarmingAnchovetaAnimation !== 'undefined') {
+            this.animationClasses.set('swarming_anchoveta', SwarmingAnchovetaAnimation);
+        }
         if (typeof SpectrumBarsAnimation !== 'undefined') {
             this.animationClasses.set('spectrum_bars', SpectrumBarsAnimation);
         }
