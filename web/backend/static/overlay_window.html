@@ -620,8 +620,10 @@
         let mappingMaskCache = new Map();
         let mappingMediaCache = new Map();
         let mappingMediaState = new Map();
+        let mappingMediaAdvanceTimers = new Map();
         let mappingAnimationFrame = null;
         const MIN_MAPPING_CLIP_SECONDS = 60;
+        const MAPPING_IMAGE_ADVANCE_MS = 10000;
         let isDragging = false;
         let isResizing = false;
         let isRotating = false;
@@ -655,6 +657,7 @@
             mappingScene = payload.mappingScene || payload.mapping_scene || null;
             videoTransform = config.video_transform || { x: 0, y: 0, scale: 1, rotation: 0 };
             widgets = config.widgets || [];
+            resetMappingPlaybackState();
 
             document.getElementById('loading').style.display = 'none';
 
@@ -798,15 +801,92 @@
             `;
         }
 
+        function clearGroupAdvanceTimer(groupId) {
+            const timer = mappingMediaAdvanceTimers.get(groupId);
+            if (timer) {
+                clearTimeout(timer);
+                mappingMediaAdvanceTimers.delete(groupId);
+            }
+        }
+
+        function clearMappingAdvanceTimers() {
+            mappingMediaAdvanceTimers.forEach((timer) => clearTimeout(timer));
+            mappingMediaAdvanceTimers.clear();
+        }
+
+        function resetMappingPlaybackState() {
+            clearMappingAdvanceTimers();
+            if (mappingAnimationFrame) {
+                cancelAnimationFrame(mappingAnimationFrame);
+                mappingAnimationFrame = null;
+            }
+            mappingMaskCache = new Map();
+            mappingMediaCache = new Map();
+            mappingMediaState = new Map();
+        }
+
+        function getNextMappingSourceIndex(state, group) {
+            if (!state?.sources?.length) {
+                return 0;
+            }
+            if (state.sources.length === 1) {
+                return 0;
+            }
+            if (group.shuffle) {
+                let nextIndex = state.currentIndex;
+                while (nextIndex === state.currentIndex) {
+                    nextIndex = Math.floor(Math.random() * state.sources.length);
+                }
+                return nextIndex;
+            }
+            return (state.currentIndex + 1) % state.sources.length;
+        }
+
+        function scheduleImageAdvance(group, state) {
+            clearGroupAdvanceTimer(group.id);
+            if (!state || state.type !== 'image' || state.sources.length <= 1 || group.auto_advance === false) {
+                return;
+            }
+
+            const advanceToken = (state.advanceToken || 0) + 1;
+            state.advanceToken = advanceToken;
+            mappingMediaState.set(group.id, state);
+
+            const timer = setTimeout(() => {
+                const activeState = mappingMediaState.get(group.id);
+                if (!activeState || activeState.type !== 'image' || activeState.advanceToken !== advanceToken) {
+                    return;
+                }
+
+                const nextIndex = getNextMappingSourceIndex(activeState, group);
+                const nextImage = new Image();
+                nextImage.onload = () => {
+                    const latestState = mappingMediaState.get(group.id);
+                    if (!latestState || latestState.type !== 'image' || latestState.advanceToken !== advanceToken) {
+                        return;
+                    }
+                    latestState.element = nextImage;
+                    latestState.currentIndex = nextIndex;
+                    mappingMediaCache.set(group.id, nextImage);
+                    mappingMediaState.set(group.id, latestState);
+                    scheduleImageAdvance(group, latestState);
+                };
+                nextImage.onerror = () => {
+                    scheduleImageAdvance(group, activeState);
+                };
+                nextImage.src = activeState.sources[nextIndex];
+            }, MAPPING_IMAGE_ADVANCE_MS);
+
+            mappingMediaAdvanceTimers.set(group.id, timer);
+        }
+
         async function initializeMappingScene(scene) {
             document.getElementById('video-container').style.display = 'none';
             document.getElementById('mapping-container').style.display = 'block';
             const canvas = document.getElementById('mapping-canvas');
             canvas.width = scene.canvas_width || 1280;
             canvas.height = scene.canvas_height || 720;
-            mappingMaskCache = new Map();
-            mappingMediaCache = new Map();
-            mappingMediaState = new Map();
+            resetMappingPlaybackState();
             await Promise.all((scene.masks || []).map(loadMappingMask));
             await Promise.all((scene.groups || []).map(loadGroupMedia));
             startMappingRenderLoop();
@@ -838,13 +918,15 @@
                 if (isImage) {
                     const image = new Image();
                     image.onload = () => {
-                        mappingMediaCache.set(group.id, image);
-                        mappingMediaState.set(group.id, {
+                        const state = {
                             element: image,
                             sources: mediaSources,
                             currentIndex,
                             type: 'image',
-                        });
+                        };
+                        mappingMediaCache.set(group.id, image);
+                        mappingMediaState.set(group.id, state);
+                        scheduleImageAdvance(group, state);
                         resolve();
                     };
                     image.onerror = resolve;

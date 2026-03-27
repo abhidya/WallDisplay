@@ -7,6 +7,7 @@ import {
   Collapse,
   Drawer,
   FormControl,
+  FormControlLabel,
   IconButton,
   InputLabel,
   List,
@@ -18,6 +19,7 @@ import {
   Select,
   Slider,
   Stack,
+  Switch,
   TextField,
   Tooltip,
   Typography,
@@ -62,7 +64,7 @@ const emptyGroup = () => ({
   media_directory_ids: [],
   direct_url: '',
   playlist_entries: [],
-  auto_advance: false,
+  auto_advance: true,
   shuffle: false,
   z_index: 0,
   visible: true,
@@ -910,6 +912,29 @@ function Mappings() {
                               ))}
                             </Select>
                           </FormControl>
+                        )}
+
+                        {['media_directory', 'media_list', 'photo_list'].includes(selectedGroup.media_binding_type) && (
+                          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                            <FormControlLabel
+                              control={(
+                                <Switch
+                                  checked={selectedGroup.auto_advance !== false}
+                                  onChange={(event) => updateGroup(selectedGroup.id, { auto_advance: event.target.checked })}
+                                />
+                              )}
+                              label="Auto-advance"
+                            />
+                            <FormControlLabel
+                              control={(
+                                <Switch
+                                  checked={Boolean(selectedGroup.shuffle)}
+                                  onChange={(event) => updateGroup(selectedGroup.id, { shuffle: event.target.checked })}
+                                />
+                              )}
+                              label="Shuffle"
+                            />
+                          </Stack>
                         )}
 
                         {selectedGroup.media_binding_type === 'media_channel' && (
