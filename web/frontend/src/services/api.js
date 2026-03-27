@@ -78,6 +78,7 @@ const deviceApi = {
   // Discovery control
   pauseDiscovery: () => api.post('/devices/discovery/pause'),
   resumeDiscovery: () => api.post('/devices/discovery/resume'),
+  setDiscoveryInterval: (seconds) => api.post('/devices/discovery/interval', null, { params: { seconds } }),
   getDiscoveryStatus: () => api.get('/devices/discovery/status'),
   // User control mode
   enableAutoMode: (deviceId) => api.post(`/devices/${deviceId}/control/auto`),

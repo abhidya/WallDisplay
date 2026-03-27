@@ -137,6 +137,9 @@ function Devices() {
     zone: ''
   });
   const [showDiscoveryDiagnostics, setShowDiscoveryDiagnostics] = useState(false);
+  const [discoveryIntervalInput, setDiscoveryIntervalInput] = useState('10');
+  const [discoveryIntervalDirty, setDiscoveryIntervalDirty] = useState(false);
+  const [savingDiscoveryInterval, setSavingDiscoveryInterval] = useState(false);
 
   const onlineDevices = devices.filter(device => getAvailabilityLabel(device) === 'online');
   const degradedDevices = devices.filter(device => getAvailabilityLabel(device) === 'degraded');
@@ -248,8 +251,44 @@ function Devices() {
     try {
       const response = await deviceApi.getDiscoveryStatus();
       setDiscoveryStatus(response.data);
+      if (!discoveryIntervalDirty && response.data?.interval !== undefined && response.data?.interval !== null) {
+        setDiscoveryIntervalInput(String(response.data.interval));
+      }
     } catch (err) {
       console.error('Error fetching discovery status:', err);
+    }
+  };
+
+  const handleSaveDiscoveryInterval = async () => {
+    const seconds = Number.parseInt(discoveryIntervalInput, 10);
+    if (!Number.isFinite(seconds) || seconds < 1 || seconds > 300) {
+      setSnackbar({
+        open: true,
+        message: 'Discovery interval must be between 1 and 300 seconds',
+        severity: 'error'
+      });
+      return;
+    }
+
+    try {
+      setSavingDiscoveryInterval(true);
+      await deviceApi.setDiscoveryInterval(seconds);
+      setDiscoveryIntervalDirty(false);
+      setSnackbar({
+        open: true,
+        message: `Discovery interval set to ${seconds}s`,
+        severity: 'success'
+      });
+      fetchDiscoveryStatus();
+    } catch (err) {
+      console.error('Error updating discovery interval:', err);
+      setSnackbar({
+        open: true,
+        message: 'Failed to update discovery interval',
+        severity: 'error'
+      });
+    } finally {
+      setSavingDiscoveryInterval(false);
     }
   };
 
@@ -746,6 +785,27 @@ function Devices() {
               </Accordion>
             </Box>
             <Box>
+              <TextField
+                size="small"
+                label="Interval (s)"
+                type="number"
+                value={discoveryIntervalInput}
+                onChange={(e) => {
+                  setDiscoveryIntervalInput(e.target.value);
+                  setDiscoveryIntervalDirty(true);
+                }}
+                inputProps={{ min: 1, max: 300 }}
+                sx={{ mr: 1, width: 130 }}
+              />
+              <Button
+                variant="outlined"
+                color="primary"
+                onClick={handleSaveDiscoveryInterval}
+                disabled={savingDiscoveryInterval}
+                sx={{ mr: 1 }}
+              >
+                {savingDiscoveryInterval ? 'Saving...' : 'Set Interval'}
+              </Button>
               <Button
                 variant="outlined"
                 color="primary"

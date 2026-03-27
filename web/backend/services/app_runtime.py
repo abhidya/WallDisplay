@@ -164,6 +164,29 @@ class AppRuntime:
     def resume_discovery(self) -> None:
         AppRuntime._get_active_discovery_controller(self).resume()
 
+    def set_discovery_interval(self, seconds: int) -> int:
+        if seconds < 1:
+            raise ValueError("Discovery interval must be at least 1 second")
+
+        if (
+            AppRuntime.uses_unified_discovery_authority.fget(self)
+            if hasattr(type(self), "uses_unified_discovery_authority")
+            else getattr(self, "uses_unified_discovery_authority", False)
+        ):
+            discovery_manager = getattr(self, "discovery_manager", None)
+            backends = getattr(discovery_manager, "backends", {}) if discovery_manager is not None else {}
+            for backend in backends.values():
+                if hasattr(backend, "discovery_interval"):
+                    backend.discovery_interval = seconds
+        else:
+            discovery_controller = AppRuntime._get_discovery_controller(self)
+            manager = getattr(discovery_controller, "manager", getattr(self, "device_manager", None))
+            if manager is None:
+                raise RuntimeError("Legacy discovery manager is unavailable")
+            manager.discovery_interval = seconds
+
+        return seconds
+
     def get_discovery_status(self) -> dict:
         status = AppRuntime._get_active_discovery_controller(self).get_status()
         authority = (

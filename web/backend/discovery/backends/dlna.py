@@ -15,6 +15,7 @@ from datetime import datetime
 import aiohttp
 
 from ..base import DiscoveryBackend, Device, CastingMethod, CastingSession, DeviceCapability
+from ..network import get_local_ipv4_addresses
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,7 @@ class DLNADiscoveryBackend(DiscoveryBackend):
     def _candidate_discovery_hosts(self) -> List[str]:
         candidates: List[str] = []
         seen = set()
-        local_addresses = self._local_ipv4_addresses()
+        local_addresses = get_local_ipv4_addresses()
 
         def add_candidate(value: Optional[str]) -> None:
             if not value or value in seen or value.startswith("127."):
@@ -59,6 +60,8 @@ class DLNADiscoveryBackend(DiscoveryBackend):
                 return
             seen.add(value)
             candidates.append(value)
+
+        add_candidate("0.0.0.0")
 
         add_candidate(os.environ.get("NANODLNA_DISCOVERY_INTERFACE_IP"))
         add_candidate(os.environ.get("SERVE_IP"))
@@ -81,32 +84,10 @@ class DLNADiscoveryBackend(DiscoveryBackend):
         except OSError:
             logger.debug("Unified DLNA discovery hostname lookup failed", exc_info=True)
 
-        if not candidates:
-            add_candidate("0.0.0.0")
+        for address in sorted(local_addresses):
+            add_candidate(address)
 
         return candidates
-
-    def _local_ipv4_addresses(self) -> set[str]:
-        addresses: set[str] = set()
-        try:
-            hostname = socket.gethostname()
-            for family, _, _, _, sockaddr in socket.getaddrinfo(hostname, None, socket.AF_INET):
-                if family == socket.AF_INET and sockaddr:
-                    addresses.add(sockaddr[0])
-        except OSError:
-            logger.debug("Unified DLNA discovery failed to enumerate hostname IPv4 addresses", exc_info=True)
-
-        try:
-            probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            try:
-                probe.connect(("8.8.8.8", 80))
-                addresses.add(probe.getsockname()[0])
-            finally:
-                probe.close()
-        except OSError:
-            logger.debug("Unified DLNA discovery failed to probe outbound IPv4 address", exc_info=True)
-
-        return addresses
         
     async def discover_devices(self) -> List[Device]:
         """

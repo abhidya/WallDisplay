@@ -123,6 +123,18 @@ def test_app_runtime_discovery_controls_delegate_to_device_manager():
     assert status == {"running": True, "authority": "legacy", "unified_running": False}
 
 
+def test_app_runtime_set_discovery_interval_delegates_to_legacy_manager():
+    manager = SimpleNamespace(discovery_interval=10)
+    runtime = SimpleNamespace(device_manager=manager)
+
+    from web.backend.services.app_runtime import AppRuntime
+
+    result = AppRuntime.set_discovery_interval(runtime, 25)
+
+    assert result == 25
+    assert manager.discovery_interval == 25
+
+
 def test_app_runtime_discovery_controls_use_unified_lifecycle_in_unified_mode(monkeypatch):
     calls = []
     unified_lifecycle = SimpleNamespace(
@@ -155,6 +167,27 @@ def test_app_runtime_discovery_controls_use_unified_lifecycle_in_unified_mode(mo
         "authority": "unified",
         "unified_running": False,
     }
+
+
+def test_app_runtime_set_discovery_interval_updates_unified_backends(monkeypatch):
+    backends = {
+        "DLNA": SimpleNamespace(discovery_interval=10),
+        "Overlay": SimpleNamespace(discovery_interval=15),
+    }
+    runtime = SimpleNamespace(
+        discovery_manager=SimpleNamespace(backends=backends),
+        uses_unified_discovery_authority=True,
+    )
+
+    monkeypatch.setenv("NANODLNA_DISCOVERY_AUTHORITY", "unified")
+
+    from web.backend.services.app_runtime import AppRuntime
+
+    result = AppRuntime.set_discovery_interval(runtime, 20)
+
+    assert result == 20
+    assert backends["DLNA"].discovery_interval == 20
+    assert backends["Overlay"].discovery_interval == 20
 
 
 def test_app_runtime_start_background_services_skips_legacy_discovery_in_unified_mode(monkeypatch):

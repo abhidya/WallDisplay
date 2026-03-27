@@ -68,6 +68,17 @@ def resume_discovery():
         "message": "Discovery loop resumed",
     }
 
+@router.post("/discovery/interval", response_model=DeviceActionResponse)
+def set_discovery_interval(
+    seconds: int = Query(..., ge=1, le=300, description="Discovery loop interval in seconds"),
+):
+    """Set the discovery loop interval"""
+    get_app_runtime().set_discovery_interval(seconds)
+    return {
+        "success": True,
+        "message": f"Discovery interval set to {seconds}s",
+    }
+
 @router.get("/discovery/status")
 def get_discovery_status():
     """Get discovery loop status"""

@@ -10,6 +10,8 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from discovery.network import get_local_ipv4_addresses
+
 if __import__("sys").version_info.major == 3:
     import urllib.request as urllibreq
     import urllib.parse as urllibparse
@@ -95,7 +97,7 @@ class DiscoveryCoordinator:
 
         candidates: List[str] = []
         seen = set()
-        local_addresses = self._local_ipv4_addresses()
+        local_addresses = get_local_ipv4_addresses()
 
         def add_candidate(value: Optional[str]) -> None:
             if not value or value in seen or value.startswith("127."):
@@ -105,6 +107,8 @@ class DiscoveryCoordinator:
                 return
             seen.add(value)
             candidates.append(value)
+
+        add_candidate("0.0.0.0")
 
         env_host = os.environ.get("NANODLNA_DISCOVERY_INTERFACE_IP") or os.environ.get("SERVE_IP")
         add_candidate(env_host)
@@ -134,32 +138,10 @@ class DiscoveryCoordinator:
         except OSError:
             logger.debug("Hostname address lookup failed during discovery host selection", exc_info=True)
 
-        if host == "0.0.0.0" or not candidates:
-            add_candidate("0.0.0.0")
+        for address in sorted(local_addresses):
+            add_candidate(address)
 
         return candidates
-
-    def _local_ipv4_addresses(self) -> set[str]:
-        addresses: set[str] = set()
-        try:
-            hostname = socket.gethostname()
-            for family, _, _, _, sockaddr in socket.getaddrinfo(hostname, None, socket.AF_INET):
-                if family == socket.AF_INET and sockaddr:
-                    addresses.add(sockaddr[0])
-        except OSError:
-            logger.debug("Failed to enumerate hostname IPv4 addresses", exc_info=True)
-
-        try:
-            probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            try:
-                probe.connect(("8.8.8.8", 80))
-                addresses.add(probe.getsockname()[0])
-            finally:
-                probe.close()
-        except OSError:
-            logger.debug("Failed to probe outbound IPv4 address", exc_info=True)
-
-        return addresses
 
     def start(self) -> None:
         authority = os.environ.get("NANODLNA_DISCOVERY_AUTHORITY", "legacy").strip().lower()

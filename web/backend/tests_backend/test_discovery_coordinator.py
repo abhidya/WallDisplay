@@ -162,3 +162,30 @@ def test_discovery_coordinator_does_not_start_in_unified_authority(monkeypatch):
 
     assert manager.discovery_running is False
     assert manager.discovery_paused is True
+
+
+def test_discovery_coordinator_candidate_hosts_include_all_local_interfaces(monkeypatch):
+    class _FakeSocket:
+        def connect(self, _addr):
+            return None
+
+        def getsockname(self):
+            return ("10.0.0.74", 12345)
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(
+        "web.backend.services.discovery_coordinator.get_local_ipv4_addresses",
+        lambda: {"10.0.0.74", "10.0.0.99"},
+    )
+    monkeypatch.setattr("web.backend.services.discovery_coordinator.socket.socket", lambda *_args, **_kwargs: _FakeSocket())
+    monkeypatch.setattr("web.backend.services.discovery_coordinator.socket.gethostname", lambda: "mini")
+    monkeypatch.setattr(
+        "web.backend.services.discovery_coordinator.socket.getaddrinfo",
+        lambda *_args, **_kwargs: [(None, None, None, None, ("10.0.0.99", 0))],
+    )
+
+    coordinator = DiscoveryCoordinator(SimpleNamespace())
+
+    assert coordinator._candidate_discovery_hosts() == ["0.0.0.0", "10.0.0.74", "10.0.0.99"]
