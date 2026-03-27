@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Alert,
   Box,
@@ -74,6 +75,19 @@ const emptyGroup = () => ({
   color_b: '#6a7f58',
 });
 
+const GROUP_COLOR_PALETTE = [
+  ['#d1495b', '#edae49'],
+  ['#00798c', '#d1495b'],
+  ['#30638e', '#f4d35e'],
+  ['#6a994e', '#a7c957'],
+  ['#5f0f40', '#9a031e'],
+  ['#0f4c5c', '#e36414'],
+  ['#7b2cbf', '#c77dff'],
+  ['#2a9d8f', '#e9c46a'],
+  ['#3a86ff', '#8338ec'],
+  ['#ef476f', '#ffd166'],
+];
+
 function normalizeNumericIdList(values) {
   return (Array.isArray(values) ? values : [])
     .map((value) => Number(value))
@@ -81,6 +95,7 @@ function normalizeNumericIdList(values) {
 }
 
 function Mappings() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const stageRef = useRef(null);
   const previewCanvasRef = useRef(null);
 
@@ -109,8 +124,20 @@ function Mappings() {
     media: false,
     visual: false,
   });
+  const requestedSceneId = searchParams.get('scene');
 
   useEffect(() => {
+    const pickInitialScene = (loadedScenes) => {
+      if (!loadedScenes?.length) {
+        createSceneDraft();
+        return;
+      }
+      const targetScene = requestedSceneId
+        ? loadedScenes.find((scene) => String(scene.id) === String(requestedSceneId))
+        : null;
+      loadScene(targetScene || loadedScenes[0]);
+    };
+
     Promise.all([
       mappingsApi.listScenes(),
       videoApi.getVideos(),
@@ -120,23 +147,20 @@ function Mappings() {
       photoListApi.listPhotoLists(),
       mediaLibraryApi.listMediaChannels(),
     ]).then(([sceneRes, videoRes, photoRes, mediaDirectoryRes, mediaListRes, photoListRes, mediaChannelRes]) => {
-      setScenes(sceneRes.data || []);
+      const loadedScenes = sceneRes.data || [];
+      setScenes(loadedScenes);
       setVideos(videoRes.data.videos || []);
       setPhotos(photoRes.data.photos || []);
       setMediaDirectories(mediaDirectoryRes.data || []);
       setMediaLists(mediaListRes.data || []);
       setPhotoLists(photoListRes.data || []);
       setMediaChannels(mediaChannelRes.data || []);
-      if (sceneRes.data?.length) {
-        loadScene(sceneRes.data[0]);
-      } else {
-        createSceneDraft();
-      }
+      pickInitialScene(loadedScenes);
     }).catch((err) => {
       console.error(err);
       setError('Failed to load mappings workspace');
     });
-  }, []);
+  }, [requestedSceneId]);
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -166,6 +190,11 @@ function Mappings() {
     setSelectedSceneId(scene.id);
     setSceneDraft(JSON.parse(JSON.stringify(scene)));
     setSelectedGroupId(scene.groups?.[0]?.id || '');
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.set('scene', String(scene.id));
+      return next;
+    }, { replace: true });
   };
 
   const createSceneDraft = () => {
@@ -264,6 +293,11 @@ function Mappings() {
         loadScene(remainingScenes[0]);
       } else {
         createSceneDraft();
+        setSearchParams((current) => {
+          const next = new URLSearchParams(current);
+          next.delete('scene');
+          return next;
+        }, { replace: true });
       }
       setMessage(`Deleted scene "${selectedScene.name}"`);
     } catch (err) {
@@ -358,6 +392,85 @@ function Mappings() {
       groups: [...(current.groups || []), group],
     }));
     setSelectedGroupId(group.id);
+  };
+
+  const buildGroupFromMask = (mask, index, zIndexBase = 0) => {
+    const [colorA, colorB] = GROUP_COLOR_PALETTE[index % GROUP_COLOR_PALETTE.length];
+    return {
+      ...emptyGroup(),
+      name: mask.name || mask.file_name || `Mask ${index + 1}`,
+      mask_ids: [mask.id],
+      z_index: zIndexBase + index,
+      color_a: colorA,
+      color_b: colorB,
+    };
+  };
+
+  const ensureFullSceneMask = async () => {
+    if (!selectedScene || !sceneDraft) {
+      throw new Error('Save the scene before creating groups from masks.');
+    }
+
+    const existingFullMask = (sceneDraft.masks || []).find((mask) => (
+      Number(mask.width) === Number(sceneDraft.canvas_width)
+      && Number(mask.height) === Number(sceneDraft.canvas_height)
+      && ['full', 'background', 'full_scene'].includes(String(mask.name || '').toLowerCase())
+    ));
+    if (existingFullMask) {
+      return existingFullMask;
+    }
+
+    const response = await mappingsApi.createPolygonMask(selectedScene.id, {
+      name: 'full',
+      points: [
+        { x: 0, y: 0 },
+        { x: sceneDraft.canvas_width, y: 0 },
+        { x: sceneDraft.canvas_width, y: sceneDraft.canvas_height },
+        { x: 0, y: sceneDraft.canvas_height },
+      ],
+    });
+    const updatedScene = response.data;
+    setScenes((current) => current.map((scene) => (scene.id === updatedScene.id ? updatedScene : scene)));
+    loadScene(updatedScene);
+    return (updatedScene.masks || []).find((mask) => String(mask.name || '').toLowerCase() === 'full')
+      || updatedScene.masks?.[updatedScene.masks.length - 1];
+  };
+
+  const createGroupsFromMasks = async () => {
+    if (!selectedScene || !sceneDraft) {
+      setError('Save the scene before generating groups from masks.');
+      return;
+    }
+    if (!(sceneDraft.masks || []).length) {
+      setError('Add masks before generating groups.');
+      return;
+    }
+
+    try {
+      setMessage('');
+      setError('');
+      const fullMask = await ensureFullSceneMask();
+      const masks = (sceneDraft.masks || []).filter((mask) => mask.id !== fullMask?.id);
+      const maskGroups = masks.map((mask, index) => buildGroupFromMask(mask, index, 1));
+      const backgroundGroup = {
+        ...emptyGroup(),
+        name: 'background',
+        mask_ids: fullMask ? [fullMask.id] : [],
+        z_index: 0,
+        color_a: '#000000',
+        color_b: '#000000',
+      };
+
+      setSceneDraft((current) => ({
+        ...current,
+        groups: [backgroundGroup, ...maskGroups],
+      }));
+      setSelectedGroupId(backgroundGroup.id);
+      setMessage(`Created ${maskGroups.length} mask groups plus background group.`);
+    } catch (err) {
+      console.error(err);
+      setError(err.message || 'Failed to generate groups from masks.');
+    }
   };
 
   const removeGroup = (groupId) => {
@@ -595,6 +708,11 @@ function Mappings() {
                       )}
                     />
                     <Collapse in={!collapsedSections.masks}>
+                      <Stack direction="row" spacing={1} sx={{ mb: 1.5 }}>
+                        <Button size="small" variant="contained" onClick={createGroupsFromMasks} disabled={!selectedScene || !(sceneDraft?.masks || []).length}>
+                          Groups From Masks
+                        </Button>
+                      </Stack>
                       {polygonDraft ? (
                         <Paper sx={{ p: 1.5, mb: 1.5, bgcolor: '#fff7ea', border: `1px solid ${PANEL_BORDER}`, boxShadow: 'none' }}>
                           <Stack spacing={1.5}>

@@ -106,6 +106,47 @@ class MappingSceneService:
         self.db.refresh(scene)
         return self._to_response(scene)
 
+    def add_mask_files(self, scene_id: int, mask_files: List[Dict[str, str]]) -> MappingSceneResponse:
+        scene = self.db.query(MappingScene).filter(MappingScene.id == scene_id).first()
+        if not scene:
+            raise ValueError("Scene not found")
+
+        mask_dir = os.path.join(self._ensure_scene_dir(scene_id), "masks")
+        os.makedirs(mask_dir, exist_ok=True)
+        existing_masks = list(scene.masks or [])
+        sort_order = len(existing_masks)
+
+        for item in mask_files:
+            source_path = item.get("file_path")
+            if not source_path or not os.path.exists(source_path):
+                raise ValueError(f"Mask file missing: {source_path}")
+
+            suffix = os.path.splitext(item.get("file_name") or source_path)[1].lower() or ".png"
+            stored_name = f"{uuid.uuid4().hex}{suffix}"
+            stored_path = os.path.join(mask_dir, stored_name)
+            shutil.copyfile(source_path, stored_path)
+
+            image = Image.open(stored_path)
+            rel_path = os.path.relpath(stored_path, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            file_name = item.get("file_name") or os.path.basename(source_path)
+            existing_masks.append(
+                MappingMask(
+                    id=uuid.uuid4().hex,
+                    name=item.get("name") or os.path.splitext(file_name)[0],
+                    file_name=file_name,
+                    stored_path=rel_path.replace("\\", "/"),
+                    width=image.width,
+                    height=image.height,
+                    sort_order=sort_order,
+                ).model_dump()
+            )
+            sort_order += 1
+
+        scene.masks = existing_masks
+        self.db.commit()
+        self.db.refresh(scene)
+        return self._to_response(scene)
+
     def create_polygon_mask(self, scene_id: int, name: str, points: List[MappingPoint]) -> MappingSceneResponse:
         scene = self.db.query(MappingScene).filter(MappingScene.id == scene_id).first()
         if not scene:

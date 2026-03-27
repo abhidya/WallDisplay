@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Alert,
   Box,
@@ -10,6 +11,7 @@ import {
   CircularProgress,
   Divider,
   Grid,
+  LinearProgress,
   List,
   ListItem,
   ListItemText,
@@ -42,6 +44,7 @@ function getProjectorOptionLabel(projector) {
 }
 
 function StructuredLighting() {
+  const navigate = useNavigate();
   const [capabilities, setCapabilities] = useState(null);
   const [status, setStatus] = useState(null);
   const [sessions, setSessions] = useState([]);
@@ -49,11 +52,13 @@ function StructuredLighting() {
   const [runtime, setRuntime] = useState(null);
   const [captures, setCaptures] = useState(null);
   const [artifactReview, setArtifactReview] = useState(null);
+  const [tuningSearch, setTuningSearch] = useState(null);
   const [projectors, setProjectors] = useState([]);
   const [selectedSessionId, setSelectedSessionId] = useState('');
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
   const [reviewNotes, setReviewNotes] = useState('');
   const [reviewedBy, setReviewedBy] = useState('');
   const [sessionView, setSessionView] = useState('active');
@@ -138,6 +143,7 @@ function StructuredLighting() {
         });
         await refreshSessions();
         setError('');
+        setMessage('');
       } catch (err) {
         console.error('Failed to load structured lighting module', err);
         if (active) {
@@ -164,21 +170,24 @@ function StructuredLighting() {
         setRuntime(null);
         setCaptures(null);
         setArtifactReview(null);
+        setTuningSearch(null);
         setReviewNotes('');
         return;
       }
       try {
-        const [planResponse, runtimeResponse, capturesResponse, reviewResponse] = await Promise.all([
+        const [planResponse, runtimeResponse, capturesResponse, reviewResponse, tuningSearchResponse] = await Promise.all([
           structuredLightingApi.getCapturePlan(selectedSessionId),
           structuredLightingApi.getRuntime(selectedSessionId),
           structuredLightingApi.listCaptures(selectedSessionId),
           structuredLightingApi.getArtifactReview(selectedSessionId),
+          structuredLightingApi.getTuningSearch(selectedSessionId),
         ]);
         if (active) {
           setPlan(planResponse.data);
           setRuntime(runtimeResponse.data);
           setCaptures(capturesResponse.data);
           setArtifactReview(reviewResponse.data);
+          setTuningSearch(tuningSearchResponse.data);
           syncSessionSnapshot(runtimeResponse.data?.session || planResponse.data?.session);
           setReviewNotes(reviewResponse.data?.review?.notes || '');
           setReviewedBy(reviewResponse.data?.review?.reviewed_by || '');
@@ -190,6 +199,7 @@ function StructuredLighting() {
           setRuntime(null);
           setCaptures(null);
           setArtifactReview(null);
+          setTuningSearch(null);
           setReviewNotes('');
           setReviewedBy('');
         }
@@ -203,7 +213,11 @@ function StructuredLighting() {
 
   const selectedSession = sessions.find((session) => session.session_id === selectedSessionId) || null;
   const selectedSessionStatus = runtime?.session?.status || selectedSession?.status || '';
-  const shouldPollRuntime = Boolean(selectedSessionId) && ['waiting_for_worker', 'ready', 'capturing'].includes(selectedSessionStatus);
+  const decodeStatus = runtime?.session?.decode?.status || selectedSession?.decode?.status || '';
+  const shouldPollRuntime = Boolean(selectedSessionId) && (
+    ['waiting_for_worker', 'ready', 'capturing'].includes(selectedSessionStatus)
+    || decodeStatus === 'running'
+  );
 
   useEffect(() => {
     if (!selectedSessionId || !shouldPollRuntime) {
@@ -224,11 +238,12 @@ function StructuredLighting() {
 
       runtimeRefreshInFlightRef.current = true;
       try {
-        const [statusResponse, runtimeResponse, capturesResponse, reviewResponse] = await Promise.all([
+        const [statusResponse, runtimeResponse, capturesResponse, reviewResponse, tuningSearchResponse] = await Promise.all([
           structuredLightingApi.getStatus(),
           structuredLightingApi.getRuntime(selectedSessionId),
           structuredLightingApi.listCaptures(selectedSessionId),
           structuredLightingApi.getArtifactReview(selectedSessionId),
+          structuredLightingApi.getTuningSearch(selectedSessionId),
         ]);
         if (cancelled) {
           return;
@@ -237,6 +252,7 @@ function StructuredLighting() {
         setRuntime(runtimeResponse.data);
         setCaptures(capturesResponse.data);
         setArtifactReview(reviewResponse.data);
+        setTuningSearch(tuningSearchResponse.data);
         syncSessionSnapshot(runtimeResponse.data?.session);
         setReviewNotes((current) => current || reviewResponse.data?.review?.notes || '');
         setReviewedBy((current) => current || reviewResponse.data?.review?.reviewed_by || '');
@@ -275,6 +291,7 @@ function StructuredLighting() {
       await refreshStatus();
       setSelectedSessionId(created.session_id);
       setError('');
+      setMessage('');
     } catch (err) {
       console.error('Failed to create structured lighting session', err);
       setError('Failed to create structured lighting session.');
@@ -296,6 +313,7 @@ function StructuredLighting() {
       });
       await refreshStatus();
       setError('');
+      setMessage('');
     } catch (err) {
       console.error('Failed to start structured lighting worker', err);
       setError('Failed to start structured lighting worker.');
@@ -310,6 +328,7 @@ function StructuredLighting() {
       await structuredLightingApi.stopWorker();
       await refreshStatus();
       setError('');
+      setMessage('');
     } catch (err) {
       console.error('Failed to stop structured lighting worker', err);
       setError('Failed to stop structured lighting worker.');
@@ -327,6 +346,7 @@ function StructuredLighting() {
       await structuredLightingApi.confirmWorkerReady(status.worker.worker_id);
       await refreshStatus();
       setError('');
+      setMessage('');
     } catch (err) {
       console.error('Failed to confirm structured lighting camera framing', err);
       setError('Failed to confirm structured lighting camera framing.');
@@ -341,17 +361,20 @@ function StructuredLighting() {
       await structuredLightingApi.startSession(sessionId);
       await refreshSessions();
       await refreshStatus();
-      const [runtimeResponse, capturesResponse, reviewResponse] = await Promise.all([
+      const [runtimeResponse, capturesResponse, reviewResponse, tuningSearchResponse] = await Promise.all([
         structuredLightingApi.getRuntime(sessionId),
         structuredLightingApi.listCaptures(sessionId),
         structuredLightingApi.getArtifactReview(sessionId),
+        structuredLightingApi.getTuningSearch(sessionId),
       ]);
       setRuntime(runtimeResponse.data);
       setCaptures(capturesResponse.data);
       setArtifactReview(reviewResponse.data);
+      setTuningSearch(tuningSearchResponse.data);
       setReviewNotes(reviewResponse.data?.review?.notes || '');
       setReviewedBy(reviewResponse.data?.review?.reviewed_by || '');
       setError('');
+      setMessage('');
     } catch (err) {
       console.error('Failed to start structured lighting session', err);
       setError('Failed to start structured lighting session.');
@@ -360,24 +383,47 @@ function StructuredLighting() {
     }
   };
 
-  const handleDecodeSession = async (sessionId) => {
+  const handleDecodeSession = async (sessionId, tuningParams = null) => {
     try {
       setActionLoading(true);
-      await structuredLightingApi.decodeSession(sessionId, { sample_step: 2 });
-      const [runtimeResponse, capturesResponse, sessionsResponse, reviewResponse] = await Promise.all([
+      setRuntime((current) => (
+        current && current.session?.session_id === sessionId
+          ? {
+              ...current,
+              session: {
+                ...current.session,
+                decode: {
+                  ...(current.session.decode || {}),
+                  status: 'running',
+                  message: tuningParams ? 'Applying selected tuning candidate.' : 'Decoding graycode captures and generating repaired projector layers.',
+                  progress: {
+                    phase: 'initializing',
+                    label: tuningParams ? 'Applying selected tuning candidate' : 'Preparing decode',
+                    percent: 2,
+                  },
+                },
+              },
+            }
+          : current
+      ));
+      await structuredLightingApi.decodeSession(sessionId, { sample_step: 1, tuning_params: tuningParams || undefined });
+      const [runtimeResponse, capturesResponse, sessionsResponse, reviewResponse, tuningSearchResponse] = await Promise.all([
         structuredLightingApi.getRuntime(sessionId),
         structuredLightingApi.listCaptures(sessionId),
         structuredLightingApi.listSessions(),
         structuredLightingApi.getArtifactReview(sessionId),
+        structuredLightingApi.getTuningSearch(sessionId),
       ]);
       setRuntime(runtimeResponse.data);
       setCaptures(capturesResponse.data);
       setSessions(sessionsResponse.data || []);
       setArtifactReview(reviewResponse.data);
+      setTuningSearch(tuningSearchResponse.data);
       setReviewNotes(reviewResponse.data?.review?.notes || '');
       setReviewedBy(reviewResponse.data?.review?.reviewed_by || '');
       await refreshStatus();
       setError('');
+      setMessage(tuningParams ? 'Decoded using selected tuning candidate.' : '');
     } catch (err) {
       console.error('Failed to decode structured lighting session', err);
       setError('Failed to decode structured lighting session.');
@@ -401,6 +447,7 @@ function StructuredLighting() {
         setReviewedBy('');
       }
       setSelectedSessionIds((current) => current.filter((id) => id !== sessionId));
+      setMessage('');
     } catch (err) {
       console.error('Failed to delete structured lighting session', err);
       setError('Failed to delete structured lighting session.');
@@ -425,6 +472,7 @@ function StructuredLighting() {
       await refreshSessions();
       await refreshStatus();
       setError('');
+      setMessage('');
     } catch (err) {
       console.error('Failed to update structured lighting review', err);
       setError('Failed to update structured lighting review.');
@@ -433,8 +481,46 @@ function StructuredLighting() {
     }
   };
 
+  const handlePublishMappingScene = async (sessionId) => {
+    try {
+      setActionLoading(true);
+      const response = await structuredLightingApi.publishMappingScene(sessionId, {});
+      const published = response.data;
+      setError('');
+      setMessage(`Published ${published.mask_count} masks to Mapping scene "${published.scene_name}" (#${published.scene_id}).`);
+      navigate(`/mappings?scene=${published.scene_id}`);
+    } catch (err) {
+      console.error('Failed to publish mapping scene', err);
+      setError(err.response?.data?.detail || 'Failed to publish mapping scene.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleRunTuningSearch = async (sessionId) => {
+    try {
+      setActionLoading(true);
+      const response = await structuredLightingApi.runTuningSearch(sessionId, { sample_step: 1 });
+      setTuningSearch(response.data);
+      setError('');
+      setMessage('Generated tuning candidates for operator review.');
+    } catch (err) {
+      console.error('Failed to run tuning search', err);
+      setError(err.response?.data?.detail || 'Failed to run tuning search.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const visibleSessions = sessions.filter((session) => {
     const reviewStatus = session.review?.status || 'pending';
+    const isDeleted = session.status === 'deleted';
+    if (sessionFilter === 'deleted') {
+      return isDeleted;
+    }
+    if (isDeleted) {
+      return false;
+    }
     const inView = sessionView === 'archive' ? reviewStatus === 'accepted' : reviewStatus !== 'accepted';
     if (!inView) {
       return false;
@@ -446,10 +532,14 @@ function StructuredLighting() {
   });
 
   const sessionCounts = sessions.reduce((counts, session) => {
+    if (session.status === 'deleted') {
+      counts.deleted = (counts.deleted || 0) + 1;
+      return counts;
+    }
     const reviewStatus = session.review?.status || 'pending';
     counts[reviewStatus] = (counts[reviewStatus] || 0) + 1;
     return counts;
-  }, { pending: 0, needs_recapture: 0, accepted: 0 });
+  }, { pending: 0, needs_recapture: 0, accepted: 0, deleted: 0 });
 
   const selectedVisibleSessionIds = selectedSessionIds.filter((id) => (
     visibleSessions.some((session) => session.session_id === id)
@@ -570,6 +660,7 @@ function StructuredLighting() {
       </Box>
 
       {error ? <Alert severity="error">{error}</Alert> : null}
+      {message ? <Alert severity="success">{message}</Alert> : null}
 
       <Grid container spacing={2}>
         <Grid item xs={12} md={3}>
@@ -675,12 +766,22 @@ function StructuredLighting() {
                   <Chip label={`camera ${status.worker.camera_indices.join(', ')}`} size="small" variant="outlined" />
                 ) : null}
               </Box>
+              <Typography variant="body2" color="text.secondary">
+                Camera Index selects the host capture device used by the worker.
+              </Typography>
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
                 <Button variant="contained" onClick={handleStartWorker} disabled={actionLoading || workerProcessState !== 'stopped'}>
                   Start Worker
                 </Button>
                 <Button variant="outlined" color="error" onClick={handleStopWorker} disabled={actionLoading || workerProcessState === 'stopped'}>
                   Stop Worker
+                </Button>
+                <Button
+                  variant="outlined"
+                  onClick={() => setWorkerForm((current) => ({ ...current, camera_index: form.camera_index }))}
+                  disabled={actionLoading}
+                >
+                  Use Session Camera
                 </Button>
                 <Button variant="contained" color="success" onClick={handleConfirmWorkerReady} disabled={actionLoading || !workerCanConfirm}>
                   Confirm Camera Ready
@@ -852,6 +953,7 @@ function StructuredLighting() {
                 <MenuItem value="pending">Pending Review</MenuItem>
                 <MenuItem value="needs_recapture">Needs Recapture</MenuItem>
                 <MenuItem value="accepted">Accepted</MenuItem>
+                <MenuItem value="deleted">Deleted</MenuItem>
               </TextField>
               <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap' }}>
                 <Chip
@@ -874,6 +976,12 @@ function StructuredLighting() {
                     setSessionView('archive');
                     setSessionFilter('accepted');
                   }}
+                />
+                <Chip
+                  label={`Deleted ${sessionCounts.deleted}`}
+                  color={sessionFilter === 'deleted' ? 'default' : 'default'}
+                  clickable
+                  onClick={() => setSessionFilter('deleted')}
                 />
               </Stack>
               <Stack direction="row" spacing={1} alignItems="center" sx={{ flexWrap: 'wrap' }}>
@@ -1070,6 +1178,23 @@ function StructuredLighting() {
                     Decode status: {runtime.session.decode.status}. {runtime.session.decode.message}
                   </Alert>
                 ) : null}
+                {runtime?.session?.decode?.status === 'running' ? (
+                  <Box>
+                    <Stack direction="row" justifyContent="space-between" sx={{ mb: 0.75 }}>
+                      <Typography variant="subtitle2">
+                        {runtime.session.decode.progress?.label || 'Decode in progress'}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {runtime.session.decode.progress?.percent ?? 0}%
+                      </Typography>
+                    </Stack>
+                    <LinearProgress
+                      variant="determinate"
+                      value={runtime.session.decode.progress?.percent ?? 0}
+                      sx={{ height: 8, borderRadius: 999 }}
+                    />
+                  </Box>
+                ) : null}
                 {runtime?.current_step ? (
                   <Box>
                     <Typography variant="subtitle2" gutterBottom>Current Pattern Preview</Typography>
@@ -1160,13 +1285,115 @@ function StructuredLighting() {
                   </Box>
                 ) : null}
                 {runtime?.session?.review?.status === 'accepted' ? (
-                  <Button
-                    variant="contained"
-                    component="a"
-                    href={structuredLightingApi.getExportUrl(runtime.session.session_id)}
-                  >
-                    Export Session Bundle
-                  </Button>
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                    <Button
+                      variant="contained"
+                      onClick={() => handlePublishMappingScene(runtime.session.session_id)}
+                      disabled={actionLoading}
+                    >
+                      Publish To Mapping
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      component="a"
+                      href={structuredLightingApi.getExportUrl(runtime.session.session_id)}
+                    >
+                      Export Session Bundle
+                    </Button>
+                  </Stack>
+                ) : null}
+                {runtime?.session?.status === 'completed' ? (
+                  <Box>
+                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 1.5 }}>
+                      <Button
+                        variant="outlined"
+                        onClick={() => handleRunTuningSearch(runtime.session.session_id)}
+                        disabled={actionLoading}
+                      >
+                        Run Parameter Search
+                      </Button>
+                      {runtime?.session?.decode?.metrics?.tuning_params ? (
+                        <Chip
+                          label={`active tuning: threshold ${runtime.session.decode.metrics.tuning_params.segmentation_threshold}, blur ${runtime.session.decode.metrics.tuning_params.segmentation_blur}, contrast ${runtime.session.decode.metrics.tuning_params.contrast_threshold}, layer area ${runtime.session.decode.metrics.tuning_params.layer_min_area}`}
+                          size="small"
+                          variant="outlined"
+                        />
+                      ) : null}
+                    </Stack>
+                    {tuningSearch?.candidates?.length ? (
+                      <Stack spacing={2}>
+                        <Typography variant="subtitle2">
+                          Parameter Search Results
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Compare candidate masks before choosing one to apply to the final decode.
+                        </Typography>
+                        <Grid container spacing={2}>
+                          {tuningSearch.candidates.map((candidate) => (
+                            <Grid item xs={12} lg={6} key={candidate.id}>
+                              <Card variant="outlined">
+                                <CardContent>
+                                  <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={1} sx={{ mb: 1 }}>
+                                    <Box>
+                                      <Typography variant="subtitle2">{candidate.label}</Typography>
+                                      <Typography variant="body2" color="text.secondary">
+                                        {candidate.description}
+                                      </Typography>
+                                    </Box>
+                                    <Button
+                                      size="small"
+                                      variant="contained"
+                                      disabled={actionLoading}
+                                      onClick={() => handleDecodeSession(runtime.session.session_id, candidate.params)}
+                                    >
+                                      Use This Candidate
+                                    </Button>
+                                  </Stack>
+                                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 1.5 }}>
+                                    <Chip label={`seg threshold ${candidate.params.segmentation_threshold}`} size="small" variant="outlined" />
+                                    <Chip label={`seg blur ${candidate.params.segmentation_blur}`} size="small" variant="outlined" />
+                                    <Chip label={`contrast ${candidate.params.contrast_threshold}`} size="small" variant="outlined" />
+                                    <Chip label={`layer min area ${candidate.params.layer_min_area}`} size="small" variant="outlined" />
+                                    <Chip label={`filtered layers ${candidate.metrics.filtered_layer_count}`} size="small" />
+                                  </Box>
+                                  <Grid container spacing={1}>
+                                    <Grid item xs={12} md={6}>
+                                      <Box
+                                        component="img"
+                                        src={structuredLightingApi.getTuningSearchPreviewUrl(runtime.session.session_id, candidate.id, 'warp')}
+                                        alt={`${candidate.label} warp`}
+                                        sx={{
+                                          width: '100%',
+                                          display: 'block',
+                                          border: '1px solid rgba(0,0,0,0.16)',
+                                          borderRadius: 1,
+                                          bgcolor: '#000',
+                                        }}
+                                      />
+                                    </Grid>
+                                    <Grid item xs={12} md={6}>
+                                      <Box
+                                        component="img"
+                                        src={structuredLightingApi.getTuningSearchPreviewUrl(runtime.session.session_id, candidate.id, 'mask')}
+                                        alt={`${candidate.label} mask`}
+                                        sx={{
+                                          width: '100%',
+                                          display: 'block',
+                                          border: '1px solid rgba(0,0,0,0.16)',
+                                          borderRadius: 1,
+                                          bgcolor: '#000',
+                                        }}
+                                      />
+                                    </Grid>
+                                  </Grid>
+                                </CardContent>
+                              </Card>
+                            </Grid>
+                          ))}
+                        </Grid>
+                      </Stack>
+                    ) : null}
+                  </Box>
                 ) : null}
                 {artifactReview ? (
                   <Box>

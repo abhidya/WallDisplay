@@ -32,6 +32,7 @@ import {
   AccountTree as MappingIcon,
   Insights as DiagnosticsIcon,
   QrCode2 as StructuredLightingIcon,
+  ViewAgenda as SceneControlIcon,
   ChevronLeft as ChevronLeftIcon,
   ChevronRight as ChevronRightIcon,
 } from '@mui/icons-material';
@@ -49,6 +50,7 @@ const menuItems = [
   { text: 'Projection Mapping', icon: <ProjectionIcon />, path: '/projection' },
   { text: 'Mappings', icon: <MappingIcon />, path: '/mappings' },
   { text: 'Structured Lighting', icon: <StructuredLightingIcon />, path: '/structured-lighting' },
+  { text: 'Scene Control', icon: <SceneControlIcon />, path: '/scene-control' },
   { text: 'Overlay', icon: <OverlayIcon />, path: '/overlay' },
   { text: 'Streaming', icon: <DiagnosticsIcon />, path: '/streaming' },
   { text: 'Projection Animation', icon: <AnimationIcon />, path: '/projection-animation' },

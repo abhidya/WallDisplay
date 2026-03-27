@@ -151,6 +151,23 @@ def flush_and_read(cap, flush_count: int):
     return frame
 
 
+def to_gray(frame):
+    if frame is None:
+        return None
+    if len(frame.shape) == 2:
+        return frame
+    return cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+
+def mean_frame_delta(previous_gray, current_gray) -> float:
+    if previous_gray is None or current_gray is None:
+        return float("inf")
+    if previous_gray.shape != current_gray.shape:
+        return float("inf")
+    delta = cv2.absdiff(previous_gray, current_gray)
+    return float(np.mean(delta))
+
+
 def capture_step(
     cap,
     projector_window: Optional[str],
@@ -159,10 +176,34 @@ def capture_step(
     settle_seconds: float,
     flush_count: int,
     pump_ms: int,
+    previous_gray=None,
+    min_frame_delta: float = 2.0,
+    max_attempts: int = 4,
 ):
+    last_delta = None
+    last_gray = None
+    last_frame = None
+
+    def capture_with_retry():
+        nonlocal last_delta, last_gray, last_frame
+        for attempt_index in range(max(1, max_attempts)):
+            frame = flush_and_read(cap, flush_count=flush_count)
+            gray = to_gray(frame)
+            delta = mean_frame_delta(previous_gray, gray)
+            last_delta = delta
+            last_gray = gray
+            last_frame = frame
+            if previous_gray is None or delta >= min_frame_delta:
+                return frame, gray
+            if attempt_index < max_attempts - 1:
+                time.sleep(max(settle_seconds * 0.5, 0.15))
+        raise RuntimeError(
+            f"Captured stale frame after {max_attempts} attempts (mean delta {last_delta:.2f} < {min_frame_delta:.2f})."
+        )
+
     if presentation_mode == "dlna_step":
         time.sleep(max(settle_seconds, 0.0))
-        return flush_and_read(cap, flush_count=flush_count)
+        return capture_with_retry()
 
     if not projector_window or not pattern_image_path:
         raise RuntimeError("Local projector presentation requires a projector window and pattern image.")
@@ -173,7 +214,7 @@ def capture_step(
 
     show_projector_frame(projector_window, pattern, pump_ms=pump_ms)
     time.sleep(max(settle_seconds, 0.0))
-    return flush_and_read(cap, flush_count=flush_count)
+    return capture_with_retry()
 
 
 def main():
@@ -188,9 +229,11 @@ def main():
     parser.add_argument("--projector-height", type=int, default=720)
     parser.add_argument("--preview-window", default="STRUCTURED_LIGHT_CAMERA")
     parser.add_argument("--projector-window", default="STRUCTURED_LIGHT_PROJECTOR")
-    parser.add_argument("--settle-seconds", type=float, default=0.8)
-    parser.add_argument("--flush-count", type=int, default=20)
-    parser.add_argument("--pump-ms", type=int, default=250)
+    parser.add_argument("--settle-seconds", type=float, default=1.0)
+    parser.add_argument("--flush-count", type=int, default=30)
+    parser.add_argument("--pump-ms", type=int, default=400)
+    parser.add_argument("--min-frame-delta", type=float, default=2.0)
+    parser.add_argument("--max-capture-attempts", type=int, default=4)
     args = parser.parse_args()
 
     worker_id = args.worker_id or str(uuid.uuid4())
@@ -218,6 +261,7 @@ def main():
             cap,
             args.preview_window,
         )
+        previous_gray = None
         while True:
             try:
                 heartbeat(
@@ -264,7 +308,7 @@ def main():
                         session_id,
                         step_index,
                     )
-                frame = capture_step(
+                frame, captured_gray = capture_step(
                     cap,
                     projector_window,
                     pattern_path,
@@ -272,8 +316,12 @@ def main():
                     settle_seconds=args.settle_seconds,
                     flush_count=args.flush_count,
                     pump_ms=args.pump_ms,
+                    previous_gray=previous_gray,
+                    min_frame_delta=args.min_frame_delta,
+                    max_attempts=args.max_capture_attempts,
                 )
                 upload_capture(args.base_url, session_id, step_index, frame)
+                previous_gray = captured_gray
                 print(f"captured and uploaded step {step_index} for session {session_id}")
             except Exception as exc:
                 print(f"structured-lighting step failed: {exc}")

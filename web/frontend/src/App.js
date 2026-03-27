@@ -24,6 +24,7 @@ import ProjectionAnimation from './pages/ProjectionAnimation';
 import Mappings from './pages/Mappings';
 import StreamingDiagnostics from './pages/StreamingDiagnostics';
 import StructuredLighting from './pages/StructuredLighting';
+import SceneControl from './pages/SceneControl';
 
 // Create a theme instance
 const theme = createTheme({
@@ -66,6 +67,7 @@ function App() {
           <Route path="/overlay" element={<OverlayProjection />} />
           <Route path="/streaming" element={<StreamingDiagnostics />} />
           <Route path="/structured-lighting" element={<StructuredLighting />} />
+          <Route path="/scene-control" element={<SceneControl />} />
           <Route path="/projection-animation" element={<ProjectionAnimation />} />
           <Route path="*" element={<NotFound />} />
         </Routes>

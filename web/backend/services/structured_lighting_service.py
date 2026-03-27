@@ -53,6 +53,7 @@ class StructuredLightingService:
             "structured_lighting",
         )
         os.makedirs(self._upload_root, exist_ok=True)
+        self._load_sessions_from_disk()
 
     def list_sessions(self) -> List[Dict]:
         with self._lock:
@@ -110,9 +111,9 @@ class StructuredLightingService:
         projector_screen_y: int,
         projector_width: int,
         projector_height: int,
-        settle_seconds: float = 0.8,
-        flush_count: int = 20,
-        pump_ms: int = 250,
+        settle_seconds: float = 1.0,
+        flush_count: int = 30,
+        pump_ms: int = 400,
         poll_seconds: float = 1.0,
     ) -> Dict:
         with self._lock:
@@ -360,7 +361,7 @@ class StructuredLightingService:
             "expected_frames": session["pattern_frame_count"],
         }
 
-    def decode_session(self, session_id: str, sample_step: int = 1) -> Optional[Dict]:
+    def decode_session(self, session_id: str, sample_step: int = 1, tuning_params: Optional[Dict] = None) -> Optional[Dict]:
         with self._lock:
             session = self._sessions.get(session_id)
             if not session:
@@ -370,14 +371,25 @@ class StructuredLightingService:
                 **self._default_decode_state(),
                 "status": "running",
                 "started_at": datetime.utcnow().isoformat(),
+                "message": "Decoding graycode captures and generating repaired projector layers.",
+                "progress": {
+                    "phase": "initializing",
+                    "label": "Preparing decode",
+                    "percent": 2,
+                },
             }
             session["calibration"] = self._default_calibration_state()
             session["review"] = self._default_review_state()
+            session["tuning_search"] = self._default_tuning_search_state()
             session["updated_at"] = datetime.utcnow().isoformat()
             self._persist_session(session)
 
         try:
-            result = self._decode_graycode_session(session_id, sample_step=max(1, sample_step))
+            result = self._decode_graycode_session(
+                session_id,
+                sample_step=max(1, sample_step),
+                tuning_params=tuning_params,
+            )
         except Exception as exc:
             with self._lock:
                 session = self._sessions.get(session_id)
@@ -404,6 +416,97 @@ class StructuredLightingService:
             session["updated_at"] = datetime.utcnow().isoformat()
             self._persist_session(session)
             return dict(session)
+
+    def run_tuning_search(self, session_id: str, sample_step: int = 1) -> Optional[Dict]:
+        session = self.get_session(session_id)
+        if not session:
+            return None
+
+        cam2proj, white_path, black_path = self._decode_raw_cam2proj(session_id, sample_step=max(1, sample_step))
+        projector_width = session["projector_width"]
+        projector_height = session["projector_height"]
+        decode_dir = self._ensure_decode_dir(session_id)
+        search_dir = os.path.join(decode_dir, "tuning_search")
+        if os.path.isdir(search_dir):
+            shutil.rmtree(search_dir)
+        os.makedirs(search_dir, exist_ok=True)
+
+        candidates = []
+        for candidate_index, candidate in enumerate(self._parameter_search_candidates()):
+            candidate_id = f"candidate_{candidate_index:02d}"
+            candidate_dir = os.path.join(search_dir, candidate_id)
+            os.makedirs(candidate_dir, exist_ok=True)
+            result = self._generate_filtered_projector_masks(
+                session_id=session_id,
+                white_path=white_path,
+                black_path=black_path,
+                cam2proj=cam2proj,
+                projector_width=projector_width,
+                projector_height=projector_height,
+                tuning_params=candidate["params"],
+                output_dir=candidate_dir,
+            )
+            with open(result["manifest_path"], "r", encoding="utf-8") as handle:
+                manifest = json.load(handle)
+            candidates.append(
+                {
+                    "id": candidate_id,
+                    "label": candidate["label"],
+                    "description": candidate["description"],
+                    "params": candidate["params"],
+                    "metrics": {
+                        "filtered_layer_count": manifest.get("filtered_layer_count", 0),
+                        "raw_layer_count": manifest.get("raw_layer_count", 0),
+                        "projector_components_kept": manifest.get("projector_components_kept", 0),
+                    },
+                    "previews": {
+                        "warp": f"/api/structured-lighting/sessions/{session_id}/tuning-search/{candidate_id}/previews/warp",
+                        "mask": f"/api/structured-lighting/sessions/{session_id}/tuning-search/{candidate_id}/previews/mask",
+                    },
+                }
+            )
+
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return None
+            session["tuning_search"] = {
+                "status": "completed",
+                "generated_at": datetime.utcnow().isoformat(),
+                "sample_step": sample_step,
+                "candidates": candidates,
+            }
+            session["updated_at"] = datetime.utcnow().isoformat()
+            self._persist_session(session)
+            return dict(session["tuning_search"])
+
+    def get_tuning_search(self, session_id: str) -> Optional[Dict]:
+        session = self.get_session(session_id)
+        if not session:
+            return None
+        return session.get("tuning_search", self._default_tuning_search_state())
+
+    def render_tuning_search_preview(self, session_id: str, candidate_id: str, preview_name: str) -> Optional[bytes]:
+        session = self.get_session(session_id)
+        if not session:
+            return None
+        search = session.get("tuning_search", {})
+        candidate = next((item for item in search.get("candidates", []) if item.get("id") == candidate_id), None)
+        if not candidate:
+            return None
+        decode_dir = self._ensure_decode_dir(session_id)
+        candidate_dir = os.path.join(decode_dir, "tuning_search", candidate_id)
+        file_name = {
+            "warp": "warped_for_projector_second_pass_filled.png",
+            "mask": "projector_wall_mask_second_pass.png",
+        }.get(preview_name)
+        if not file_name:
+            return None
+        file_path = os.path.join(candidate_dir, file_name)
+        if not os.path.exists(file_path):
+            return None
+        with open(file_path, "rb") as handle:
+            return handle.read()
 
     def get_calibration(self, session_id: str) -> Optional[Dict]:
         session = self.get_session(session_id)
@@ -461,17 +564,19 @@ class StructuredLightingService:
 
             decode_dir = os.path.join(bundle_dir, "decode")
             if os.path.isdir(decode_dir):
-                for entry in sorted(os.listdir(decode_dir)):
-                    full_path = os.path.join(decode_dir, entry)
-                    if os.path.isfile(full_path):
-                        archive.write(full_path, arcname=f"decode/{entry}")
+                for root, _, files in os.walk(decode_dir):
+                    for entry in sorted(files):
+                        full_path = os.path.join(root, entry)
+                        rel_path = os.path.relpath(full_path, bundle_dir)
+                        archive.write(full_path, arcname=rel_path.replace("\\", "/"))
 
             capture_dir = os.path.join(bundle_dir, "captures")
             if os.path.isdir(capture_dir):
-                for entry in sorted(os.listdir(capture_dir)):
-                    full_path = os.path.join(capture_dir, entry)
-                    if os.path.isfile(full_path):
-                        archive.write(full_path, arcname=f"captures/{entry}")
+                for root, _, files in os.walk(capture_dir):
+                    for entry in sorted(files):
+                        full_path = os.path.join(root, entry)
+                        rel_path = os.path.relpath(full_path, bundle_dir)
+                        archive.write(full_path, arcname=rel_path.replace("\\", "/"))
 
         return {
             "session_id": session_id,
@@ -547,6 +652,7 @@ class StructuredLightingService:
         now = datetime.utcnow().isoformat()
         bit_planes_x = max(1, math.ceil(math.log2(max(2, projector_width))))
         bit_planes_y = max(1, math.ceil(math.log2(max(2, projector_height))))
+        pattern_frame_count = self._graycode_pattern_count(projector_width, projector_height)
         session = {
             "session_id": str(uuid.uuid4()),
             "name": name,
@@ -560,7 +666,7 @@ class StructuredLightingService:
             "status": "draft",
             "bit_planes_x": bit_planes_x,
             "bit_planes_y": bit_planes_y,
-            "pattern_frame_count": 2 + (bit_planes_x + bit_planes_y) * 2,
+            "pattern_frame_count": pattern_frame_count,
             "current_step_index": 0,
             "captured_frames": 0,
             "captured_step_indices": [],
@@ -568,6 +674,7 @@ class StructuredLightingService:
             "decode": self._default_decode_state(),
             "calibration": self._default_calibration_state(),
             "review": self._default_review_state(),
+            "tuning_search": self._default_tuning_search_state(),
             "created_at": now,
             "updated_at": now,
         }
@@ -580,6 +687,11 @@ class StructuredLightingService:
         session = self.get_session(session_id)
         if not session:
             return None
+
+        graycode_patterns = self._generate_graycode_patterns(
+            session["projector_width"],
+            session["projector_height"],
+        )
 
         steps = [
             {
@@ -598,23 +710,17 @@ class StructuredLightingService:
             },
         ]
 
-        step_index = 2
-        for axis, plane_count in (("x", session["bit_planes_x"]), ("y", session["bit_planes_y"])):
-            for bit in range(plane_count):
-                for polarity in ("normal", "inverse"):
-                    steps.append(
-                        {
-                            "index": step_index,
-                            "kind": "graycode",
-                            "axis": axis,
-                            "bit": bit,
-                            "polarity": polarity,
-                            "label": f"{axis.upper()} bit {bit} ({polarity})",
-                            "hold_ms": session["hold_ms"],
-                            "capture_required": True,
-                        }
-                    )
-                    step_index += 1
+        for pattern_index, _pattern in enumerate(graycode_patterns):
+            steps.append(
+                {
+                    "index": pattern_index + 2,
+                    "kind": "graycode",
+                    "pattern_index": pattern_index,
+                    "label": f"Graycode Pattern {pattern_index:03d}",
+                    "hold_ms": session["hold_ms"],
+                    "capture_required": True,
+                }
+            )
 
         return {
             "session": session,
@@ -635,42 +741,20 @@ class StructuredLightingService:
         if step_index < 0 or step_index >= len(steps):
             return None
 
+        step = steps[step_index]
         session = plan["session"]
         width = session["projector_width"]
         height = session["projector_height"]
-        step = steps[step_index]
-
-        image = Image.new("L", (width, height), color=0)
-        pixels = image.load()
 
         if step["kind"] == "reference_white":
-            for y in range(height):
-                for x in range(width):
-                    pixels[x, y] = 255
+            image = Image.new("L", (width, height), color=255)
         elif step["kind"] == "reference_black":
-            pass
+            image = Image.new("L", (width, height), color=0)
         elif step["kind"] == "graycode":
-            axis = step["axis"]
-            bit = step["bit"]
-            inverse = step["polarity"] == "inverse"
-            if axis == "x":
-                for x in range(width):
-                    gray = x ^ (x >> 1)
-                    bit_value = (gray >> bit) & 1
-                    value = 255 if bit_value else 0
-                    if inverse:
-                        value = 255 - value
-                    for y in range(height):
-                        pixels[x, y] = value
-            else:
-                for y in range(height):
-                    gray = y ^ (y >> 1)
-                    bit_value = (gray >> bit) & 1
-                    value = 255 if bit_value else 0
-                    if inverse:
-                        value = 255 - value
-                    for x in range(width):
-                        pixels[x, y] = value
+            patterns = self._generate_graycode_patterns(width, height)
+            image = Image.fromarray(patterns[step["pattern_index"]], mode="L")
+        else:
+            return None
 
         buffer = BytesIO()
         image.save(buffer, format="PNG")
@@ -735,16 +819,14 @@ class StructuredLightingService:
         image.save(buffer, format="PNG")
         return buffer.getvalue()
 
-    def _decode_graycode_session(self, session_id: str, sample_step: int) -> Dict:
+    def _decode_graycode_session(self, session_id: str, sample_step: int, tuning_params: Optional[Dict] = None) -> Dict:
         session = self.get_session(session_id)
         if not session:
             raise RuntimeError("Structured lighting session not found")
-
-        capture_dir = self._ensure_capture_dir(session_id)
-        white_path = self._find_capture_file(capture_dir, ("img_white.png", "img_white.jpg", "img_white.jpeg"))
-        black_path = self._find_capture_file(capture_dir, ("img_black.png", "img_black.jpg", "img_black.jpeg"))
-        if not white_path or not black_path:
-            raise RuntimeError("Reference white/black captures are missing.")
+        tuning = self._normalize_tuning_params(tuning_params)
+        self._set_decode_progress(session_id, phase="loading", label="Loading captures", percent=5)
+        cam2proj_u, white_path, black_path = self._decode_raw_cam2proj(session_id, sample_step)
+        self._set_decode_progress(session_id, phase="mapping", label="Building projector maps", percent=60)
 
         try:
             import cv2
@@ -752,51 +834,12 @@ class StructuredLightingService:
         except ImportError as exc:
             raise RuntimeError("Decoding requires opencv-contrib-python and numpy in the backend environment.") from exc
 
-        plan = self.get_capture_plan(session_id)
-        graycode_steps = [step for step in plan["steps"] if step["kind"] == "graycode"]
-        pattern_images = []
-        for step in graycode_steps:
-            capture_meta = session.get("captures", {}).get(str(step["index"]))
-            if not capture_meta:
-                raise RuntimeError(f"Missing capture for graycode step {step['index']}.")
-            image = cv2.imread(capture_meta["stored_path"], cv2.IMREAD_GRAYSCALE)
-            if image is None:
-                raise RuntimeError(f"Failed to load capture {capture_meta['stored_path']}.")
-            pattern_images.append(image)
-
         white_img = cv2.imread(white_path, cv2.IMREAD_GRAYSCALE)
         black_img = cv2.imread(black_path, cv2.IMREAD_GRAYSCALE)
         if white_img is None or black_img is None:
             raise RuntimeError("Failed to read reference captures.")
 
-        if hasattr(cv2, "structured_light_GrayCodePattern"):
-            graycode = cv2.structured_light_GrayCodePattern.create(session["projector_width"], session["projector_height"])
-        elif hasattr(cv2, "structured_light") and hasattr(cv2.structured_light, "GrayCodePattern_create"):
-            graycode = cv2.structured_light.GrayCodePattern_create(session["projector_width"], session["projector_height"])
-        else:
-            raise RuntimeError("OpenCV structured light module is unavailable.")
-
-        graycode.setWhiteThreshold(5)
-        graycode.setBlackThreshold(40)
-
-        imgs = pattern_images
-        h, w = imgs[0].shape
-        cam2proj = np.full((h, w, 2), -1, dtype=np.int32)
-        valid = 0
-
-        for y in range(0, h, sample_step):
-            for x in range(0, w, sample_step):
-                ok, p = graycode.getProjPixel(imgs, x, y)
-                if ok:
-                    cam2proj[y, x, 0] = int(p[0])
-                    cam2proj[y, x, 1] = int(p[1])
-                    valid += 1
-
-        if sample_step > 1:
-            cam2proj_u = cv2.resize(cam2proj.astype(np.float32), (w, h), interpolation=cv2.INTER_NEAREST).astype(np.int32)
-        else:
-            cam2proj_u = cam2proj
-
+        h, w = white_img.shape
         valid_mask_cam = (cam2proj_u[:, :, 0] >= 0) & (cam2proj_u[:, :, 1] >= 0)
         proj_w = session["projector_width"]
         proj_h = session["projector_height"]
@@ -817,13 +860,30 @@ class StructuredLightingService:
         np.save(os.path.join(decode_dir, "proj2cam_x.npy"), proj2cam_x)
         np.save(os.path.join(decode_dir, "proj2cam_y.npy"), proj2cam_y)
 
+        self._set_decode_progress(session_id, phase="repair", label="Preparing second-pass repair", percent=68)
+        filtered_mask_result = self._generate_filtered_projector_masks(
+            session_id=session_id,
+            white_path=white_path,
+            black_path=black_path,
+            cam2proj=cam2proj_u,
+            projector_width=session["projector_width"],
+            projector_height=session["projector_height"],
+            tuning_params=tuning,
+        )
+
         white_delta = float(white_img.mean() - black_img.mean())
         coverage = float(valid_mask_cam.sum()) / float(valid_mask_cam.size) if valid_mask_cam.size else 0.0
+        self._set_decode_progress(session_id, phase="finalizing", label="Writing decode artifacts", percent=96)
         manifest = {
             "status": "completed",
             "started_at": datetime.utcnow().isoformat(),
             "finished_at": datetime.utcnow().isoformat(),
             "message": "Gray-code decode completed.",
+            "progress": {
+                "phase": "completed",
+                "label": "Decode complete",
+                "percent": 100,
+            },
             "metrics": {
                 "camera_width": int(w),
                 "camera_height": int(h),
@@ -832,6 +892,8 @@ class StructuredLightingService:
                 "coverage_ratio": round(coverage, 4),
                 "white_black_mean_delta": round(white_delta, 2),
                 "sample_step": sample_step,
+                "filtered_mask_count": filtered_mask_result["filtered_mask_count"],
+                "tuning_params": tuning,
             },
             "artifacts": {
                 "decode_dir": decode_dir,
@@ -839,11 +901,706 @@ class StructuredLightingService:
                 "valid_mask_cam": os.path.join(decode_dir, "valid_mask_cam.npy"),
                 "proj2cam_x": os.path.join(decode_dir, "proj2cam_x.npy"),
                 "proj2cam_y": os.path.join(decode_dir, "proj2cam_y.npy"),
+                "projector_wall_mask": filtered_mask_result["combined_mask_path"],
+                "filtered_masks_dir": filtered_mask_result["filtered_masks_dir"],
+                "filtered_masks_manifest": filtered_mask_result["manifest_path"],
+                "raw_layers_dir": filtered_mask_result["raw_layers_dir"],
+                "second_pass_proj2cam_x": filtered_mask_result["second_pass_proj2cam_x_path"],
+                "second_pass_proj2cam_y": filtered_mask_result["second_pass_proj2cam_y_path"],
+                "second_pass_warp_raw": filtered_mask_result["second_pass_raw_path"],
+                "second_pass_warp_filled": filtered_mask_result["second_pass_filled_path"],
+                "repair_support_mask": filtered_mask_result["repair_support_mask_path"],
             },
         }
         with open(os.path.join(decode_dir, "decode_manifest.json"), "w", encoding="utf-8") as handle:
             json.dump(manifest, handle, indent=2, sort_keys=True)
         return manifest
+
+    def _generate_graycode_patterns(self, projector_width: int, projector_height: int):
+        try:
+            import cv2
+        except ImportError as exc:
+            raise RuntimeError("OpenCV structured light module is unavailable.") from exc
+
+        if hasattr(cv2, "structured_light_GrayCodePattern"):
+            graycode = cv2.structured_light_GrayCodePattern.create(projector_width, projector_height)
+        elif hasattr(cv2, "structured_light") and hasattr(cv2.structured_light, "GrayCodePattern_create"):
+            graycode = cv2.structured_light.GrayCodePattern_create(projector_width, projector_height)
+        else:
+            raise RuntimeError("OpenCV structured light module is unavailable.")
+
+        graycode.setWhiteThreshold(5)
+        graycode.setBlackThreshold(40)
+        ok, patterns = graycode.generate()
+        if not ok:
+            raise RuntimeError("Pattern generation failed.")
+        return patterns
+
+    def _graycode_pattern_count(self, projector_width: int, projector_height: int) -> int:
+        return 2 + len(self._generate_graycode_patterns(projector_width, projector_height))
+
+    def _generate_filtered_projector_masks(
+        self,
+        *,
+        session_id: str,
+        white_path: str,
+        black_path: str,
+        cam2proj,
+        projector_width: int,
+        projector_height: int,
+        tuning_params: Optional[Dict] = None,
+        output_dir: Optional[str] = None,
+    ) -> Dict[str, object]:
+        try:
+            import cv2
+            import numpy as np
+        except ImportError as exc:
+            raise RuntimeError("Filtered mask generation requires opencv-contrib-python and numpy.") from exc
+
+        white_bgr = cv2.imread(white_path, cv2.IMREAD_COLOR)
+        black_bgr = cv2.imread(black_path, cv2.IMREAD_COLOR)
+        if white_bgr is None or black_bgr is None:
+            raise RuntimeError("Failed to load white reference image for mask generation.")
+
+        params = self._normalize_tuning_params(tuning_params)
+        decode_dir = output_dir or self._ensure_decode_dir(session_id)
+        raw_layers_dir = os.path.join(decode_dir, "second_pass_projector_layers")
+        filtered_masks_dir = os.path.join(decode_dir, "second_pass_projector_layers_filtered")
+        os.makedirs(raw_layers_dir, exist_ok=True)
+        os.makedirs(filtered_masks_dir, exist_ok=True)
+
+        proj_w = projector_width
+        proj_h = projector_height
+        if proj_w <= 0 or proj_h <= 0:
+            raise RuntimeError("Structured-light decode produced no valid projector coordinates.")
+
+        edge_data = self._build_wall_edge_map(
+            white_bgr,
+            blur_ksize=int(params["median_blur_ksize"]),
+            bilateral_params=(
+                int(params["bilateral_d"]),
+                int(params["bilateral_sigma_color"]),
+                int(params["bilateral_sigma_space"]),
+            ),
+            gradient_kernel=int(params["gradient_kernel_size"]),
+        )
+        self._set_decode_progress(session_id, phase="segmentation", label="Building wall-edge image", percent=70)
+        segmentation_source_path = os.path.join(decode_dir, "warped_for_projector.png")
+        segmentation_source = cv2.resize(
+            cv2.cvtColor(edge_data["gradient"], cv2.COLOR_GRAY2BGR),
+            (white_bgr.shape[1], white_bgr.shape[0]),
+            interpolation=cv2.INTER_LINEAR,
+        )
+        cv2.imwrite(segmentation_source_path, segmentation_source)
+        segmentation = self._segment_projector_source(
+            edge_data["gradient"],
+            scale=float(params["segmentation_scale"]),
+            threshold_value=int(params["segmentation_threshold"]),
+            blur_value=int(params["segmentation_blur"]),
+            min_area_fraction=float(params["min_area_ratio"]),
+            close_kernel=int(params["room_close_kernel_size"]),
+        )
+        self._set_decode_progress(session_id, phase="segmentation", label="Segmenting camera-space regions", percent=74)
+        final_bgr = cv2.cvtColor(segmentation["final_rgb"], cv2.COLOR_RGB2BGR)
+        camera_segmentation_path = os.path.join(decode_dir, "best_result_S1.0_T5_B7.png")
+        cv2.imwrite(camera_segmentation_path, final_bgr)
+
+        decode_diag = self._build_decode_diagnostics(
+            cam2proj,
+            white_bgr,
+            black_bgr,
+            proj_w,
+            proj_h,
+            contrast_thresh=int(params["contrast_threshold"]),
+        )
+        filtered_projector_occupancy, _, kept_components = self._filter_projector_occupancy(
+            decode_diag["projector_occupancy"],
+            min_area=int(params["min_projector_component_area"]),
+            close_kernel_size=int(params["room_close_kernel_size"]),
+        )
+        self._set_decode_progress(session_id, phase="repair", label="Filtering projector occupancy", percent=78)
+        repair_support = self._refine_support_mask(
+            filtered_projector_occupancy,
+            fill_holes=bool(params["repair_fill_holes"]),
+            restrict_to_bbox=bool(params["repair_restrict_to_bbox"]),
+            max_hole_area=int(params["repair_max_hole_area"]),
+        )
+        self._set_decode_progress(session_id, phase="repair", label="Building repair support mask", percent=82)
+        confidence_map = self._confidence_from_contrast_percentiles(
+            decode_diag["contrast"],
+            decode_diag["trusted_cam_mask"],
+            low_percentile=float(params["confidence_low_percentile"]),
+            high_percentile=float(params["confidence_high_percentile"]),
+            contrast_thresh=int(params["contrast_threshold"]),
+        )
+        weighted_aggregation = self._aggregate_projector_hits_weighted(
+            cam2proj,
+            decode_diag["trusted_cam_mask"],
+            confidence_map,
+            proj_w,
+            proj_h,
+            support_mask=repair_support["clean"],
+            conflict_sigma=float(params["aggregation_sigma"]),
+        )
+        self._set_decode_progress(session_id, phase="repair", label="Aggregating trusted projector hits", percent=86)
+        kernel_filled_proj2cam_x = self._normalized_kernel_fill(
+            weighted_aggregation["proj2cam_x"],
+            repair_support["clean"],
+            radius=int(params["kernel_radius"]),
+            sigma=float(params["kernel_sigma"]),
+            min_valid_neighbors=int(params["kernel_min_valid_neighbors"]),
+            max_passes=int(params["kernel_max_passes"]),
+        )
+        kernel_filled_proj2cam_y = self._normalized_kernel_fill(
+            weighted_aggregation["proj2cam_y"],
+            repair_support["clean"],
+            radius=int(params["kernel_radius"]),
+            sigma=float(params["kernel_sigma"]),
+            min_valid_neighbors=int(params["kernel_min_valid_neighbors"]),
+            max_passes=int(params["kernel_max_passes"]),
+        )
+        kernel_repaired_proj2cam_x = np.where(
+            np.isfinite(weighted_aggregation["proj2cam_x"]),
+            weighted_aggregation["proj2cam_x"],
+            kernel_filled_proj2cam_x,
+        ).astype(np.float32)
+        kernel_repaired_proj2cam_y = np.where(
+            np.isfinite(weighted_aggregation["proj2cam_y"]),
+            weighted_aggregation["proj2cam_y"],
+            kernel_filled_proj2cam_y,
+        ).astype(np.float32)
+
+        first_pass_missing_mask = (repair_support["clean"] > 0) & (~np.isfinite(kernel_repaired_proj2cam_x))
+        second_pass_proj2cam_x = self._normalized_kernel_fill_from_source(
+            kernel_repaired_proj2cam_x,
+            first_pass_missing_mask,
+            repair_support["clean"],
+            radius=int(params["second_pass_kernel_radius"]),
+            sigma=float(params["second_pass_kernel_sigma"]),
+            min_valid_neighbors=int(params["second_pass_min_valid_neighbors"]),
+            max_passes=int(params["second_pass_max_passes"]),
+        )
+        second_pass_proj2cam_y = self._normalized_kernel_fill_from_source(
+            kernel_repaired_proj2cam_y,
+            first_pass_missing_mask,
+            repair_support["clean"],
+            radius=int(params["second_pass_kernel_radius"]),
+            sigma=float(params["second_pass_kernel_sigma"]),
+            min_valid_neighbors=int(params["second_pass_min_valid_neighbors"]),
+            max_passes=int(params["second_pass_max_passes"]),
+        )
+        self._set_decode_progress(session_id, phase="repair", label="Completing second-pass repaired maps", percent=90)
+
+        second_pass_map_x_for_remap = np.nan_to_num(second_pass_proj2cam_x, nan=0.0).astype(np.float32)
+        second_pass_map_y_for_remap = np.nan_to_num(second_pass_proj2cam_y, nan=0.0).astype(np.float32)
+        second_pass_warp_raw = cv2.remap(
+            final_bgr,
+            second_pass_map_x_for_remap,
+            second_pass_map_y_for_remap,
+            interpolation=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=(0, 0, 0),
+        )
+        second_pass_warp_raw[repair_support["clean"] == 0] = 0
+        second_pass_warp_filled = cv2.morphologyEx(
+            second_pass_warp_raw,
+            cv2.MORPH_CLOSE,
+            np.ones((5, 5), np.uint8),
+        )
+
+        second_pass_raw_path = os.path.join(decode_dir, "warped_for_projector_second_pass_raw.png")
+        second_pass_filled_path = os.path.join(decode_dir, "warped_for_projector_second_pass_filled.png")
+        combined_mask_path = os.path.join(decode_dir, "projector_wall_mask_second_pass.png")
+        second_pass_proj2cam_x_path = os.path.join(decode_dir, "second_pass_proj2cam_x.npy")
+        second_pass_proj2cam_y_path = os.path.join(decode_dir, "second_pass_proj2cam_y.npy")
+        repair_support_mask_path = os.path.join(decode_dir, "projector_repair_support_mask.png")
+        cv2.imwrite(second_pass_raw_path, second_pass_warp_raw)
+        cv2.imwrite(second_pass_filled_path, second_pass_warp_filled)
+        cv2.imwrite(combined_mask_path, (cv2.cvtColor(second_pass_warp_filled, cv2.COLOR_BGR2GRAY) > 0).astype(np.uint8) * 255)
+        cv2.imwrite(repair_support_mask_path, repair_support["clean"])
+        np.save(second_pass_proj2cam_x_path, second_pass_proj2cam_x)
+        np.save(second_pass_proj2cam_y_path, second_pass_proj2cam_y)
+        self._set_decode_progress(session_id, phase="layers", label="Warping repaired layers into projector space", percent=92)
+
+        raw_layer_paths = self._save_layer_masks_from_color_image(
+            second_pass_warp_filled,
+            raw_layers_dir,
+            prefix="second_pass_layer",
+        )
+        self._set_decode_progress(session_id, phase="layers", label="Extracting projector layer masks", percent=94)
+        layer_info = self._collect_layer_areas(raw_layer_paths)
+        chosen_min_area = int(params["layer_min_area"])
+        mask_manifest = []
+        filtered_layer_paths = []
+        kept_layer_info = [info for info in layer_info if info["area"] >= chosen_min_area]
+        for output_index, item in enumerate(kept_layer_info):
+            mask = cv2.imread(item["path"], cv2.IMREAD_GRAYSCALE)
+            if mask is None:
+                continue
+            file_name = f"second_pass_layer_min{chosen_min_area}_{output_index:03d}.png"
+            file_path = os.path.join(filtered_masks_dir, file_name)
+            cv2.imwrite(file_path, mask)
+            filtered_layer_paths.append(file_path)
+            mask_manifest.append(
+                {
+                    "name": os.path.splitext(file_name)[0],
+                    "file_name": file_name,
+                    "file_path": file_path,
+                    "area": int(item["area"]),
+                    "sort_order": output_index,
+                }
+            )
+
+        manifest_path = os.path.join(filtered_masks_dir, "mask_manifest.json")
+        with open(manifest_path, "w", encoding="utf-8") as handle:
+            json.dump(
+                {
+                    "masks": mask_manifest,
+                    "min_area": chosen_min_area,
+                    "raw_layer_count": len(raw_layer_paths),
+                    "filtered_layer_count": len(mask_manifest),
+                    "projector_components_kept": int(kept_components),
+                    "tuning_params": params,
+                },
+                handle,
+                indent=2,
+                sort_keys=True,
+            )
+
+        return {
+            "combined_mask_path": combined_mask_path,
+            "filtered_masks_dir": filtered_masks_dir,
+            "manifest_path": manifest_path,
+            "filtered_mask_count": len(mask_manifest),
+            "raw_layers_dir": raw_layers_dir,
+            "second_pass_proj2cam_x_path": second_pass_proj2cam_x_path,
+            "second_pass_proj2cam_y_path": second_pass_proj2cam_y_path,
+            "second_pass_raw_path": second_pass_raw_path,
+            "second_pass_filled_path": second_pass_filled_path,
+            "repair_support_mask_path": repair_support_mask_path,
+        }
+
+    def _build_wall_edge_map(self, img_white_bgr, blur_ksize: int, bilateral_params, gradient_kernel: int):
+        import cv2
+
+        clean = cv2.medianBlur(img_white_bgr, blur_ksize)
+        smooth = cv2.bilateralFilter(clean, bilateral_params[0], bilateral_params[1], bilateral_params[2])
+        gray = cv2.cvtColor(smooth, cv2.COLOR_BGR2GRAY)
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (gradient_kernel, gradient_kernel))
+        gradient = cv2.morphologyEx(gray, cv2.MORPH_GRADIENT, kernel)
+        return {"clean": clean, "smooth": smooth, "gray": gray, "gradient": gradient}
+
+    def _segment_projector_source(
+        self,
+        gray_image,
+        *,
+        scale: float,
+        threshold_value: int,
+        blur_value: int,
+        min_area_fraction: float,
+        close_kernel: int,
+    ):
+        import cv2
+        import numpy as np
+
+        scaled_w = max(1, int(gray_image.shape[1] * scale))
+        scaled_h = max(1, int(gray_image.shape[0] * scale))
+        small_base = cv2.resize(gray_image, (scaled_w, scaled_h), interpolation=cv2.INTER_AREA)
+        blurred = cv2.GaussianBlur(small_base, (blur_value, blur_value), 0)
+        _, walls = cv2.threshold(blurred, threshold_value, 255, cv2.THRESH_BINARY)
+        walls = cv2.morphologyEx(walls, cv2.MORPH_CLOSE, np.ones((close_kernel, close_kernel), np.uint8))
+        rooms = cv2.bitwise_not(walls)
+        component_count, labels = cv2.connectedComponents(rooms)
+
+        min_area = (scaled_w * scaled_h) * min_area_fraction
+        filtered_labels = labels.copy()
+        for label_id in range(1, component_count):
+            if np.sum(filtered_labels == label_id) < min_area:
+                filtered_labels[filtered_labels == label_id] = 0
+
+        np.random.seed(42)
+        colors = np.random.randint(0, 255, size=(component_count + 1, 3), dtype=np.uint8)
+        colors[0] = [0, 0, 0]
+        filled = colors[filtered_labels]
+        upsampled = cv2.resize(filled, (gray_image.shape[1], gray_image.shape[0]), interpolation=cv2.INTER_NEAREST)
+        final = cv2.medianBlur(upsampled, 7)
+        return {"labels": filtered_labels, "final_rgb": final}
+
+    def _build_decode_diagnostics(
+        self,
+        cam2proj_map,
+        img_white_bgr,
+        img_black_bgr,
+        projector_width: int,
+        projector_height: int,
+        *,
+        contrast_thresh: int,
+    ):
+        import cv2
+        import numpy as np
+
+        white_gray = cv2.cvtColor(img_white_bgr, cv2.COLOR_BGR2GRAY)
+        black_gray = cv2.cvtColor(img_black_bgr, cv2.COLOR_BGR2GRAY)
+        contrast = white_gray.astype(np.int16) - black_gray.astype(np.int16)
+        contrast_mask = contrast > contrast_thresh
+        valid_decode_mask = (cam2proj_map[:, :, 0] >= 0) & (cam2proj_map[:, :, 1] >= 0)
+        trusted_cam_mask = valid_decode_mask & contrast_mask
+
+        projector_occupancy = np.zeros((projector_height, projector_width), dtype=np.uint8)
+        projector_hit_count = np.zeros((projector_height, projector_width), dtype=np.int32)
+        ys, xs = np.where(trusted_cam_mask)
+        px = cam2proj_map[ys, xs, 0]
+        py = cam2proj_map[ys, xs, 1]
+        in_bounds = (px >= 0) & (px < projector_width) & (py >= 0) & (py < projector_height)
+        ys, xs, px, py = ys[in_bounds], xs[in_bounds], px[in_bounds], py[in_bounds]
+        np.add.at(projector_hit_count, (py, px), 1)
+        projector_occupancy[py, px] = 255
+
+        return {
+            "contrast": contrast,
+            "contrast_mask": contrast_mask,
+            "valid_decode_mask": valid_decode_mask,
+            "trusted_cam_mask": trusted_cam_mask,
+            "projector_occupancy": projector_occupancy,
+            "projector_hit_count": projector_hit_count,
+            "trusted_sample_count": len(px),
+        }
+
+    def _filter_projector_occupancy(self, occupancy_mask, *, min_area: int, close_kernel_size: int):
+        import cv2
+        import numpy as np
+
+        kernel = np.ones((close_kernel_size, close_kernel_size), np.uint8)
+        closed = cv2.morphologyEx(occupancy_mask, cv2.MORPH_CLOSE, kernel)
+        component_count, labels, stats, _ = cv2.connectedComponentsWithStats(closed, connectivity=8)
+        filtered = np.zeros_like(occupancy_mask)
+        kept_components = 0
+        for label_id in range(1, component_count):
+            if stats[label_id, cv2.CC_STAT_AREA] >= min_area:
+                filtered[labels == label_id] = 255
+                kept_components += 1
+        return filtered, closed, kept_components
+
+    def _fill_small_enclosed_holes(self, mask, *, max_hole_area: int):
+        import cv2
+        import numpy as np
+
+        filled = mask.copy()
+        h, w = filled.shape
+        flood = filled.copy()
+        flood_mask = np.zeros((h + 2, w + 2), dtype=np.uint8)
+        cv2.floodFill(flood, flood_mask, (0, 0), 255)
+        holes = cv2.bitwise_not(flood) & cv2.bitwise_not(filled)
+
+        kept_holes = np.zeros_like(mask)
+        component_count, labels, stats, _ = cv2.connectedComponentsWithStats(holes, connectivity=8)
+        for label_id in range(1, component_count):
+            if stats[label_id, cv2.CC_STAT_AREA] <= max_hole_area:
+                kept_holes[labels == label_id] = 255
+        return cv2.bitwise_or(filled, kept_holes), kept_holes
+
+    def _largest_component_bbox(self, mask):
+        import cv2
+        import numpy as np
+
+        component_count, _, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+        if component_count <= 1:
+            return None
+        largest_label = int(np.argmax(stats[1:, cv2.CC_STAT_AREA])) + 1
+        return (
+            int(stats[largest_label, cv2.CC_STAT_LEFT]),
+            int(stats[largest_label, cv2.CC_STAT_TOP]),
+            int(stats[largest_label, cv2.CC_STAT_WIDTH]),
+            int(stats[largest_label, cv2.CC_STAT_HEIGHT]),
+        )
+
+    def _refine_support_mask(self, base_support, *, fill_holes: bool, restrict_to_bbox: bool, max_hole_area: int):
+        import cv2
+        import numpy as np
+
+        support = base_support.copy()
+        holes = np.zeros_like(base_support)
+        if fill_holes:
+            support, holes = self._fill_small_enclosed_holes(support, max_hole_area=max_hole_area)
+
+        bbox_mask = np.full_like(base_support, 255)
+        if restrict_to_bbox:
+            bbox = self._largest_component_bbox(base_support)
+            bbox_mask[:] = 0
+            if bbox is not None:
+                x, y, w, h = bbox
+                bbox_mask[y:y + h, x:x + w] = 255
+                support = cv2.bitwise_and(support, bbox_mask)
+                holes = cv2.bitwise_and(holes, bbox_mask)
+        return {"clean": support, "holes": holes, "bbox_mask": bbox_mask}
+
+    def _gaussian_kernel(self, radius: int, sigma: float):
+        import numpy as np
+
+        ys, xs = np.mgrid[-radius:radius + 1, -radius:radius + 1]
+        kernel = np.exp(-(xs * xs + ys * ys) / (2.0 * sigma * sigma))
+        kernel /= kernel.sum()
+        return kernel.astype(np.float32)
+
+    def _confidence_from_contrast_percentiles(
+        self,
+        contrast_image,
+        valid_mask,
+        *,
+        low_percentile: float,
+        high_percentile: float,
+        contrast_thresh: int,
+    ):
+        import numpy as np
+
+        contrast = contrast_image.astype(np.float32)
+        candidate_mask = valid_mask & (contrast > float(contrast_thresh))
+        conf = np.zeros_like(contrast, dtype=np.float32)
+        if not np.any(candidate_mask):
+            return conf
+        values = contrast[candidate_mask]
+        low = float(np.percentile(values, low_percentile))
+        high = float(np.percentile(values, high_percentile))
+        if high <= low:
+            high = low + 1.0
+        conf[candidate_mask] = np.clip((contrast[candidate_mask] - low) / (high - low), 0.0, 1.0)
+        return conf
+
+    def _aggregate_projector_hits_weighted(
+        self,
+        cam2proj_map,
+        trusted_cam_mask,
+        confidence_map,
+        projector_width: int,
+        projector_height: int,
+        *,
+        support_mask=None,
+        conflict_sigma: float,
+    ):
+        import numpy as np
+
+        px_sum = np.zeros((projector_height, projector_width), dtype=np.float64)
+        py_sum = np.zeros((projector_height, projector_width), dtype=np.float64)
+        w_sum = np.zeros((projector_height, projector_width), dtype=np.float64)
+        hit_count = np.zeros((projector_height, projector_width), dtype=np.int32)
+
+        ys, xs = np.where(trusted_cam_mask)
+        proj_x = cam2proj_map[ys, xs, 0]
+        proj_y = cam2proj_map[ys, xs, 1]
+        conf = confidence_map[ys, xs]
+        in_bounds = (proj_x >= 0) & (proj_x < projector_width) & (proj_y >= 0) & (proj_y < projector_height) & (conf > 0)
+        ys, xs, proj_x, proj_y, conf = ys[in_bounds], xs[in_bounds], proj_x[in_bounds], proj_y[in_bounds], conf[in_bounds]
+        if support_mask is not None:
+            keep = support_mask[proj_y, proj_x] > 0
+            ys, xs, proj_x, proj_y, conf = ys[keep], xs[keep], proj_x[keep], proj_y[keep], conf[keep]
+
+        np.add.at(hit_count, (proj_y, proj_x), 1)
+        np.add.at(px_sum, (proj_y, proj_x), xs * conf)
+        np.add.at(py_sum, (proj_y, proj_x), ys * conf)
+        np.add.at(w_sum, (proj_y, proj_x), conf)
+
+        proj2cam_x = np.full((projector_height, projector_width), np.nan, dtype=np.float32)
+        proj2cam_y = np.full((projector_height, projector_width), np.nan, dtype=np.float32)
+        valid = w_sum > 0
+        proj2cam_x[valid] = (px_sum[valid] / w_sum[valid]).astype(np.float32)
+        proj2cam_y[valid] = (py_sum[valid] / w_sum[valid]).astype(np.float32)
+
+        grouped = {}
+        for cx, cy, px, py, cw in zip(xs, ys, proj_x, proj_y, conf):
+            grouped.setdefault((int(py), int(px)), []).append((float(cx), float(cy), float(cw)))
+        for (pyi, pxi), samples in grouped.items():
+            if len(samples) <= 1:
+                continue
+            avg_x = proj2cam_x[pyi, pxi]
+            avg_y = proj2cam_y[pyi, pxi]
+            distances = [((sx - avg_x) ** 2 + (sy - avg_y) ** 2) ** 0.5 for sx, sy, _ in samples]
+            if np.average(distances, weights=[max(sw, 1e-6) for _, _, sw in samples]) > conflict_sigma:
+                best = max(samples, key=lambda item: item[2])
+                proj2cam_x[pyi, pxi] = np.float32(best[0])
+                proj2cam_y[pyi, pxi] = np.float32(best[1])
+        return {
+            "proj2cam_x": proj2cam_x,
+            "proj2cam_y": proj2cam_y,
+            "hit_count": hit_count,
+            "weighted_sum": w_sum.astype(np.float32),
+        }
+
+    def _normalized_kernel_fill(
+        self,
+        map_array,
+        support_mask,
+        *,
+        radius: int,
+        sigma: float,
+        min_valid_neighbors: int,
+        max_passes: int,
+    ):
+        import cv2
+        import numpy as np
+
+        filled = map_array.astype(np.float32).copy()
+        kernel = self._gaussian_kernel(radius, sigma)
+        support = support_mask > 0
+        for _ in range(max_passes):
+            valid = np.isfinite(filled) & support
+            missing = (~valid) & support
+            if not np.any(missing):
+                break
+            src = np.where(valid, filled, 0.0).astype(np.float32)
+            weight_src = valid.astype(np.float32)
+            weighted_sum = cv2.filter2D(src, -1, kernel, borderType=cv2.BORDER_REPLICATE)
+            weight_sum = cv2.filter2D(weight_src, -1, kernel, borderType=cv2.BORDER_REPLICATE)
+            neighbor_count = cv2.filter2D(
+                weight_src,
+                -1,
+                np.ones((2 * radius + 1, 2 * radius + 1), np.float32),
+                borderType=cv2.BORDER_REPLICATE,
+            )
+            can_fill = missing & (weight_sum > 1e-6) & (neighbor_count >= float(min_valid_neighbors))
+            if not np.any(can_fill):
+                break
+            filled[can_fill] = weighted_sum[can_fill] / weight_sum[can_fill]
+        filled[~support] = np.nan
+        return filled
+
+    def _normalized_kernel_fill_from_source(
+        self,
+        source_map,
+        target_missing_mask,
+        support_mask,
+        *,
+        radius: int,
+        sigma: float,
+        min_valid_neighbors: int,
+        max_passes: int,
+    ):
+        import cv2
+        import numpy as np
+
+        filled = source_map.astype(np.float32).copy()
+        kernel = self._gaussian_kernel(radius, sigma)
+        support = support_mask > 0
+        target_missing = target_missing_mask & support
+        for _ in range(max_passes):
+            valid = np.isfinite(filled) & support
+            can_target = target_missing & (~valid)
+            if not np.any(can_target):
+                break
+            src = np.where(valid, filled, 0.0).astype(np.float32)
+            weight_src = valid.astype(np.float32)
+            weighted_sum = cv2.filter2D(src, -1, kernel, borderType=cv2.BORDER_REPLICATE)
+            weight_sum = cv2.filter2D(weight_src, -1, kernel, borderType=cv2.BORDER_REPLICATE)
+            neighbor_count = cv2.filter2D(
+                weight_src,
+                -1,
+                np.ones((2 * radius + 1, 2 * radius + 1), np.float32),
+                borderType=cv2.BORDER_REPLICATE,
+            )
+            fill_now = can_target & (weight_sum > 1e-6) & (neighbor_count >= float(min_valid_neighbors))
+            if not np.any(fill_now):
+                break
+            filled[fill_now] = weighted_sum[fill_now] / weight_sum[fill_now]
+        filled[~support] = np.nan
+        return filled
+
+    def _save_layer_masks_from_color_image(self, color_bgr, out_dir: str, *, prefix: str):
+        import cv2
+        import numpy as np
+
+        os.makedirs(out_dir, exist_ok=True)
+        flat = color_bgr.reshape(-1, 3)
+        unique_colors = np.unique(flat, axis=0)
+        unique_colors = [color for color in unique_colors if np.any(color != 0)]
+        saved_paths = []
+        for idx, color in enumerate(unique_colors):
+            mask = np.all(color_bgr == color, axis=2).astype(np.uint8) * 255
+            out_path = os.path.join(out_dir, f"{prefix}_{idx:03d}.png")
+            cv2.imwrite(out_path, mask)
+            saved_paths.append(out_path)
+        return saved_paths
+
+    def _collect_layer_areas(self, layer_paths: List[str]):
+        import cv2
+        import numpy as np
+
+        layer_info = []
+        for layer_path in layer_paths:
+            mask = cv2.imread(layer_path, cv2.IMREAD_GRAYSCALE)
+            if mask is None:
+                continue
+            layer_info.append({"path": layer_path, "area": int(np.count_nonzero(mask))})
+        return layer_info
+
+    def _ensure_unique_mapping_scene_name(self, mapping_service, base_name: str) -> str:
+        existing_names = {scene.name for scene in mapping_service.list_scenes()}
+        if base_name not in existing_names:
+            return base_name
+        suffix = 2
+        while f"{base_name} {suffix}" in existing_names:
+            suffix += 1
+        return f"{base_name} {suffix}"
+
+    def publish_mapping_scene(self, session_id: str, scene_name: Optional[str] = None) -> Optional[Dict]:
+        session = self.get_session(session_id)
+        if not session:
+            return None
+        if session.get("review", {}).get("status") != "accepted":
+            raise RuntimeError("Session must be accepted before publishing to Mapping.")
+
+        artifacts = session.get("decode", {}).get("artifacts", {})
+        manifest_path = artifacts.get("filtered_masks_manifest")
+        if not manifest_path or not os.path.exists(manifest_path):
+            raise RuntimeError("Filtered masks have not been generated for this session.")
+
+        with open(manifest_path, "r", encoding="utf-8") as handle:
+            manifest = json.load(handle)
+
+        mask_entries = manifest.get("masks", [])
+        if not mask_entries:
+            raise RuntimeError("No filtered masks are available to publish.")
+
+        from database.database import get_db
+        from schemas.mapping_scene import MappingSceneCreate
+        from services.mapping_scene_service import MappingSceneService
+
+        requested_name = (scene_name or f"{session['name']} {session_id[:8]}").strip()
+        db_generator = get_db()
+        db = next(db_generator)
+        try:
+            mapping_service = MappingSceneService(db)
+            scene = mapping_service.create_scene(
+                MappingSceneCreate(
+                    name=self._ensure_unique_mapping_scene_name(mapping_service, requested_name),
+                    canvas_width=session["projector_width"],
+                    canvas_height=session["projector_height"],
+                    mask_mode="luminance",
+                    masks=[],
+                    groups=[],
+                    render_settings={"background": "#000000"},
+                )
+            )
+            scene = mapping_service.add_mask_files(
+                scene.id,
+                [
+                    {
+                        "file_path": entry["file_path"],
+                        "name": entry["name"],
+                        "file_name": entry.get("file_name") or os.path.basename(entry["file_path"]),
+                    }
+                    for entry in mask_entries
+                ],
+            )
+            return {
+                "session_id": session_id,
+                "scene_id": scene.id,
+                "scene_name": scene.name,
+                "mask_count": len(scene.masks or []),
+            }
+        finally:
+            try:
+                db_generator.close()
+            except Exception:
+                pass
 
     def _worker_is_connected(self) -> bool:
         last_seen = self._worker.get("last_seen_at")
@@ -1083,6 +1840,24 @@ class StructuredLightingService:
         finally:
             loop.close()
 
+    def _load_sessions_from_disk(self) -> None:
+        if not os.path.isdir(self._upload_root):
+            return
+        for entry in os.listdir(self._upload_root):
+            session_dir = os.path.join(self._upload_root, entry)
+            session_path = os.path.join(session_dir, "session.json")
+            if not os.path.isfile(session_path):
+                continue
+            try:
+                with open(session_path, "r", encoding="utf-8") as handle:
+                    session = json.load(handle)
+            except Exception:
+                continue
+            session_id = session.get("session_id")
+            if not session_id:
+                continue
+            self._sessions[session_id] = session
+
     def _session_dir(self, session_id: str) -> str:
         path = os.path.join(self._upload_root, session_id)
         os.makedirs(path, exist_ok=True)
@@ -1136,6 +1911,153 @@ class StructuredLightingService:
                 return candidate
         return None
 
+    def _decode_raw_cam2proj(self, session_id: str, sample_step: int):
+        session = self.get_session(session_id)
+        if not session:
+            raise RuntimeError("Structured lighting session not found")
+
+        capture_dir = self._ensure_capture_dir(session_id)
+        white_path = self._find_capture_file(capture_dir, ("img_white.png", "img_white.jpg", "img_white.jpeg"))
+        black_path = self._find_capture_file(capture_dir, ("img_black.png", "img_black.jpg", "img_black.jpeg"))
+        if not white_path or not black_path:
+            raise RuntimeError("Reference white/black captures are missing.")
+
+        try:
+            import cv2
+            import numpy as np
+        except ImportError as exc:
+            raise RuntimeError("Decoding requires opencv-contrib-python and numpy in the backend environment.") from exc
+
+        plan = self.get_capture_plan(session_id)
+        graycode_steps = [step for step in plan["steps"] if step["kind"] == "graycode"]
+        pattern_images = []
+        for step in graycode_steps:
+            capture_meta = session.get("captures", {}).get(str(step["index"]))
+            if not capture_meta:
+                raise RuntimeError(f"Missing capture for graycode step {step['index']}.")
+            image = cv2.imread(capture_meta["stored_path"], cv2.IMREAD_GRAYSCALE)
+            if image is None:
+                raise RuntimeError(f"Failed to load capture {capture_meta['stored_path']}.")
+            pattern_images.append(image)
+
+        if hasattr(cv2, "structured_light_GrayCodePattern"):
+            graycode = cv2.structured_light_GrayCodePattern.create(session["projector_width"], session["projector_height"])
+        elif hasattr(cv2, "structured_light") and hasattr(cv2.structured_light, "GrayCodePattern_create"):
+            graycode = cv2.structured_light.GrayCodePattern_create(session["projector_width"], session["projector_height"])
+        else:
+            raise RuntimeError("OpenCV structured light module is unavailable.")
+
+        graycode.setWhiteThreshold(5)
+        graycode.setBlackThreshold(40)
+
+        h, w = pattern_images[0].shape
+        cam2proj = np.full((h, w, 2), -1, dtype=np.int32)
+        row_positions = list(range(0, h, sample_step))
+        total_rows = max(1, len(row_positions))
+        for row_index, y in enumerate(row_positions):
+            for x in range(0, w, sample_step):
+                ok, p = graycode.getProjPixel(pattern_images, x, y)
+                if ok:
+                    cam2proj[y, x, 0] = int(p[0])
+                    cam2proj[y, x, 1] = int(p[1])
+            if row_index == 0 or row_index == total_rows - 1 or row_index % max(1, total_rows // 12) == 0:
+                percent = 8 + int((row_index + 1) / total_rows * 47)
+                self._set_decode_progress(
+                    session_id,
+                    phase="decoding",
+                    label=f"Decoding projector correspondence ({row_index + 1}/{total_rows} rows)",
+                    percent=min(percent, 55),
+                )
+        return cam2proj, white_path, black_path
+
+    def _set_decode_progress(self, session_id: str, *, phase: str, label: str, percent: int) -> None:
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return
+            decode = {**self._default_decode_state(), **session.get("decode", {})}
+            decode["status"] = "running" if phase != "completed" else "completed"
+            decode["message"] = label
+            decode["progress"] = {
+                "phase": phase,
+                "label": label,
+                "percent": max(0, min(int(percent), 100)),
+            }
+            session["decode"] = decode
+            session["updated_at"] = datetime.utcnow().isoformat()
+            self._persist_session(session)
+
+    def _default_tuning_params(self) -> Dict:
+        return {
+            "median_blur_ksize": 11,
+            "bilateral_d": 15,
+            "bilateral_sigma_color": 75,
+            "bilateral_sigma_space": 75,
+            "gradient_kernel_size": 5,
+            "segmentation_scale": 1.0,
+            "segmentation_threshold": 5,
+            "segmentation_blur": 7,
+            "room_close_kernel_size": 3,
+            "min_area_ratio": 0.001,
+            "contrast_threshold": 25,
+            "min_projector_component_area": 25,
+            "repair_fill_holes": True,
+            "repair_restrict_to_bbox": False,
+            "repair_max_hole_area": 5000,
+            "confidence_low_percentile": 60.0,
+            "confidence_high_percentile": 97.0,
+            "aggregation_sigma": 1.5,
+            "kernel_radius": 5,
+            "kernel_sigma": 2.0,
+            "kernel_min_valid_neighbors": 6,
+            "kernel_max_passes": 6,
+            "second_pass_kernel_radius": 9,
+            "second_pass_kernel_sigma": 3.5,
+            "second_pass_min_valid_neighbors": 10,
+            "second_pass_max_passes": 4,
+            "layer_min_area": 1000,
+        }
+
+    def _normalize_tuning_params(self, overrides: Optional[Dict] = None) -> Dict:
+        params = self._default_tuning_params()
+        if overrides:
+            params.update(overrides)
+        return params
+
+    def _parameter_search_candidates(self) -> List[Dict]:
+        return [
+            {
+                "label": "Balanced",
+                "description": "Default repair and layer filtering.",
+                "params": self._normalize_tuning_params(),
+            },
+            {
+                "label": "Fine Layers",
+                "description": "Keep smaller layers and sharper segmentation.",
+                "params": self._normalize_tuning_params({"segmentation_blur": 5, "layer_min_area": 250}),
+            },
+            {
+                "label": "Smooth Segmentation",
+                "description": "Heavier blur for cleaner large regions.",
+                "params": self._normalize_tuning_params({"segmentation_blur": 11}),
+            },
+            {
+                "label": "Low Threshold",
+                "description": "More aggressive wall detection and lighter layer filtering.",
+                "params": self._normalize_tuning_params({"segmentation_threshold": 3, "contrast_threshold": 20, "layer_min_area": 500}),
+            },
+            {
+                "label": "High Contrast",
+                "description": "Stricter trusted pixels and more conservative masks.",
+                "params": self._normalize_tuning_params({"contrast_threshold": 35, "layer_min_area": 2500}),
+            },
+            {
+                "label": "Strict Segmentation",
+                "description": "Higher segmentation threshold with smoother region boundaries.",
+                "params": self._normalize_tuning_params({"segmentation_threshold": 7, "segmentation_blur": 11, "layer_min_area": 1000}),
+            },
+        ]
+
     def _artifact_preview_specs(self) -> List[tuple[str, str, str]]:
         return [
             ("valid-mask", "Camera Valid Mask", "White pixels decoded to projector coordinates."),
@@ -1167,6 +2089,7 @@ class StructuredLightingService:
             "started_at": None,
             "finished_at": None,
             "message": "Decode has not run yet.",
+            "progress": None,
             "metrics": {},
             "artifacts": {},
         }
@@ -1188,6 +2111,14 @@ class StructuredLightingService:
             "reviewed_by": "",
             "accepted_at": None,
             "updated_at": None,
+        }
+
+    def _default_tuning_search_state(self) -> Dict:
+        return {
+            "status": "not_started",
+            "generated_at": None,
+            "sample_step": 1,
+            "candidates": [],
         }
 
     def _build_calibration_record(self, session: Dict, decode_result: Dict) -> Dict:
