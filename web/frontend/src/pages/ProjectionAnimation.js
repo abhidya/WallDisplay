@@ -22,6 +22,7 @@ import {
 import {
   Animation as AnimationIcon,
   ContentCopy as CopyIcon,
+  Refresh as RefreshIcon,
 } from '@mui/icons-material';
 import { projectionApi } from '../services/api';
 
@@ -35,20 +36,25 @@ function ProjectionAnimation() {
   const [animationLists, setAnimationLists] = useState([]);
   const [listDraft, setListDraft] = useState({ id: '', name: '', animation_ids: [], auto_advance_seconds: 12 });
 
+  const loadLibrary = async ({ quiet = false } = {}) => {
+    if (!quiet) {
+      setLoading(true);
+    }
+    setError('');
+
+    const [animationRes, animationListRes] = await Promise.all([
+      projectionApi.listAnimations(),
+      projectionApi.listAnimationLists(),
+    ]);
+    setAnimations(animationRes.data?.animations || []);
+    setAnimationLists(animationListRes.data?.animation_lists || []);
+    setLoading(false);
+  };
+
   useEffect(() => {
     let active = true;
 
-    Promise.all([
-      projectionApi.listAnimations(),
-      projectionApi.listAnimationLists(),
-    ]).then(([animationRes, animationListRes]) => {
-      if (!active) {
-        return;
-      }
-      setAnimations(animationRes.data?.animations || []);
-      setAnimationLists(animationListRes.data?.animation_lists || []);
-      setLoading(false);
-    }).catch((err) => {
+    loadLibrary().catch((err) => {
       console.error(err);
       if (!active) {
         return;
@@ -57,8 +63,20 @@ function ProjectionAnimation() {
       setLoading(false);
     });
 
+    const handleFocus = () => {
+      if (!active) {
+        return;
+      }
+      loadLibrary({ quiet: true }).catch((err) => {
+        console.error(err);
+      });
+    };
+
+    window.addEventListener('focus', handleFocus);
+
     return () => {
       active = false;
+      window.removeEventListener('focus', handleFocus);
     };
   }, []);
 
@@ -134,13 +152,30 @@ function ProjectionAnimation() {
     <Grid container spacing={3}>
       <Grid item xs={12}>
         <Paper sx={{ p: 3 }}>
-          <Typography variant="h4" gutterBottom>
-            Projection Animation
-          </Typography>
-          <Typography variant="body1" color="text.secondary">
-            Projection animations are reusable visual sources. Use the library here for preview and selection, then bind
-            them as media sources inside Mapping or Scene Control.
-          </Typography>
+          <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={2}>
+            <Box>
+              <Typography variant="h4" gutterBottom>
+                Projection Animation
+              </Typography>
+              <Typography variant="body1" color="text.secondary">
+                Projection animations are reusable visual sources. Use the library here for preview and selection, then bind
+                them as media sources inside Mapping or Scene Control.
+              </Typography>
+            </Box>
+            <Button
+              variant="outlined"
+              startIcon={<RefreshIcon />}
+              onClick={() => {
+                loadLibrary().catch((err) => {
+                  console.error(err);
+                  setError('Failed to refresh projection animations');
+                  setLoading(false);
+                });
+              }}
+            >
+              Refresh Library
+            </Button>
+          </Stack>
         </Paper>
       </Grid>
 

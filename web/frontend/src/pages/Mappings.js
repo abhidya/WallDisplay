@@ -181,20 +181,6 @@ function Mappings() {
     });
   }, [requestedSceneId]);
 
-  useEffect(() => {
-    const onKeyDown = (event) => {
-      if (event.key.toLowerCase() === 'h' && uiHidden) {
-        setUiHidden(false);
-      }
-      if (event.key.toLowerCase() === 'f') {
-        toggleFullscreen();
-      }
-    };
-
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [uiHidden]);
-
   const selectedScene = useMemo(
     () => scenes.find((scene) => scene.id === selectedSceneId) || null,
     [scenes, selectedSceneId]
@@ -204,6 +190,30 @@ function Mappings() {
     () => sceneDraft?.groups?.find((group) => group.id === selectedGroupId) || null,
     [sceneDraft, selectedGroupId]
   );
+
+  const stageRenderState = useMemo(() => {
+    if (!sceneDraft) {
+      return null;
+    }
+
+    return {
+      canvas_width: sceneDraft.canvas_width,
+      canvas_height: sceneDraft.canvas_height,
+      render_settings: {
+        background: sceneDraft.render_settings?.background || '#000000',
+      },
+      groups: (sceneDraft.groups || []).map((group) => ({
+        id: group.id,
+        mask_ids: group.mask_ids || [],
+        z_index: group.z_index || 0,
+        visible: group.visible,
+        fill_mode: group.fill_mode,
+        color_a: group.color_a,
+        color_b: group.color_b,
+        transform: group.transform || { scale: 1, offset_x: 0, offset_y: 0, rotation: 0 },
+      })),
+    };
+  }, [sceneDraft]);
 
   const loadScene = (scene) => {
     setSelectedSceneId(scene.id);
@@ -261,9 +271,19 @@ function Mappings() {
   }, [sceneDraft?.masks, selectedSceneId, getMaskUrl]);
 
   useEffect(() => {
-    if (!sceneDraft || !previewCanvasRef.current) return;
-    renderStage(previewCanvasRef.current, sceneDraft, maskImages, selectedGroupId, polygonDraft);
-  }, [sceneDraft, maskImages, selectedGroupId, polygonDraft]);
+    if (!stageRenderState || !previewCanvasRef.current) return undefined;
+
+    let frameId = requestAnimationFrame(() => {
+      if (!previewCanvasRef.current) {
+        return;
+      }
+      renderStage(previewCanvasRef.current, stageRenderState, maskImages, selectedGroupId, polygonDraft);
+    });
+
+    return () => {
+      cancelAnimationFrame(frameId);
+    };
+  }, [stageRenderState, maskImages, selectedGroupId, polygonDraft]);
 
   const persistScene = async () => {
     try {
@@ -612,13 +632,23 @@ function Mappings() {
   };
 
   return (
-    <Box sx={{ minHeight: 'calc(100vh - 96px)', bgcolor: '#e9dfcf', color: PANEL_TEXT, p: uiHidden ? 0 : 2 }}>
+    <Box
+      sx={{
+        height: 'calc(100vh - 96px)',
+        bgcolor: '#e9dfcf',
+        color: PANEL_TEXT,
+        p: uiHidden ? 0 : 2,
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+      }}
+    >
       {!uiHidden && (
         <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
           <Box>
             <Typography variant="h4" sx={{ color: PANEL_TEXT }}>Mappings</Typography>
             <Typography variant="body2" sx={{ color: PANEL_SUBTEXT }}>
-              Stage-first scene editor. `H` hides chrome. `F` toggles fullscreen.
+              Stage-first scene editor with fixed side panels and an always-visible stage.
             </Typography>
           </Box>
           <Stack direction="row" spacing={1}>
@@ -659,7 +689,7 @@ function Mappings() {
         </Stack>
       )}
 
-      <Box sx={{ display: 'flex', gap: 2, minHeight: uiHidden ? '100vh' : 'calc(100vh - 180px)' }}>
+      <Box sx={{ display: 'flex', gap: 2, flex: 1, minHeight: 0 }}>
         {!uiHidden && leftOpen && (
           <Drawer
             variant="permanent"
@@ -675,10 +705,12 @@ function Mappings() {
                 border: `1px solid ${PANEL_BORDER}`,
                 borderRadius: 2,
                 p: 2,
+                height: '100%',
+                overflow: 'hidden',
               },
             }}
           >
-            <Stack spacing={2}>
+            <Stack spacing={2} sx={{ height: '100%', minHeight: 0, overflowY: 'auto', pr: 0.5 }}>
               <Paper sx={panelPaperSx}>
                 <SectionHeader
                   title="Scenes"
@@ -842,6 +874,8 @@ function Mappings() {
             flex: 1,
             display: 'flex',
             flexDirection: 'column',
+            minWidth: 0,
+            minHeight: 0,
             bgcolor: '#000',
             borderRadius: uiHidden ? 0 : 3,
             border: uiHidden ? 'none' : `1px solid ${CANVAS_FRAME}`,
@@ -858,9 +892,9 @@ function Mappings() {
             </Stack>
           )}
 
-          <Box sx={{ flex: 1, display: 'grid', placeItems: 'center', p: uiHidden ? 0 : 2 }}>
+          <Box sx={{ flex: 1, minHeight: 0, display: 'grid', placeItems: 'center', p: uiHidden ? 0 : 2 }}>
             {sceneDraft ? (
-              <Box sx={{ width: '100%', maxWidth: uiHidden ? '100vw' : 1320 }}>
+              <Box sx={{ width: '100%', maxWidth: uiHidden ? '100vw' : 1320, maxHeight: '100%' }}>
                 <canvas
                   ref={previewCanvasRef}
                   onClick={handleStageClick}
@@ -894,10 +928,12 @@ function Mappings() {
                 border: `1px solid ${PANEL_BORDER}`,
                 borderRadius: 2,
                 p: 2,
+                height: '100%',
+                overflow: 'hidden',
               },
             }}
           >
-            <Stack spacing={2}>
+            <Stack spacing={2} sx={{ height: '100%', minHeight: 0, overflowY: 'auto', pr: 0.5 }}>
               <Paper sx={panelPaperSx}>
                 <SectionHeader
                   title="Groups"
@@ -1275,7 +1311,7 @@ function Mappings() {
       </Box>
 
       {!uiHidden && (
-        <Stack spacing={1} sx={{ mt: 2 }}>
+        <Stack spacing={1} sx={{ mt: 2, flexShrink: 0 }}>
           {message && <Alert onClose={() => setMessage('')} severity="success">{message}</Alert>}
           {error && <Alert onClose={() => setError('')} severity="error">{error}</Alert>}
         </Stack>

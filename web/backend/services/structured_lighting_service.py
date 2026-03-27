@@ -464,11 +464,52 @@ class StructuredLightingService:
             shutil.rmtree(search_dir)
         os.makedirs(search_dir, exist_ok=True)
 
+        search_candidates = self._parameter_search_candidates(base_params, parameter_grid)
+        total_candidates = len(search_candidates)
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return None
+            session["tuning_search"] = {
+                "status": "running",
+                "message": "Generating tuning candidates.",
+                "generated_at": None,
+                "sample_step": sample_step,
+                "base_tuning_params": base_params,
+                "parameter_grid": parameter_grid or {},
+                "candidates": [],
+                "progress": {
+                    "current": 0,
+                    "total": total_candidates,
+                    "percent": 0,
+                    "label": "Preparing tuning search",
+                },
+            }
+            session["updated_at"] = datetime.utcnow().isoformat()
+            self._persist_session(session)
+
         candidates = []
-        for candidate_index, candidate in enumerate(self._parameter_search_candidates(base_params, parameter_grid)):
+        for candidate_index, candidate in enumerate(search_candidates):
             candidate_id = f"candidate_{candidate_index:02d}"
             candidate_dir = os.path.join(search_dir, candidate_id)
             os.makedirs(candidate_dir, exist_ok=True)
+            with self._lock:
+                session = self._sessions.get(session_id)
+                if session:
+                    session["tuning_search"] = {
+                        **session.get("tuning_search", self._default_tuning_search_state()),
+                        "status": "running",
+                        "message": f"Generating candidate {candidate_index + 1} of {total_candidates}.",
+                        "progress": {
+                            "current": candidate_index,
+                            "total": total_candidates,
+                            "percent": int((candidate_index / max(total_candidates, 1)) * 100),
+                            "label": f"Testing {candidate['label']}",
+                        },
+                        "candidates": list(candidates),
+                    }
+                    session["updated_at"] = datetime.utcnow().isoformat()
+                    self._persist_session(session)
             result = self._generate_filtered_projector_masks(
                 session_id=session_id,
                 white_path=white_path,
@@ -498,6 +539,23 @@ class StructuredLightingService:
                     },
                 }
             )
+            with self._lock:
+                session = self._sessions.get(session_id)
+                if session:
+                    session["tuning_search"] = {
+                        **session.get("tuning_search", self._default_tuning_search_state()),
+                        "status": "running",
+                        "message": f"Completed candidate {candidate_index + 1} of {total_candidates}.",
+                        "progress": {
+                            "current": candidate_index + 1,
+                            "total": total_candidates,
+                            "percent": int(((candidate_index + 1) / max(total_candidates, 1)) * 100),
+                            "label": f"Completed {candidate['label']}",
+                        },
+                        "candidates": list(candidates),
+                    }
+                    session["updated_at"] = datetime.utcnow().isoformat()
+                    self._persist_session(session)
 
         with self._lock:
             session = self._sessions.get(session_id)
@@ -505,11 +563,18 @@ class StructuredLightingService:
                 return None
             session["tuning_search"] = {
                 "status": "completed",
+                "message": f"Generated {len(candidates)} tuning candidates.",
                 "generated_at": datetime.utcnow().isoformat(),
                 "sample_step": sample_step,
                 "base_tuning_params": base_params,
                 "parameter_grid": parameter_grid or {},
                 "candidates": candidates,
+                "progress": {
+                    "current": len(candidates),
+                    "total": total_candidates,
+                    "percent": 100,
+                    "label": "Parameter search completed",
+                },
             }
             session["updated_at"] = datetime.utcnow().isoformat()
             self._persist_session(session)
@@ -2310,9 +2375,11 @@ class StructuredLightingService:
     def _default_tuning_search_state(self) -> Dict:
         return {
             "status": "not_started",
+            "message": "Parameter search has not run yet.",
             "generated_at": None,
             "sample_step": 1,
             "candidates": [],
+            "progress": None,
         }
 
     def _build_calibration_record(self, session: Dict, decode_result: Dict) -> Dict:

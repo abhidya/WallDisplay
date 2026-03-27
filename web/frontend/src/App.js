@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
@@ -26,22 +26,59 @@ import StreamingDiagnostics from './pages/StreamingDiagnostics';
 import StructuredLighting from './pages/StructuredLighting';
 import SceneControl from './pages/SceneControl';
 
-// Create a theme instance
-const theme = createTheme({
-  palette: {
-    primary: {
-      main: '#1976d2',
-    },
-    secondary: {
-      main: '#dc004e',
-    },
-    background: {
-      default: '#f5f5f5',
-    },
-  },
-});
+const UI_PREFS_KEY = 'nanoDlnaUiPrefs';
+
+function getUiPrefs() {
+  try {
+    const raw = localStorage.getItem(UI_PREFS_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return {
+      themeMode: parsed.themeMode === 'dark' ? 'dark' : 'light',
+    };
+  } catch (error) {
+    return {
+      themeMode: 'light',
+    };
+  }
+}
 
 function App() {
+  const [themeMode, setThemeMode] = useState(() => getUiPrefs().themeMode);
+
+  useEffect(() => {
+    const syncPrefs = () => {
+      setThemeMode(getUiPrefs().themeMode);
+    };
+
+    window.addEventListener('storage', syncPrefs);
+    window.addEventListener('nanoDlnaUiPrefsChanged', syncPrefs);
+    return () => {
+      window.removeEventListener('storage', syncPrefs);
+      window.removeEventListener('nanoDlnaUiPrefsChanged', syncPrefs);
+    };
+  }, []);
+
+  const theme = useMemo(() => createTheme({
+    palette: {
+      mode: themeMode,
+      primary: {
+        main: themeMode === 'dark' ? '#7cc6ff' : '#1976d2',
+      },
+      secondary: {
+        main: themeMode === 'dark' ? '#ff7da5' : '#dc004e',
+      },
+      background: themeMode === 'dark'
+        ? {
+            default: '#111418',
+            paper: '#1a2027',
+          }
+        : {
+            default: '#f5f5f5',
+            paper: '#ffffff',
+          },
+    },
+  }), [themeMode]);
+
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />

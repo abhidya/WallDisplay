@@ -251,9 +251,11 @@ function StructuredLighting() {
   const selectedSession = sessions.find((session) => session.session_id === selectedSessionId) || null;
   const selectedSessionStatus = runtime?.session?.status || selectedSession?.status || '';
   const decodeStatus = runtime?.session?.decode?.status || selectedSession?.decode?.status || '';
+  const tuningSearchStatus = tuningSearch?.status || 'not_started';
   const shouldPollRuntime = Boolean(selectedSessionId) && (
     ['waiting_for_worker', 'ready', 'capturing'].includes(selectedSessionStatus)
     || decodeStatus === 'running'
+    || tuningSearchStatus === 'running'
   );
 
   useEffect(() => {
@@ -543,6 +545,24 @@ function StructuredLighting() {
       const edgeModes = Object.entries(searchGrid.edge_modes)
         .filter(([, enabled]) => enabled)
         .map(([edgeMode]) => edgeMode);
+      const brightnessValues = parseGridValues(searchGrid.brightness_gain, Number);
+      const whiteValues = parseGridValues(searchGrid.white_threshold, Number);
+      const blackValues = parseGridValues(searchGrid.black_threshold, Number);
+      const totalCandidates = Math.min(
+        Math.max(edgeModes.length, 1) * Math.max(brightnessValues.length, 1) * Math.max(whiteValues.length, 1) * Math.max(blackValues.length, 1),
+        18,
+      );
+      setTuningSearch({
+        status: 'running',
+        message: 'Generating tuning candidates.',
+        candidates: [],
+        progress: {
+          current: 0,
+          total: totalCandidates,
+          percent: 0,
+          label: 'Preparing tuning search',
+        },
+      });
       const response = await structuredLightingApi.runTuningSearch(sessionId, {
         sample_step: 1,
         tuning_params: {
@@ -550,9 +570,9 @@ function StructuredLighting() {
         },
         parameter_grid: {
           edge_mode: edgeModes.length ? edgeModes : ['morph_gradient'],
-          brightness_gain: parseGridValues(searchGrid.brightness_gain, Number),
-          white_threshold: parseGridValues(searchGrid.white_threshold, Number),
-          black_threshold: parseGridValues(searchGrid.black_threshold, Number),
+          brightness_gain: brightnessValues,
+          white_threshold: whiteValues,
+          black_threshold: blackValues,
         },
       });
       setTuningSearch(response.data);
@@ -1511,6 +1531,11 @@ function StructuredLighting() {
                             </Button>
                           ))}
                         </Stack>
+                        <Typography variant="body2" color="text.secondary">
+                          Edge mode buttons choose which wall-edge detector families are included in the grid search.
+                          Current search candidates vary only edge mode, brightness gain, white threshold, and black threshold.
+                          Kernel radius values are not part of this search grid yet.
+                        </Typography>
                         <Grid container spacing={2}>
                           <Grid item xs={12} md={4}>
                             <TextField
@@ -1551,6 +1576,29 @@ function StructuredLighting() {
                         </Grid>
                       </Stack>
                     </Paper>
+                    {tuningSearch?.status === 'running' ? (
+                      <Paper variant="outlined" sx={{ p: 2 }}>
+                        <Stack spacing={1}>
+                          <Stack direction="row" justifyContent="space-between" alignItems="center">
+                            <Typography variant="subtitle2">
+                              {tuningSearch.progress?.label || 'Parameter search in progress'}
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary">
+                              {tuningSearch.progress?.percent ?? 0}%
+                            </Typography>
+                          </Stack>
+                          <LinearProgress
+                            variant="determinate"
+                            value={tuningSearch.progress?.percent ?? 0}
+                            sx={{ height: 8, borderRadius: 999 }}
+                          />
+                          <Typography variant="body2" color="text.secondary">
+                            {tuningSearch.message || 'Running parameter search.'}
+                            {tuningSearch.progress?.total ? ` ${tuningSearch.progress.current || 0}/${tuningSearch.progress.total} candidates complete.` : ''}
+                          </Typography>
+                        </Stack>
+                      </Paper>
+                    ) : null}
                     {tuningSearch?.candidates?.length ? (
                       <Stack spacing={2}>
                         <Typography variant="subtitle2">

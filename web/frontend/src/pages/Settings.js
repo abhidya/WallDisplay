@@ -41,10 +41,12 @@ function loadUiPrefs() {
     const raw = localStorage.getItem(UI_PREFS_KEY);
     const parsed = raw ? JSON.parse(raw) : {};
     return {
+      themeMode: parsed.themeMode === 'dark' ? 'dark' : 'light',
       showExperimentalTabs: Boolean(parsed.showExperimentalTabs),
     };
   } catch (error) {
     return {
+      themeMode: 'light',
       showExperimentalTabs: false,
     };
   }
@@ -67,6 +69,7 @@ function Settings() {
     logLevel: 'info',
     serverPort: 8000,
     enableSubtitles: true,
+    themeMode: 'light',
     showExperimentalTabs: false,
   });
 
@@ -74,6 +77,7 @@ function Settings() {
     const uiPrefs = loadUiPrefs();
     setSettings((current) => ({
       ...current,
+      themeMode: uiPrefs.themeMode,
       showExperimentalTabs: uiPrefs.showExperimentalTabs,
     }));
   }, []);
@@ -139,6 +143,7 @@ function Settings() {
     localStorage.setItem(
       UI_PREFS_KEY,
       JSON.stringify({
+        themeMode: settings.themeMode,
         showExperimentalTabs: settings.showExperimentalTabs,
       }),
     );
@@ -184,6 +189,18 @@ function Settings() {
           </Typography>
           <Divider sx={{ my: 1 }} />
           <List>
+            <ListItem>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={settings.themeMode === 'dark'}
+                    onChange={(e) => handleSettingChange('themeMode', e.target.checked ? 'dark' : 'light')}
+                    color="primary"
+                  />
+                }
+                label="Dark theme"
+              />
+            </ListItem>
             <ListItem>
               <FormControlLabel
                 control={
