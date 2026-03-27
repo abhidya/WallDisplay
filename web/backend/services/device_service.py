@@ -434,6 +434,8 @@ class DeviceService:
             return None
         logger.debug(f"[get_device_instance] Looking for device '{db_device.name}' in runtime inventory")
         core_device = self.runtime_sync_service.get_core_device(db_device.name)
+        expected_hostname = db_device.hostname or ""
+        expected_action_url = db_device.action_url or ""
         if not core_device:
             logger.debug(f"[get_device_instance] Device '{db_device.name}' not found, registering from DB")
             device_info = self.runtime_sync_service.build_device_info(db_device)
@@ -441,5 +443,26 @@ class DeviceService:
             if not core_device:
                 logger.error(f"[get_device_instance] Registration failed for device '{db_device.name}' with info: {device_info}")
         else:
-            logger.debug(f"[get_device_instance] Found device '{db_device.name}' in runtime inventory")
+            runtime_hostname = getattr(core_device, "hostname", "") or ""
+            runtime_action_url = getattr(core_device, "action_url", "") or ""
+            if runtime_hostname != expected_hostname or runtime_action_url != expected_action_url:
+                logger.info(
+                    "[get_device_instance] Refreshing stale runtime device '%s' (runtime hostname/action_url=%s/%s, db=%s/%s)",
+                    db_device.name,
+                    runtime_hostname,
+                    runtime_action_url,
+                    expected_hostname,
+                    expected_action_url,
+                )
+                self.runtime_sync_service.unregister(db_device.name)
+                device_info = self.runtime_sync_service.build_device_info(db_device)
+                core_device = self.runtime_sync_service.register(device_info)
+                if not core_device:
+                    logger.error(
+                        "[get_device_instance] Re-registration failed for device '%s' with info: %s",
+                        db_device.name,
+                        device_info,
+                    )
+            else:
+                logger.debug(f"[get_device_instance] Found device '{db_device.name}' in runtime inventory")
         return core_device
