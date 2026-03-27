@@ -46,6 +46,22 @@ class DiscoveryCoordinator:
     def __init__(self, manager: Any):
         self.manager = manager
         self.device_inventory = getattr(manager, "device_inventory", None)
+        self._last_cycle_status: Dict[str, Any] = {
+            "started_at": None,
+            "finished_at": None,
+            "duration_ms": None,
+            "candidate_hosts": [],
+            "ssdp_response_count": 0,
+            "location_url_count": 0,
+            "devices_discovered": 0,
+            "devices_registered_new": 0,
+            "devices_registered_changed": 0,
+            "devices_seen_this_pass": 0,
+            "devices_marked_disconnected": 0,
+            "devices_removed": 0,
+            "registration_failures": 0,
+            "last_error": None,
+        }
 
     def _inventory_len(self) -> int:
         if self.device_inventory is not None:
@@ -192,8 +208,22 @@ class DiscoveryCoordinator:
             "running": self.manager.discovery_running and not self.manager.discovery_paused,
             "paused": self.manager.discovery_paused,
             "interval": self.manager.discovery_interval,
-            "devices_discovered": self._inventory_len(),
+            "devices_discovered": self._last_cycle_status.get("devices_discovered", 0),
             "devices_playing": sum(1 for d in self._inventory_values() if d.is_playing),
+            "observed_devices": self._inventory_len(),
+            "last_cycle_started_at": self._last_cycle_status.get("started_at"),
+            "last_cycle_finished_at": self._last_cycle_status.get("finished_at"),
+            "last_cycle_duration_ms": self._last_cycle_status.get("duration_ms"),
+            "candidate_hosts": self._last_cycle_status.get("candidate_hosts", []),
+            "ssdp_response_count": self._last_cycle_status.get("ssdp_response_count", 0),
+            "location_url_count": self._last_cycle_status.get("location_url_count", 0),
+            "devices_registered_new": self._last_cycle_status.get("devices_registered_new", 0),
+            "devices_registered_changed": self._last_cycle_status.get("devices_registered_changed", 0),
+            "devices_seen_this_pass": self._last_cycle_status.get("devices_seen_this_pass", 0),
+            "devices_marked_disconnected": self._last_cycle_status.get("devices_marked_disconnected", 0),
+            "devices_removed": self._last_cycle_status.get("devices_removed", 0),
+            "registration_failures": self._last_cycle_status.get("registration_failures", 0),
+            "last_error": self._last_cycle_status.get("last_error"),
         }
 
     def run_loop(self) -> None:
@@ -210,17 +240,41 @@ class DiscoveryCoordinator:
             logger.error("Error loading default configuration: %s", exc)
 
         while self.manager.discovery_running:
+            cycle_started = time.time()
             try:
                 if self.manager.discovery_paused:
                     time.sleep(0.5)
                     continue
 
                 logger.debug("Starting DLNA device discovery cycle")
+                self._last_cycle_status = {
+                    "started_at": datetime.now(timezone.utc).isoformat(),
+                    "finished_at": None,
+                    "duration_ms": None,
+                    "candidate_hosts": [],
+                    "ssdp_response_count": 0,
+                    "location_url_count": 0,
+                    "devices_discovered": 0,
+                    "devices_registered_new": 0,
+                    "devices_registered_changed": 0,
+                    "devices_seen_this_pass": 0,
+                    "devices_marked_disconnected": 0,
+                    "devices_removed": 0,
+                    "registration_failures": 0,
+                    "last_error": None,
+                }
                 discovered_devices = self.discover_dlna_devices()
                 logger.debug("Found %s DLNA devices", len(discovered_devices))
+                self._last_cycle_status["devices_discovered"] = len(discovered_devices)
 
                 current_devices.clear()
                 observations = self.reconcile_discovered_devices(discovered_devices)
+                self._last_cycle_status["devices_registered_new"] = sum(
+                    1 for observation in observations if observation["is_new_device"]
+                )
+                self._last_cycle_status["devices_registered_changed"] = sum(
+                    1 for observation in observations if observation["is_changed_device"]
+                )
                 for observation in observations:
                     current_devices.add(observation["device_name"])
                     self.manager._process_device_video_assignment(
@@ -228,12 +282,19 @@ class DiscoveryCoordinator:
                         observation["is_new_device"],
                         observation["is_changed_device"],
                     )
+                self._last_cycle_status["devices_seen_this_pass"] = len(current_devices)
 
-                self.evaluate_disconnected_devices(current_devices)
+                disconnect_summary = self.evaluate_disconnected_devices(current_devices)
+                self._last_cycle_status["devices_marked_disconnected"] = disconnect_summary["marked_disconnected"]
+                self._last_cycle_status["devices_removed"] = disconnect_summary["removed"]
                 logger.debug("Finished DLNA discovery cycle")
             except Exception as exc:
+                self._last_cycle_status["last_error"] = str(exc)
                 logger.error("Error during DLNA discovery loop: %s", exc)
                 logger.error("Exception details: %s", traceback.format_exc())
+            finally:
+                self._last_cycle_status["finished_at"] = datetime.now(timezone.utc).isoformat()
+                self._last_cycle_status["duration_ms"] = int((time.time() - cycle_started) * 1000)
 
             time.sleep(self.manager.discovery_interval)
 
@@ -242,6 +303,7 @@ class DiscoveryCoordinator:
     def discover_dlna_devices(self, timeout: float = 2.0, host: Optional[str] = None) -> List[Dict[str, Any]]:
         devices = []
         attempted_hosts = self._candidate_discovery_hosts(host)
+        self._last_cycle_status["candidate_hosts"] = attempted_hosts
         logger.debug("Searching for DLNA devices on candidate hosts %s", attempted_hosts)
 
         for candidate_host in attempted_hosts:
@@ -275,6 +337,7 @@ class DiscoveryCoordinator:
                             if len(left) >= 2
                         }
                         devices.append(device)
+                        self._last_cycle_status["ssdp_response_count"] += 1
                     except Exception as exc:
                         logger.error("Error parsing DLNA device response: %s", exc)
             except OSError as exc:
@@ -287,12 +350,15 @@ class DiscoveryCoordinator:
             for dev in devices
             if "st" in dev and "AVTransport" in dev["st"]
         ]
+        self._last_cycle_status["location_url_count"] = len(devices_urls)
 
         registered_devices = []
         for location_url in devices_urls:
             device_info = self.register_dlna_device(location_url)
             if device_info:
                 registered_devices.append(device_info)
+            else:
+                self._last_cycle_status["registration_failures"] += 1
 
         return self.remove_duplicates(registered_devices)
 
@@ -373,7 +439,8 @@ class DiscoveryCoordinator:
 
         return observations
 
-    def evaluate_disconnected_devices(self, current_devices: set) -> None:
+    def evaluate_disconnected_devices(self, current_devices: set) -> Dict[str, int]:
+        summary = {"marked_disconnected": 0, "removed": 0}
         with self.manager.device_state_lock:
             for device_name in self._inventory_keys():
                 if device_name in current_devices:
@@ -428,6 +495,7 @@ class DiscoveryCoordinator:
                         time_since_last_seen,
                     )
                     self.manager.update_device_status(device_name, "disconnected")
+                    summary["marked_disconnected"] += 1
                     self._cleanup_streaming_sessions(device_name, removed=False)
 
                     if time_since_last_seen > self.manager.connectivity_timeout * 2:
@@ -438,6 +506,8 @@ class DiscoveryCoordinator:
                         self._cleanup_streaming_sessions(device_name, removed=True)
                         self._inventory_remove(device_name)
                         self.manager.runtime_registry.remove_device(device_name)
+                        summary["removed"] += 1
+        return summary
 
     def register_dlna_device(self, location_url: str) -> Optional[Dict[str, Any]]:
         try:

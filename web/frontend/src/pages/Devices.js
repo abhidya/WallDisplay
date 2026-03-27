@@ -77,6 +77,17 @@ function formatLastSeen(secondsSinceSeen) {
   return duration ? `Seen ${duration} ago` : 'No discovery data';
 }
 
+function formatCycleAge(isoTimestamp) {
+  if (!isoTimestamp) {
+    return 'Never';
+  }
+  const parsed = Date.parse(isoTimestamp);
+  if (Number.isNaN(parsed)) {
+    return isoTimestamp;
+  }
+  return formatLastSeen((Date.now() - parsed) / 1000);
+}
+
 function getAvailabilityLabel(device) {
   return device.availability || device.derived_status || device.status || 'unknown';
 }
@@ -679,11 +690,56 @@ function Devices() {
                     {discoveryStatus?.interval !== undefined && (
                       <Chip label={`Interval ${discoveryStatus.interval}s`} size="small" />
                     )}
+                    {discoveryStatus?.observed_devices !== undefined && (
+                      <Chip label={`${discoveryStatus.observed_devices} in runtime inventory`} size="small" />
+                    )}
                     {discoveryStatus?.devices_discovered !== undefined && (
                       <Chip label={`${discoveryStatus.devices_discovered} discovered this pass`} size="small" />
                     )}
+                    {discoveryStatus?.devices_seen_this_pass !== undefined && (
+                      <Chip label={`${discoveryStatus.devices_seen_this_pass} refreshed this pass`} size="small" />
+                    )}
+                    {discoveryStatus?.devices_registered_new !== undefined && (
+                      <Chip label={`${discoveryStatus.devices_registered_new} new`} size="small" />
+                    )}
+                    {discoveryStatus?.devices_registered_changed !== undefined && (
+                      <Chip label={`${discoveryStatus.devices_registered_changed} changed`} size="small" />
+                    )}
                     {discoveryStatus?.devices_playing !== undefined && (
                       <Chip label={`${discoveryStatus.devices_playing} marked playing`} size="small" />
+                    )}
+                    {discoveryStatus?.ssdp_response_count !== undefined && (
+                      <Chip label={`${discoveryStatus.ssdp_response_count} SSDP responses`} size="small" />
+                    )}
+                    {discoveryStatus?.location_url_count !== undefined && (
+                      <Chip label={`${discoveryStatus.location_url_count} AVTransport endpoints`} size="small" />
+                    )}
+                    {discoveryStatus?.registration_failures !== undefined && (
+                      <Chip label={`${discoveryStatus.registration_failures} registration failures`} size="small" color={discoveryStatus.registration_failures > 0 ? 'warning' : 'default'} />
+                    )}
+                    {discoveryStatus?.devices_marked_disconnected !== undefined && (
+                      <Chip label={`${discoveryStatus.devices_marked_disconnected} marked disconnected`} size="small" color={discoveryStatus.devices_marked_disconnected > 0 ? 'warning' : 'default'} />
+                    )}
+                    {discoveryStatus?.devices_removed !== undefined && (
+                      <Chip label={`${discoveryStatus.devices_removed} removed`} size="small" color={discoveryStatus.devices_removed > 0 ? 'warning' : 'default'} />
+                    )}
+                  </Box>
+                  <Box sx={{ mt: 1 }}>
+                    <Typography variant="caption" color="textSecondary" display="block">
+                      Last cycle finished: {formatCycleAge(discoveryStatus?.last_cycle_finished_at)}
+                      {discoveryStatus?.last_cycle_duration_ms !== undefined && discoveryStatus?.last_cycle_duration_ms !== null
+                        ? ` • duration ${discoveryStatus.last_cycle_duration_ms}ms`
+                        : ''}
+                    </Typography>
+                    {Array.isArray(discoveryStatus?.candidate_hosts) && discoveryStatus.candidate_hosts.length > 0 && (
+                      <Typography variant="caption" color="textSecondary" display="block">
+                        Candidate interfaces: {discoveryStatus.candidate_hosts.join(', ')}
+                      </Typography>
+                    )}
+                    {discoveryStatus?.last_error && (
+                      <Typography variant="caption" color="error" display="block">
+                        Last discovery error: {discoveryStatus.last_error}
+                      </Typography>
                     )}
                   </Box>
                 </AccordionDetails>

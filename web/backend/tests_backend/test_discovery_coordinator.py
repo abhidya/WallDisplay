@@ -138,13 +138,13 @@ def test_discovery_coordinator_start_and_status(mock_thread, monkeypatch):
 
     mock_thread.assert_called_once()
     thread_instance.start.assert_called_once()
-    assert status == {
-        "running": True,
-        "paused": False,
-        "interval": 10,
-        "devices_discovered": 2,
-        "devices_playing": 1,
-    }
+    assert status["running"] is True
+    assert status["paused"] is False
+    assert status["interval"] == 10
+    assert status["devices_discovered"] == 0
+    assert status["devices_playing"] == 1
+    assert status["observed_devices"] == 2
+    assert "candidate_hosts" in status
     assert manager.discovery_running is False
 
 

@@ -47,7 +47,7 @@ DASHBOARD_PID=$!
 cd "$NANODLNA_ROOT_DIR"
 
 echo "Waiting for dashboard to start..."
-MAX_RETRIES=15
+MAX_RETRIES="$NANODLNA_DASHBOARD_START_TIMEOUT"
 RETRY_COUNT=0
 while ! curl -s "http://localhost:${NANODLNA_BACKEND_PORT}/health" > /dev/null && [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
     sleep 1

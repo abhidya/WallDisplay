@@ -42,7 +42,7 @@ PYTHONPATH="$NANODLNA_BACKEND_DIR" "$NANODLNA_PYTHON_BIN" run.py --host "$NANODL
 BACKEND_PID=$!
 
 echo "Waiting for backend to start..."
-MAX_RETRIES=20
+MAX_RETRIES="$NANODLNA_BACKEND_START_TIMEOUT"
 RETRY_COUNT=0
 while ! curl -s "http://localhost:${NANODLNA_BACKEND_PORT}/health" > /dev/null && [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
     sleep 1
