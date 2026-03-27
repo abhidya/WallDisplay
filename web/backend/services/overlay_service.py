@@ -412,6 +412,13 @@ class OverlayService:
         payload = response.json()
         return payload.get("access_token", "")
 
+    def _spotify_currently_playing(self, access_token: str) -> requests.Response:
+        return requests.get(
+            "https://api.spotify.com/v1/me/player/currently-playing",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=10,
+        )
+
     def _fetch_spotify_now_playing(self, api_configs: Dict[str, Any]) -> Dict[str, Any]:
         client_id = self._resolve_api_config(api_configs, "spotify_client_id", "SPOTIFY_CLIENT_ID")
         client_secret = self._resolve_api_config(api_configs, "spotify_client_secret", "SPOTIFY_CLIENT_SECRET")
@@ -427,11 +434,22 @@ class OverlayService:
         if not access_token:
             return {"status": "unconfigured"}
 
-        response = requests.get(
-            "https://api.spotify.com/v1/me/player/currently-playing",
-            headers={"Authorization": f"Bearer {access_token}"},
-            timeout=10,
-        )
+        response = self._spotify_currently_playing(access_token)
+        if (
+            response.status_code == 401
+            and refresh_token
+            and client_id
+            and client_secret
+        ):
+            access_token = self._refresh_oauth_access_token(
+                "https://accounts.spotify.com/api/token",
+                client_id,
+                client_secret,
+                refresh_token,
+            )
+            if not access_token:
+                return {"status": "unconfigured"}
+            response = self._spotify_currently_playing(access_token)
         if response.status_code == 204:
             return {"status": "idle"}
         response.raise_for_status()
