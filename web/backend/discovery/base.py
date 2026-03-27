@@ -299,7 +299,24 @@ class DiscoveryBackend(ABC):
                     
                     # Update existing or add new device
                     if device.id in self.discovered_devices:
-                        self.discovered_devices[device.id].update_last_seen()
+                        existing_device = self.discovered_devices[device.id]
+                        existing_device.name = device.name
+                        existing_device.friendly_name = device.friendly_name
+                        existing_device.hostname = device.hostname
+                        existing_device.port = device.port
+                        existing_device.capabilities = device.capabilities
+                        existing_device.metadata = device.metadata
+                        existing_device.action_url = device.action_url
+                        existing_device.location = device.location
+                        existing_device.manufacturer = device.manufacturer
+                        existing_device.features = device.features
+                        existing_device.model = device.model
+                        existing_device.display_index = device.display_index
+                        existing_device.resolution = device.resolution
+                        existing_device.update_last_seen()
+                        if not existing_device.is_online:
+                            existing_device.is_online = True
+                            await self._notify_device_discovered(existing_device)
                     else:
                         self.discovered_devices[device.id] = device
                         await self._notify_device_discovered(device)
