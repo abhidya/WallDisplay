@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import traceback
+from copy import deepcopy
 from typing import Any, Callable, Dict, List
 
 from core.config_service import ConfigService
@@ -30,6 +31,79 @@ class DeviceDiscoveryService:
         self.runtime_sync_service = runtime_sync_service
         self.get_device_by_name = get_device_by_name
         self.update_device_status = update_device_status
+
+    def _build_merged_device_config(
+        self,
+        existing_config: Dict[str, Any] | None,
+        device_info: Dict[str, Any],
+        device_name: str,
+    ) -> Dict[str, Any]:
+        merged = deepcopy(existing_config) if isinstance(existing_config, dict) else {}
+        merged.update(device_info)
+        merged["device_name"] = device_name
+        merged["name"] = device_name
+        merged["type"] = "dlna"
+        return merged
+
+    def _refresh_existing_device(
+        self,
+        db_device: DeviceModel,
+        device_info: Dict[str, Any],
+        active_streaming_devices: set[str],
+        core_device: Any,
+    ) -> DeviceModel:
+        device_name = db_device.name
+        merged_config = self._build_merged_device_config(db_device.config, device_info, device_name)
+
+        transport_changed = any(
+            (
+                (db_device.hostname or "") != (device_info.get("hostname") or ""),
+                (db_device.action_url or "") != (device_info.get("action_url") or ""),
+                (db_device.location or "") != (device_info.get("location") or ""),
+                (db_device.manufacturer or "") != (device_info.get("manufacturer") or ""),
+                (db_device.friendly_name or device_name)
+                != (device_info.get("friendly_name") or device_name),
+            )
+        )
+
+        db_device.type = "dlna"
+        db_device.hostname = device_info.get("hostname", "") or ""
+        db_device.action_url = device_info.get("action_url", "") or ""
+        db_device.friendly_name = device_info.get("friendly_name", device_name) or device_name
+        db_device.manufacturer = device_info.get("manufacturer", "") or ""
+        db_device.location = device_info.get("location", "") or ""
+        db_device.status = "connected"
+        db_device.config = merged_config
+
+        is_already_playing = False
+        if device_name in active_streaming_devices:
+            is_already_playing = True
+            logger.info("Device %s has active streaming sessions", device_name)
+        if core_device and core_device.is_playing:
+            is_already_playing = True
+            logger.info("Device %s reports is_playing=True", device_name)
+        if db_device.is_playing:
+            is_already_playing = True
+            logger.info("Database shows device %s is_playing=True", device_name)
+        if db_device.current_video:
+            is_already_playing = True
+            logger.info("Device %s has current_video=%s", device_name, db_device.current_video)
+
+        db_device.is_playing = is_already_playing
+        self.db.commit()
+        self.db.refresh(db_device)
+
+        if transport_changed:
+            logger.info("Refreshing runtime device %s with updated discovery transport", device_name)
+            self.runtime_sync_service.unregister(device_name)
+
+        self.runtime_sync_service.register_and_update(
+            db_device,
+            status="connected",
+            is_playing=is_already_playing,
+            current_video=db_device.current_video,
+        )
+        return db_device
 
     def discover_devices(self, timeout: float = 5.0) -> List[Dict[str, Any]]:
         try:
@@ -79,36 +153,15 @@ class DeviceDiscoveryService:
                     core_device = existing_data["core_device"]
 
                     logger.info(
-                        "Device %s already exists in database, updating status only",
+                        "Device %s already exists in database, refreshing discovery metadata",
                         device_name,
                     )
-                    db_device.status = "connected"
-                    self.db.commit()
-                    self.db.refresh(db_device)
-
-                    is_already_playing = False
-                    if device_name in active_streaming_devices:
-                        is_already_playing = True
-                        logger.info(f"Device {device_name} has active streaming sessions")
-                    if core_device and core_device.is_playing:
-                        is_already_playing = True
-                        logger.info(f"Device {device_name} reports is_playing=True")
-                    if db_device.is_playing:
-                        is_already_playing = True
-                        logger.info(f"Database shows device {device_name} is_playing=True")
-                    if db_device.current_video:
-                        is_already_playing = True
-                        logger.info(
-                            "Device %s has current_video=%s",
-                            device_name,
-                            db_device.current_video,
-                        )
-
-                    if is_already_playing:
-                        db_device.is_playing = True
-                        self.db.commit()
-                        logger.info(f"Updated device {device_name} playing status")
-
+                    db_device = self._refresh_existing_device(
+                        db_device,
+                        device_info,
+                        active_streaming_devices,
+                        core_device,
+                    )
                     db_devices.append(db_device)
                     continue
 

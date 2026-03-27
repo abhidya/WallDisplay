@@ -98,6 +98,32 @@ function Videos() {
     current_index: 0,
   });
 
+  const getPreprocessingStatusMeta = (status) => {
+    switch (status) {
+      case 'ready':
+        return { label: 'Processed', color: 'success' };
+      case 'processing':
+        return { label: 'Processing', color: 'warning' };
+      case 'failed':
+        return { label: 'Failed', color: 'error' };
+      case 'pending':
+      default:
+        return { label: 'Unprocessed', color: 'default' };
+    }
+  };
+
+  const processingCounts = videos.reduce((counts, video) => {
+    const status = video.preprocessing_status || 'pending';
+    counts.total += 1;
+    counts[status] = (counts[status] || 0) + 1;
+    return counts;
+  }, { total: 0, pending: 0, processing: 0, ready: 0, failed: 0 });
+
+  const hasActivePreprocessing = videos.some((video) => {
+    const status = video.preprocessing_status || 'pending';
+    return status === 'pending' || status === 'processing';
+  });
+
   const fetchVideos = useCallback(async () => {
     try {
       setLoading(true);
@@ -117,6 +143,18 @@ function Videos() {
     fetchMediaLists();
     fetchMediaChannels();
   }, [fetchVideos]);
+
+  useEffect(() => {
+    if (!hasActivePreprocessing) {
+      return undefined;
+    }
+
+    const intervalId = window.setInterval(() => {
+      fetchVideos();
+    }, 5000);
+
+    return () => window.clearInterval(intervalId);
+  }, [fetchVideos, hasActivePreprocessing]);
 
   const fetchMediaDirectories = async () => {
     try {
@@ -603,7 +641,18 @@ function Videos() {
             <Typography variant="body2" color="text.secondary">
               Organize shared media libraries for mappings and overlay backgrounds.
             </Typography>
+            <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap' }}>
+              <Chip label={`${processingCounts.pending} unprocessed`} size="small" />
+              <Chip label={`${processingCounts.processing} processing`} size="small" color="warning" />
+              <Chip label={`${processingCounts.ready} processed`} size="small" color="success" />
+              <Chip label={`${processingCounts.failed} failed`} size="small" color="error" />
+            </Stack>
           </Stack>
+          {hasActivePreprocessing && (
+            <Alert severity="info" sx={{ mt: 2 }}>
+              Video preprocessing is running in the background. This page refreshes automatically while items are pending.
+            </Alert>
+          )}
         </Paper>
       </Grid>
 
@@ -757,6 +806,16 @@ function Videos() {
                 <VideoIcon sx={{ fontSize: 60, opacity: 0.7 }} />
               </CardMedia>
               <CardContent>
+                <Box sx={{ mb: 1, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                  <Chip
+                    label={getPreprocessingStatusMeta(video.preprocessing_status).label}
+                    size="small"
+                    color={getPreprocessingStatusMeta(video.preprocessing_status).color}
+                  />
+                  {video.overlay_optimized && (
+                    <Chip label="Overlay Optimized" size="small" color="success" variant="outlined" />
+                  )}
+                </Box>
                 <Typography variant="body2" color="textSecondary" gutterBottom>
                   Duration: {formatDuration(video.duration)}
                 </Typography>
@@ -770,6 +829,11 @@ function Videos() {
                 )}
                 {video.has_subtitle && (
                   <Chip label="Has Subtitles" size="small" color="primary" sx={{ mt: 1 }} />
+                )}
+                {video.preprocessing_error && (
+                  <Alert severity="error" sx={{ mt: 1 }}>
+                    {video.preprocessing_error}
+                  </Alert>
                 )}
                 <Box sx={{ mt: 1 }}>
                   <Chip label={video.category} size="small" color="secondary" sx={{ mr: 1 }} />
