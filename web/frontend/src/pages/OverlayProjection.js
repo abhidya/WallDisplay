@@ -44,6 +44,8 @@ import {
     MusicNote as MusicIcon,
     Email as EmailIcon,
     SportsEsports as SteamIcon,
+    MonitorHeart as HealthIcon,
+    Event as EventIcon,
     NightsStay as NightsStayIcon,
     Brightness4 as BrightnessIcon,
     LightMode as LightModeIcon,
@@ -79,6 +81,7 @@ function OverlayProjection() {
         weather_api_key: '',
         transit_stop_id: '13915',
         timezone: 'America/Los_Angeles',
+        apple_health_stats_json: '',
         spotify_client_id: '',
         spotify_client_secret: '',
         spotify_refresh_token: '',
@@ -93,6 +96,7 @@ function OverlayProjection() {
         weather_api_key: 'Get your API key from openweathermap.org/api.',
         transit_stop_id: 'Transit stop code, e.g. 13915 for Carl St & Stanyan St.',
         timezone: 'IANA timezone string, e.g. America/Los_Angeles.',
+        apple_health_stats_json: 'Paste a JSON array of Apple Health day records. The widget uses the latest entry plus a compact step trend.',
         spotify_client_id: 'From your Spotify developer app dashboard.',
         spotify_client_secret: 'From your Spotify developer app dashboard.',
         spotify_refresh_token: 'OAuth refresh token for the Spotify account you want to display.',
@@ -129,6 +133,17 @@ function OverlayProjection() {
             size: { width: 420, height: 140 },
             config: { theme: 'minimal' },
         },
+        apple_health: {
+            type: 'apple_health',
+            size: { width: 520, height: 300 },
+            config: {
+                metric: 'steps',
+                days: 7,
+                showTrend: true,
+                showComparison: true,
+                title: 'Apple Health',
+            },
+        },
         calendar: {
             type: 'calendar',
             size: { width: 420, height: 220 },
@@ -138,6 +153,11 @@ function OverlayProjection() {
             type: 'steam',
             size: { width: 360, height: 140 },
             config: { showAvatar: true },
+        },
+        dothebay_lgbtq: {
+            type: 'dothebay_lgbtq',
+            size: { width: 520, height: 320 },
+            config: { title: 'DoTheBay LGBTQ', rotateMs: 6500 },
         },
     };
     
@@ -345,9 +365,33 @@ function OverlayProjection() {
                     rotation: 0
                 },
                 {
+                    id: 'dothebay-lgbtq-1',
+                    type: 'dothebay_lgbtq',
+                    position: { x: 40, y: 260 },
+                    size: { width: 520, height: 320 },
+                    config: { title: 'DoTheBay LGBTQ', rotateMs: 6500 },
+                    visible: true,
+                    rotation: 0
+                },
+                {
+                    id: 'apple-health-1',
+                    type: 'apple_health',
+                    position: { x: 590, y: 320 },
+                    size: { width: 520, height: 300 },
+                    config: {
+                        metric: 'steps',
+                        days: 7,
+                        showTrend: true,
+                        showComparison: true,
+                        title: 'Apple Health'
+                    },
+                    visible: true,
+                    rotation: 0
+                },
+                {
                     id: 'steam-1',
                     type: 'steam',
-                    position: { x: 520, y: 830 },
+                    position: { x: 520, y: 870 },
                     size: { width: 360, height: 140 },
                     config: { showAvatar: true },
                     visible: true,
@@ -572,6 +616,8 @@ function OverlayProjection() {
             onChange={(e) => updateApiConfig(key, e.target.value)}
             helperText={extra.helperText}
             type={extra.type}
+            multiline={Boolean(extra.multiline)}
+            minRows={extra.minRows}
             InputProps={{
                 endAdornment: (
                     <InputAdornment position="end">
@@ -615,6 +661,8 @@ function OverlayProjection() {
             case 'transit': return <TransitIcon />;
             case 'lights': return <NightsStayIcon />;
             case 'spotify': return <MusicIcon />;
+            case 'dothebay_lgbtq': return <EventIcon />;
+            case 'apple_health': return <HealthIcon />;
             case 'calendar': return <EmailIcon />;
             case 'steam': return <SteamIcon />;
             default: return <SettingsIcon />;
@@ -820,7 +868,7 @@ function OverlayProjection() {
                         />
                         <CardContent>
                             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 2 }}>
-                                {['weather', 'time', 'transit', 'lights', 'spotify', 'calendar', 'steam'].map((type) => (
+                                {['weather', 'time', 'transit', 'lights', 'spotify', 'dothebay_lgbtq', 'apple_health', 'calendar', 'steam'].map((type) => (
                                     <Button key={type} size="small" variant="outlined" onClick={() => addWidget(type)} startIcon={getWidgetIcon(type)}>
                                         Add {type}
                                     </Button>
@@ -1209,6 +1257,11 @@ function OverlayProjection() {
                             helperText: 'Default stop used by transit widgets.',
                         })}
                         {renderApiConfigField('timezone', 'Timezone')}
+                        {renderApiConfigField('apple_health_stats_json', 'Apple Health Stats JSON', {
+                            helperText: 'Paste the Apple Health JSON array directly. The Apple Health widget reads this data.',
+                            multiline: true,
+                            minRows: 8,
+                        })}
                         <Divider />
                         {renderApiConfigField('spotify_client_id', 'Spotify Client ID')}
                         {renderApiConfigField('spotify_client_secret', 'Spotify Client Secret')}

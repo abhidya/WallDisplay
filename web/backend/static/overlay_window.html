@@ -254,6 +254,8 @@
         }
 
         .spotify-widget,
+        .dothebay_lgbtq-widget,
+        .apple_health-widget,
         .gmail-widget,
         .calendar-widget,
         .climate-widget,
@@ -263,12 +265,182 @@
         }
 
         .spotify-widget .spotify-content,
+        .dothebay_lgbtq-widget .dtb-widget-shell,
+        .apple_health-widget .apple-health-content,
         .gmail-widget .gmail-content,
         .calendar-widget .gmail-content,
         .climate-widget .climate-content,
         .steam-widget .steam-content {
             width: 100%;
             height: 100%;
+        }
+
+        .apple_health-widget {
+            background:
+                radial-gradient(circle at top right, rgba(0, 210, 255, 0.18), transparent 32%),
+                linear-gradient(160deg, rgba(7, 14, 18, 0.96), rgba(17, 28, 34, 0.92));
+            border: 1px solid rgba(120, 220, 255, 0.14);
+            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.03);
+        }
+
+        .apple-health-content {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            color: #f6fbff;
+        }
+
+        .apple-health-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 12px;
+        }
+
+        .apple-health-title {
+            font-size: 28px;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+
+        .apple-health-date {
+            font-size: 16px;
+            color: rgba(255,255,255,0.7);
+            text-align: right;
+            max-width: 45%;
+        }
+
+        .apple-health-main {
+            display: grid;
+            grid-template-columns: 1.6fr 1fr;
+            gap: 14px;
+            align-items: stretch;
+        }
+
+        .apple-health-hero,
+        .apple-health-stats {
+            border-radius: 16px;
+            background: rgba(255,255,255,0.045);
+            border: 1px solid rgba(255,255,255,0.06);
+            padding: 16px 18px;
+        }
+
+        .apple-health-kicker,
+        .apple-health-stat-label,
+        .apple-health-aux-label,
+        .apple-health-summary-label {
+            font-size: 13px;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: rgba(255,255,255,0.58);
+        }
+
+        .apple-health-step-value {
+            margin-top: 8px;
+            font-size: 72px;
+            line-height: 0.95;
+            font-weight: 700;
+            letter-spacing: -0.04em;
+            color: #f7fcff;
+        }
+
+        .apple-health-step-subtitle {
+            margin-top: 10px;
+            font-size: 18px;
+            color: rgba(255,255,255,0.82);
+        }
+
+        .apple-health-summary-grid,
+        .apple-health-aux-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+        }
+
+        .apple-health-summary {
+            min-width: 0;
+        }
+
+        .apple-health-summary-value {
+            margin-top: 6px;
+            font-size: 28px;
+            font-weight: 600;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .apple-health-aux-grid {
+            margin-top: 2px;
+        }
+
+        .apple-health-aux-card {
+            border-radius: 14px;
+            background: rgba(255,255,255,0.045);
+            border: 1px solid rgba(255,255,255,0.06);
+            padding: 14px 16px;
+            min-height: 76px;
+        }
+
+        .apple-health-aux-value {
+            margin-top: 6px;
+            font-size: 30px;
+            font-weight: 600;
+            line-height: 1;
+        }
+
+        .apple-health-trend {
+            border-radius: 16px;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.06);
+            padding: 12px 14px 10px;
+        }
+
+        .apple-health-trend-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            gap: 12px;
+            margin-bottom: 8px;
+        }
+
+        .apple-health-trend-caption {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: rgba(255,255,255,0.55);
+        }
+
+        .apple-health-trend svg {
+            width: 100%;
+            height: 88px;
+            display: block;
+        }
+
+        .apple-health-trend-labels {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            margin-top: 6px;
+            font-size: 11px;
+            color: rgba(255,255,255,0.56);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        .apple-health-empty {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            min-height: 100%;
+            border-radius: 16px;
+            background: rgba(255,255,255,0.035);
+            border: 1px dashed rgba(255,255,255,0.12);
+            padding: 24px;
+            font-size: 26px;
+            color: rgba(255,255,255,0.8);
         }
 
         .spotify-widget .spotify-row,
@@ -324,6 +496,140 @@
             height: 100%;
             width: 0%;
             background: linear-gradient(90deg, #1db954, #66ffb2);
+        }
+
+        .dothebay_lgbtq-widget {
+            background: linear-gradient(160deg, rgba(11, 12, 18, 0.96), rgba(24, 18, 26, 0.92));
+            overflow: hidden;
+        }
+
+        .dtb-widget-shell,
+        .dtb-widget-stage {
+            width: 100%;
+            height: 100%;
+        }
+
+        .dtb-event-card {
+            position: relative;
+            display: block;
+            width: 100%;
+            height: 100%;
+            border-radius: 18px;
+            overflow: hidden;
+            color: #fff;
+            text-decoration: none;
+            background: linear-gradient(160deg, rgba(20, 20, 24, 0.98), rgba(37, 22, 40, 0.92));
+        }
+
+        .dtb-event-card .ds-cover-image {
+            position: absolute;
+            inset: 0;
+            background-position: center;
+            background-size: cover;
+            transform: scale(1.02);
+        }
+
+        .dtb-event-overlay {
+            position: absolute;
+            inset: 0;
+            background:
+                linear-gradient(180deg, rgba(7, 10, 16, 0.18), rgba(7, 10, 16, 0.8) 55%, rgba(7, 10, 16, 0.95)),
+                linear-gradient(135deg, rgba(255, 73, 182, 0.18), transparent 38%);
+        }
+
+        .dtb-event-copy {
+            position: absolute;
+            inset: auto 0 0 0;
+            padding: 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .dtb-title-row,
+        .dtb-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .dtb-title,
+        .dtb-badge,
+        .dtb-footer {
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+        }
+
+        .dtb-title {
+            font-size: 13px;
+            color: rgba(255,255,255,0.72);
+        }
+
+        .dtb-badge {
+            font-size: 11px;
+            padding: 4px 8px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.14);
+            color: rgba(255,255,255,0.92);
+        }
+
+        .dtb-event-headline {
+            font-size: 32px;
+            line-height: 1.05;
+            font-weight: 700;
+            text-wrap: balance;
+        }
+
+        .dtb-event-subtitle,
+        .dtb-event-summary {
+            color: rgba(255,255,255,0.82);
+        }
+
+        .dtb-event-subtitle {
+            font-size: 17px;
+            font-weight: 500;
+        }
+
+        .dtb-event-summary {
+            font-size: 15px;
+            line-height: 1.35;
+            max-width: 90%;
+        }
+
+        .dtb-footer {
+            font-size: 11px;
+            color: rgba(255,255,255,0.62);
+        }
+
+        .dtb-event-empty .dtb-event-copy {
+            inset: 0;
+            justify-content: center;
+        }
+
+        .dtb-empty-title {
+            font-size: 28px;
+            font-weight: 700;
+        }
+
+        .dtb-empty-subtitle {
+            font-size: 16px;
+            color: rgba(255,255,255,0.74);
+        }
+
+        .dtb-event-enter {
+            animation: dtbFadeIn 420ms ease-out;
+        }
+
+        @keyframes dtbFadeIn {
+            from {
+                opacity: 0.6;
+                transform: scale(0.985);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
         }
 
         .gmail-list {
@@ -753,6 +1059,7 @@
     <script src="/backend-static/js/projection/animations/webgl_flowers.js"></script>
     <script src="/backend-static/js/projection/animations/rainstorm.js"></script>
     <script src="/backend-static/js/projection/animations/pride_spectrum.js"></script>
+    <script src="/backend-static/js/widgets/dothebay_lgbtq_widget.js"></script>
     <script>
         let config = null;
         let backgroundType = 'video';
@@ -780,10 +1087,355 @@
         let rotateStart = { angle: 0, mouseAngle: 0 };
         let selectedWidget = null;
         let dataUpdateIntervals = {};
+        let appleHealthWidgetInstances = new Map();
+        let doTheBayWidgetInstances = new Map();
         let initialUrlParams = new URLSearchParams(window.location.search);
         let currentConfigId = initialUrlParams.get('config_id');
         let currentConfigRevision = null;
         let refreshStatePollInterval = null;
+
+        function createAppleHealthStatsWidget(root) {
+            let currentConfig = {};
+            let normalizedData = [];
+
+            function metricValue(metric) {
+                if (!metric || typeof metric !== 'object') {
+                    return null;
+                }
+                if (metric.type === 'value' && Number.isFinite(Number(metric.value))) {
+                    return Number(metric.value);
+                }
+                return null;
+            }
+
+            function resolveHealthData(configValue, apiConfigValue) {
+                if (Array.isArray(configValue)) {
+                    return configValue;
+                }
+                if (typeof configValue === 'string' && configValue.trim()) {
+                    try {
+                        const parsed = JSON.parse(configValue);
+                        return Array.isArray(parsed) ? parsed : [];
+                    } catch (error) {
+                        console.warn('Apple Health widget received invalid widget JSON:', error);
+                    }
+                }
+                if (typeof apiConfigValue === 'string' && apiConfigValue.trim()) {
+                    try {
+                        const parsed = JSON.parse(apiConfigValue);
+                        return Array.isArray(parsed) ? parsed : [];
+                    } catch (error) {
+                        console.warn('Apple Health widget received invalid global JSON:', error);
+                    }
+                }
+                if (Array.isArray(apiConfigValue)) {
+                    return apiConfigValue;
+                }
+                return [];
+            }
+
+            function normalizeEntry(entry) {
+                if (!entry || typeof entry !== 'object' || !entry.date) {
+                    return null;
+                }
+                const date = new Date(entry.date);
+                if (Number.isNaN(date.getTime())) {
+                    return null;
+                }
+                return {
+                    date: date.toISOString(),
+                    steps: metricValue(entry.stepCount),
+                    sleep: metricValue(entry.sleepDuration),
+                    heartRate: metricValue(entry.heartRate),
+                    weight: metricValue(entry.weight),
+                    sleepUnit: typeof entry.sleepUnit === 'string' && entry.sleepUnit ? entry.sleepUnit : 'hours',
+                    weightUnit: typeof entry.weightUnit === 'string' && entry.weightUnit ? entry.weightUnit : 'lbs',
+                };
+            }
+
+            function dedupeAndSort(records) {
+                const byDate = new Map();
+                records.forEach((record) => {
+                    if (!record) {
+                        return;
+                    }
+                    byDate.set(record.date, record);
+                });
+                return Array.from(byDate.values()).sort((left, right) => new Date(left.date) - new Date(right.date));
+            }
+
+            function formatFullDate(dateValue) {
+                const date = new Date(dateValue);
+                return new Intl.DateTimeFormat('en-US', {
+                    weekday: 'short',
+                    month: 'short',
+                    day: 'numeric',
+                }).format(date);
+            }
+
+            function formatShortDay(dateValue) {
+                const date = new Date(dateValue);
+                return new Intl.DateTimeFormat('en-US', {
+                    weekday: 'short',
+                }).format(date);
+            }
+
+            function formatNumber(value, digits = 0) {
+                return new Intl.NumberFormat('en-US', {
+                    maximumFractionDigits: digits,
+                    minimumFractionDigits: digits,
+                }).format(value);
+            }
+
+            function formatSignedDelta(value) {
+                if (!Number.isFinite(value)) {
+                    return 'No prior day';
+                }
+                if (value === 0) {
+                    return 'Flat vs yesterday';
+                }
+                const sign = value > 0 ? '+' : '-';
+                return `${sign}${formatNumber(Math.abs(value))} vs yesterday`;
+            }
+
+            function buildTrendSvg(points) {
+                const values = points.map((point) => point.steps);
+                const width = 100;
+                const height = 88;
+                const paddingX = 8;
+                const paddingY = 10;
+                const min = Math.min(...values);
+                const max = Math.max(...values);
+                const span = Math.max(1, max - min);
+                const xStep = points.length > 1 ? (width - paddingX * 2) / (points.length - 1) : 0;
+                const coords = points.map((point, index) => {
+                    const x = paddingX + (index * xStep);
+                    const y = height - paddingY - (((point.steps - min) / span) * (height - paddingY * 2));
+                    return { x, y };
+                });
+                const polyline = coords.map((coord) => `${coord.x.toFixed(2)},${coord.y.toFixed(2)}`).join(' ');
+                const area = [
+                    `${coords[0].x.toFixed(2)},${(height - paddingY).toFixed(2)}`,
+                    ...coords.map((coord) => `${coord.x.toFixed(2)},${coord.y.toFixed(2)}`),
+                    `${coords[coords.length - 1].x.toFixed(2)},${(height - paddingY).toFixed(2)}`,
+                ].join(' ');
+
+                return `
+                    <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-hidden="true">
+                        <defs>
+                            <linearGradient id="apple-health-line-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                                <stop offset="0%" stop-color="#7ce4ff" />
+                                <stop offset="100%" stop-color="#4cffc2" />
+                            </linearGradient>
+                            <linearGradient id="apple-health-area-gradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                                <stop offset="0%" stop-color="rgba(110, 225, 255, 0.35)" />
+                                <stop offset="100%" stop-color="rgba(110, 225, 255, 0.02)" />
+                            </linearGradient>
+                        </defs>
+                        <path d="M 0 ${height - paddingY} H ${width}" stroke="rgba(255,255,255,0.08)" stroke-width="1" fill="none"></path>
+                        <polygon points="${area}" fill="url(#apple-health-area-gradient)"></polygon>
+                        <polyline points="${polyline}" fill="none" stroke="url(#apple-health-line-gradient)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"></polyline>
+                        ${coords.map((coord) => `<circle cx="${coord.x.toFixed(2)}" cy="${coord.y.toFixed(2)}" r="3.4" fill="#dffcff" stroke="rgba(11,22,27,0.85)" stroke-width="1.2"></circle>`).join('')}
+                    </svg>
+                `;
+            }
+
+            function render() {
+                const dayCount = Math.max(1, Number(currentConfig.days) || 7);
+                const latest = normalizedData[normalizedData.length - 1] || null;
+                const stepRecords = normalizedData.filter((record) => record.steps != null);
+                const trendRecords = stepRecords.slice(-dayCount);
+
+                if (!latest || [latest.steps, latest.sleep, latest.heartRate, latest.weight].every((value) => value == null)) {
+                    root.innerHTML = `<div class="apple-health-empty">No Apple Health data available</div>`;
+                    return;
+                }
+
+                const previousWithSteps = stepRecords.length > 1
+                    ? stepRecords[stepRecords.length - 2]
+                    : null;
+                const todaySteps = latest.steps;
+                const stepDelta = todaySteps != null && previousWithSteps?.steps != null
+                    ? todaySteps - previousWithSteps.steps
+                    : NaN;
+                const averageSteps = trendRecords.length
+                    ? trendRecords.reduce((sum, record) => sum + record.steps, 0) / trendRecords.length
+                    : null;
+                const bestDay = stepRecords.length
+                    ? stepRecords.reduce((best, record) => (best == null || (record.steps || 0) > (best.steps || 0) ? record : best), null)
+                    : null;
+                const auxCards = [
+                    latest.sleep != null ? { label: 'Sleep', value: `${formatNumber(latest.sleep, latest.sleep % 1 ? 1 : 0)} ${latest.sleepUnit}` } : null,
+                    latest.heartRate != null ? { label: 'Heart Rate', value: `${formatNumber(latest.heartRate)} bpm` } : null,
+                    latest.weight != null ? { label: 'Weight', value: `${formatNumber(latest.weight, latest.weight % 1 ? 1 : 0)} ${latest.weightUnit}` } : null,
+                ].filter(Boolean);
+                const trendSvg = trendRecords.length >= 2 ? buildTrendSvg(trendRecords) : '';
+                const trendLabels = trendRecords.length
+                    ? trendRecords.map((record) => `<span>${formatShortDay(record.date)}</span>`).join('')
+                    : '';
+
+                root.innerHTML = `
+                    <div class="apple-health-content">
+                        <div class="apple-health-header">
+                            <div>
+                                <div class="apple-health-title">${currentConfig.title || 'Apple Health'}</div>
+                            </div>
+                            <div class="apple-health-date">${formatFullDate(latest.date)}</div>
+                        </div>
+                        <div class="apple-health-main">
+                            <div class="apple-health-hero">
+                                <div class="apple-health-kicker">Today&apos;s Steps</div>
+                                <div class="apple-health-step-value">${todaySteps != null ? formatNumber(todaySteps) : '--'}</div>
+                                ${currentConfig.showComparison === false ? '' : `<div class="apple-health-step-subtitle">${todaySteps != null ? formatSignedDelta(stepDelta) : 'Steps unavailable today'}</div>`}
+                            </div>
+                            <div class="apple-health-stats">
+                                <div class="apple-health-summary-grid">
+                                    <div class="apple-health-summary">
+                                        <div class="apple-health-summary-label">7 Day Avg</div>
+                                        <div class="apple-health-summary-value">${averageSteps != null ? formatNumber(Math.round(averageSteps)) : '--'}</div>
+                                    </div>
+                                    <div class="apple-health-summary">
+                                        <div class="apple-health-summary-label">Best Day</div>
+                                        <div class="apple-health-summary-value">${bestDay?.steps != null ? formatNumber(bestDay.steps) : '--'}</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        ${auxCards.length ? `
+                            <div class="apple-health-aux-grid">
+                                ${auxCards.map((card) => `
+                                    <div class="apple-health-aux-card">
+                                        <div class="apple-health-aux-label">${card.label}</div>
+                                        <div class="apple-health-aux-value">${card.value}</div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        ` : ''}
+                        ${currentConfig.showTrend === false || trendRecords.length === 0 ? '' : `
+                            <div class="apple-health-trend">
+                                <div class="apple-health-trend-header">
+                                    <div class="apple-health-kicker">${Math.min(dayCount, trendRecords.length)} Day Step Trend</div>
+                                    <div class="apple-health-trend-caption">${bestDay?.date ? `Best ${formatShortDay(bestDay.date)}` : ''}</div>
+                                </div>
+                                ${trendRecords.length >= 2 ? trendSvg : '<div class="apple-health-step-subtitle">Need at least two step entries for a trend</div>'}
+                                ${trendRecords.length >= 2 ? `<div class="apple-health-trend-labels">${trendLabels}</div>` : ''}
+                            </div>
+                        `}
+                    </div>
+                `;
+            }
+
+            return {
+                init(nextConfig) {
+                    currentConfig = {
+                        title: 'Apple Health',
+                        metric: 'steps',
+                        days: 7,
+                        showTrend: true,
+                        showComparison: true,
+                        ...nextConfig,
+                    };
+                    const resolved = resolveHealthData(currentConfig.healthData, config?.api_configs?.apple_health_stats_json);
+                    normalizedData = dedupeAndSort(
+                        (Array.isArray(resolved) ? resolved : [])
+                            .map(normalizeEntry)
+                            .filter(Boolean)
+                    );
+                    render();
+                },
+                update(nextData) {
+                    normalizedData = dedupeAndSort(
+                        (Array.isArray(nextData) ? nextData : [])
+                            .map(normalizeEntry)
+                            .filter(Boolean)
+                    );
+                    render();
+                },
+                render,
+                destroy() {
+                    root.innerHTML = '';
+                }
+            };
+        }
+
+        function responsiveFont(base, scale, min, max) {
+            return `${Math.max(min, Math.min(max, base * scale)).toFixed(1)}px`;
+        }
+
+        function applyResponsiveWidgetSizing(widgetEl, widget) {
+            if (!widgetEl || !widget) {
+                return;
+            }
+
+            const width = Math.max(120, Number(widget.size?.width || widgetEl.offsetWidth || 0));
+            const height = Math.max(60, Number(widget.size?.height || widgetEl.offsetHeight || 0));
+            const scale = Math.max(0.48, Math.min(1.6, Math.min(width / 420, height / 220)));
+
+            const setSize = (selector, size) => {
+                widgetEl.querySelectorAll(selector).forEach((node) => {
+                    node.style.fontSize = size;
+                });
+            };
+
+            if (widget.type === 'weather') {
+                setSize('h2', responsiveFont(24, scale, 14, 30));
+                setSize('.weather-icon', responsiveFont(64, scale, 24, 72));
+                setSize('.temperature', responsiveFont(48, scale, 22, 56));
+                setSize('.weather-description', responsiveFont(18, scale, 11, 22));
+                setSize('.weather-location', responsiveFont(16, scale, 10, 18));
+            } else if (widget.type === 'time') {
+                setSize('.time-content', responsiveFont(48, scale, 18, 58));
+                setSize('.date-content', responsiveFont(18, scale, 10, 22));
+            } else if (widget.type === 'transit') {
+                setSize('h2', responsiveFont(24, scale, 12, 28));
+                setSize('.transit-content', responsiveFont(18, scale, 10, 22));
+                setSize('.prediction-time', responsiveFont(18, scale, 10, 22));
+            } else if (widget.type === 'spotify') {
+                setSize('.spotify-title', responsiveFont(22, scale, 12, 26));
+                setSize('.spotify-artist', responsiveFont(14, scale, 9, 17));
+                const artSize = responsiveFont(88, scale, 36, 96);
+                widgetEl.querySelectorAll('.spotify-art').forEach((node) => {
+                    node.style.width = artSize;
+                    node.style.height = artSize;
+                });
+            } else if (widget.type === 'dothebay_lgbtq') {
+                setSize('.dtb-title', responsiveFont(13, scale, 8, 14));
+                setSize('.dtb-badge, .dtb-footer', responsiveFont(11, scale, 8, 12));
+                setSize('.dtb-event-headline', responsiveFont(32, scale, 14, 36));
+                setSize('.dtb-event-subtitle', responsiveFont(17, scale, 10, 18));
+                setSize('.dtb-event-summary', responsiveFont(15, scale, 9, 16));
+                setSize('.dtb-empty-title', responsiveFont(28, scale, 12, 30));
+                setSize('.dtb-empty-subtitle', responsiveFont(16, scale, 9, 17));
+            } else if (widget.type === 'calendar' || widget.type === 'gmail') {
+                setSize('.gmail-title', responsiveFont(22, scale, 12, 26));
+                setSize('.gmail-sender', responsiveFont(14, scale, 9, 17));
+                setSize('.gmail-item .gmail-title', responsiveFont(18, scale, 10, 20));
+                setSize('.gmail-item .gmail-sender', responsiveFont(13, scale, 8, 15));
+            } else if (widget.type === 'climate') {
+                setSize('.gmail-title', responsiveFont(22, scale, 12, 26));
+                setSize('.climate-label', responsiveFont(14, scale, 9, 17));
+                setSize('.climate-value', responsiveFont(34, scale, 15, 40));
+            } else if (widget.type === 'steam') {
+                setSize('.steam-game', responsiveFont(22, scale, 12, 26));
+                setSize('.steam-status', responsiveFont(14, scale, 9, 17));
+                const avatarSize = responsiveFont(88, scale, 36, 96);
+                widgetEl.querySelectorAll('.steam-avatar').forEach((node) => {
+                    node.style.width = avatarSize;
+                    node.style.height = avatarSize;
+                });
+            } else if (widget.type === 'apple_health') {
+                setSize('.apple-health-title', responsiveFont(28, scale, 12, 32));
+                setSize('.apple-health-date', responsiveFont(16, scale, 9, 18));
+                setSize('.apple-health-kicker, .apple-health-stat-label, .apple-health-aux-label, .apple-health-summary-label, .apple-health-trend-caption, .apple-health-trend-labels', responsiveFont(13, scale, 8, 14));
+                setSize('.apple-health-step-value', responsiveFont(72, scale, 22, 80));
+                setSize('.apple-health-step-subtitle', responsiveFont(18, scale, 10, 20));
+                setSize('.apple-health-summary-value', responsiveFont(28, scale, 12, 32));
+                setSize('.apple-health-aux-value', responsiveFont(30, scale, 12, 34));
+                setSize('.apple-health-empty', responsiveFont(26, scale, 12, 30));
+            } else if (widget.type === 'lights') {
+                setSize('.label', responsiveFont(14, scale, 9, 16));
+            }
+        }
 
         function applyUrlOptions(params) {
             const hideControls = (
@@ -1591,6 +2243,10 @@
         
         function createWidgets() {
             const container = document.getElementById('widgets-container');
+            appleHealthWidgetInstances.forEach((instance) => instance.destroy());
+            appleHealthWidgetInstances = new Map();
+            doTheBayWidgetInstances.forEach((instance) => instance.destroy());
+            doTheBayWidgetInstances = new Map();
             container.innerHTML = '';
             
             widgets.forEach(widget => {
@@ -1652,6 +2308,14 @@
                                 </div>
                             </div>
                         </div>
+                    `;
+                } else if (widget.type === 'dothebay_lgbtq') {
+                    widgetEl.innerHTML = `
+                        <div class="dtb-widget-shell"></div>
+                    `;
+                } else if (widget.type === 'apple_health') {
+                    widgetEl.innerHTML = `
+                        <div class="apple-health-content"></div>
                     `;
                 } else if (widget.type === 'gmail' || widget.type === 'calendar') {
                     widgetEl.innerHTML = `
@@ -1727,6 +2391,24 @@
                 widgetEl.addEventListener('click', () => selectWidget(widget.id));
                 
                 container.appendChild(widgetEl);
+
+                if (widget.type === 'apple_health') {
+                    const root = widgetEl.querySelector('.apple-health-content');
+                    if (root) {
+                        const instance = createAppleHealthStatsWidget(root);
+                        instance.init(widget.config || {});
+                        appleHealthWidgetInstances.set(widget.id, instance);
+                    }
+                } else if (widget.type === 'dothebay_lgbtq') {
+                    const root = widgetEl.querySelector('.dtb-widget-shell');
+                    if (root && window.DoTheBayLgbtqWidget) {
+                        const instance = new window.DoTheBayLgbtqWidget(root, widget.config || {});
+                        instance.init(widget.config || {});
+                        doTheBayWidgetInstances.set(widget.id, instance);
+                    }
+                }
+
+                applyResponsiveWidgetSizing(widgetEl, widget);
             });
         }
         
@@ -1881,6 +2563,7 @@
                 if (widget) {
                     widget.size.width = newWidth;
                     widget.size.height = newHeight;
+                    applyResponsiveWidgetSizing(currentWidget, widget);
                 }
             } else if (isRotating && currentWidget) {
                 const rect = currentWidget.getBoundingClientRect();

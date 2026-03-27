@@ -11,6 +11,7 @@ from .overlay_router import router as overlay_router
 from .projection_router import router as projection_router
 from .mapping_router import router as mapping_router
 from .media_library_router import router as media_library_router
+from .widget_router import router as widget_router
 try:
     from .depth_router import router as depth_router
     __all__ = [
@@ -22,6 +23,7 @@ try:
         'projection_router',
         'mapping_router',
         'media_library_router',
+        'widget_router',
         'depth_router',
     ]
 except ImportError:
@@ -35,4 +37,5 @@ except ImportError:
         'projection_router',
         'mapping_router',
         'media_library_router',
+        'widget_router',
     ]

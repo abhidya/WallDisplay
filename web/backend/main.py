@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 
 from database.database import init_db, get_db
-from routers import device_router, video_router, streaming_router, renderer_router, overlay_router, projection_router, log_router, mapping_router, media_library_router, structured_lighting_router
+from routers import device_router, video_router, streaming_router, renderer_router, overlay_router, projection_router, log_router, mapping_router, media_library_router, structured_lighting_router, widget_router
 from routers.photo_router import router as photo_router
 from routers.photo_list_router import router as photo_list_router
 from api.discovery_router import router as discovery_router
@@ -113,6 +113,7 @@ app.include_router(overlay_router)  # Overlay router already has /api prefix
 app.include_router(projection_router)  # Projection router already has /api prefix
 app.include_router(mapping_router)
 app.include_router(media_library_router)
+app.include_router(widget_router)
 app.include_router(structured_lighting_router.router)
 app.include_router(log_router.router)  # Log streaming router
 app.include_router(discovery_router)  # New unified discovery API (already has /api/v2/discovery prefix)

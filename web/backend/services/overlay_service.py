@@ -287,35 +287,36 @@ class OverlayService:
             if (widget or {}).get("visible", True)
         }
         api_configs = self._merged_api_configs(config.api_configs or {})
+        api_revision = self._api_config_revision(api_configs)
         data: Dict[str, Any] = {}
 
         if "spotify" in widget_types:
             data["spotify"] = self._cached_live_widget_value(
-                f"spotify:{config_id}",
+                f"spotify:{config_id}:{api_revision}",
                 ttl_seconds=8,
                 loader=lambda: self._fetch_spotify_now_playing(api_configs),
             )
         if "calendar" in widget_types:
             data["calendar"] = self._cached_live_widget_value(
-                f"calendar:{config_id}",
+                f"calendar:{config_id}:{api_revision}",
                 ttl_seconds=60,
                 loader=lambda: self._fetch_google_calendar_events(api_configs),
             )
         if "gmail" in widget_types:
             data["gmail"] = self._cached_live_widget_value(
-                f"gmail:{config_id}",
+                f"gmail:{config_id}:{api_revision}",
                 ttl_seconds=20,
                 loader=lambda: self._fetch_gmail_summary(api_configs),
             )
         if "steam" in widget_types:
             data["steam"] = self._cached_live_widget_value(
-                f"steam:{config_id}",
+                f"steam:{config_id}:{api_revision}",
                 ttl_seconds=30,
                 loader=lambda: self._fetch_steam_status(api_configs),
             )
         if "climate" in widget_types:
             data["climate"] = self._cached_live_widget_value(
-                f"climate:{config_id}",
+                f"climate:{config_id}:{api_revision}",
                 ttl_seconds=20,
                 loader=lambda: self._fetch_tuya_climate(api_configs),
             )
@@ -345,7 +346,15 @@ class OverlayService:
         )
 
     def _merged_api_configs(self, api_configs: Dict[str, Any]) -> Dict[str, Any]:
-        return {**self.get_global_api_configs(), **(api_configs or {})}
+        merged = dict(self.get_global_api_configs())
+        for key, value in (api_configs or {}).items():
+            if value not in (None, ""):
+                merged[key] = value
+        return merged
+
+    def _api_config_revision(self, api_configs: Dict[str, Any]) -> str:
+        serialized = json.dumps(api_configs or {}, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha1(serialized.encode("utf-8")).hexdigest()[:12]
 
     def _validate_background_source(self, background_type: str, video_id: Optional[int], mapping_scene_id: Optional[int]) -> None:
         if background_type == "mapping":

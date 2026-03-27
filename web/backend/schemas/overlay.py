@@ -29,6 +29,7 @@ class ApiConfigs(BaseModel):
     weather_api_key: Optional[str] = ""
     transit_stop_id: Optional[str] = ""
     timezone: Optional[str] = "America/Los_Angeles"
+    apple_health_stats_json: Optional[str] = ""
     spotify_client_id: Optional[str] = ""
     spotify_client_secret: Optional[str] = ""
     spotify_refresh_token: Optional[str] = ""

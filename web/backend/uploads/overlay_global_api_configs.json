@@ -1,0 +1,21 @@
+{
+  "gmail_access_token": "",
+  "gmail_client_id": "",
+  "gmail_client_secret": "",
+  "gmail_refresh_token": "",
+  "google_calendar_api_key": "AIzaSyDwmFpMHOlvH6Ls91kXoCwb9O2548Ma0JE",
+  "google_calendar_id": "sfcontent311@gmail.com",
+  "spotify_access_token": "BQB-SvJnmFpK51FaXk3_MprB_lrbvpgqmJOqlYX9fLRrIFucTuj9yDB2NiJbstrUooqe_q6LU6W5rTJaBvVm9IdUTlQQRK7Mnns6DCDXRonxtLNuQu3eO_GBiS7o8MHAygcLSNx2bVT3e1rOfzD7kbvnDNYYyazRluWkhXCAdbF2GHnWga7MkLm_MWw6jKi-AB6Hp-rUSXediBQTZVziRl-B7vWxRQ5BsA\"",
+  "spotify_client_id": "54a4b6761c974d8d8bdc2419edf0d381",
+  "spotify_client_secret": "95dd9a1782e043258960ec89e9a541e9",
+  "spotify_refresh_token": "AQDqrnzxmCyUHhIc8RmTjQqR8V4epYbQ30SMAMYeNYGxoIEl1HXcV-Gz0AEGMojTucFaZJ5t3cRZRCVQjg1gKJdL4XvYMKGU984xCOr_DJa-2A9__vuU0dFPxUpCr2VlxfI",
+  "steam_api_key": "21132DDB87FC65CA7D43A75B8754287B",
+  "steam_id": "76561198078203399",
+  "timezone": "America/Los_Angeles",
+  "transit_stop_id": "13915",
+  "tuya_access_id": "",
+  "tuya_access_secret": "",
+  "tuya_api_base_url": "https://openapi.tuyaus.com",
+  "tuya_device_id": "",
+  "weather_api_key": "42935f0e94fd243d2111438601732cb0"
+}
