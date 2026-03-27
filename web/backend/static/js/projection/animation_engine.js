@@ -36,6 +36,18 @@ class AnimationEngine {
         if (typeof KoiPond8BitAnimation !== 'undefined') {
             this.animationClasses.set('koi_pond_8bit', KoiPond8BitAnimation);
         }
+        if (typeof PokedexAnimation !== 'undefined') {
+            this.animationClasses.set('pokedex', PokedexAnimation);
+        }
+        if (typeof MoonViewAnimation !== 'undefined') {
+            this.animationClasses.set('moon_view', MoonViewAnimation);
+        }
+        if (typeof MedusesAnimation !== 'undefined') {
+            this.animationClasses.set('meduses', MedusesAnimation);
+        }
+        if (typeof KelpForestAnimation !== 'undefined') {
+            this.animationClasses.set('kelp_forest', KelpForestAnimation);
+        }
         if (typeof SpectrumBarsAnimation !== 'undefined') {
             this.animationClasses.set('spectrum_bars', SpectrumBarsAnimation);
         }
