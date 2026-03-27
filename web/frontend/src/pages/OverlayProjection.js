@@ -14,6 +14,7 @@ import {
     Select,
     MenuItem,
     TextField,
+    InputAdornment,
     List,
     ListItem,
     ListItemText,
@@ -42,15 +43,13 @@ import {
     DirectionsBus as TransitIcon,
     MusicNote as MusicIcon,
     Email as EmailIcon,
-    DeviceThermostat as ClimateIcon,
     SportsEsports as SteamIcon,
-    Visibility as VisibilityIcon,
-    VisibilityOff as VisibilityOffIcon,
     NightsStay as NightsStayIcon,
     Brightness4 as BrightnessIcon,
     LightMode as LightModeIcon,
     DarkMode as DarkModeIcon,
-    Sync as SyncIcon
+    Sync as SyncIcon,
+    InfoOutlined as InfoIcon
 } from '@mui/icons-material';
 import { api, discoveryV2Api, mappingsApi, overlayApi } from '../services/api';
 
@@ -76,6 +75,33 @@ function OverlayProjection() {
     const [castSessions, setCastSessions] = useState([]);
     const [castLoading, setCastLoading] = useState(false);
     const [castDebugOpen, setCastDebugOpen] = useState(true);
+    const [globalApiConfigs, setGlobalApiConfigs] = useState({
+        weather_api_key: '',
+        transit_stop_id: '13915',
+        timezone: 'America/Los_Angeles',
+        spotify_client_id: '',
+        spotify_client_secret: '',
+        spotify_refresh_token: '',
+        spotify_access_token: '',
+        google_calendar_api_key: '',
+        google_calendar_id: '',
+        steam_api_key: '',
+        steam_id: '',
+    });
+
+    const apiFieldHelp = {
+        weather_api_key: 'Get your API key from openweathermap.org/api.',
+        transit_stop_id: 'Transit stop code, e.g. 13915 for Carl St & Stanyan St.',
+        timezone: 'IANA timezone string, e.g. America/Los_Angeles.',
+        spotify_client_id: 'From your Spotify developer app dashboard.',
+        spotify_client_secret: 'From your Spotify developer app dashboard.',
+        spotify_refresh_token: 'OAuth refresh token for the Spotify account you want to display.',
+        spotify_access_token: 'Optional manual override. Usually leave blank and use refresh token instead.',
+        google_calendar_api_key: 'Google Calendar API key from Google Cloud. Works with accessible/public calendars.',
+        google_calendar_id: 'Calendar ID, e.g. your public calendar ID or an address-like calendar identifier.',
+        steam_api_key: 'Get from steamcommunity.com/dev/apikey.',
+        steam_id: 'Numeric SteamID64 for the account to display.',
+    };
 
     const widgetTemplates = {
         weather: {
@@ -103,15 +129,10 @@ function OverlayProjection() {
             size: { width: 420, height: 140 },
             config: { theme: 'minimal' },
         },
-        gmail: {
-            type: 'gmail',
+        calendar: {
+            type: 'calendar',
             size: { width: 420, height: 220 },
             config: { maxItems: 4 },
-        },
-        climate: {
-            type: 'climate',
-            size: { width: 300, height: 180 },
-            config: { units: 'celsius' },
         },
         steam: {
             type: 'steam',
@@ -126,6 +147,7 @@ function OverlayProjection() {
         fetchBrightness();
         fetchCastDevices();
         fetchCastSessions();
+        fetchGlobalApiConfigs();
     }, []);
     
     useEffect(() => {
@@ -216,6 +238,18 @@ function OverlayProjection() {
         }
     };
 
+    const fetchGlobalApiConfigs = async () => {
+        try {
+            const response = await overlayApi.getGlobalApiConfigs();
+            setGlobalApiConfigs((current) => ({
+                ...current,
+                ...(response.data || {}),
+            }));
+        } catch (error) {
+            console.error('Error fetching global API configs:', error);
+        }
+    };
+
     useEffect(() => {
         if (!castLoading && !castSession) {
             return undefined;
@@ -302,20 +336,11 @@ function OverlayProjection() {
                     rotation: 0
                 },
                 {
-                    id: 'gmail-1',
-                    type: 'gmail',
+                    id: 'calendar-1',
+                    type: 'calendar',
                     position: { x: 980, y: 50 },
                     size: { width: 420, height: 220 },
                     config: { maxItems: 4 },
-                    visible: true,
-                    rotation: 0
-                },
-                {
-                    id: 'climate-1',
-                    type: 'climate',
-                    position: { x: 1470, y: 180 },
-                    size: { width: 300, height: 180 },
-                    config: { units: 'celsius' },
                     visible: true,
                     rotation: 0
                 },
@@ -330,23 +355,7 @@ function OverlayProjection() {
                 }
             ],
             api_configs: {
-                weather_api_key: localStorage.getItem('weather_api_key') || '',
-                transit_stop_id: localStorage.getItem('transit_stop_id') || '13915',
-                timezone: 'America/Los_Angeles',
-                spotify_client_id: localStorage.getItem('spotify_client_id') || '',
-                spotify_client_secret: localStorage.getItem('spotify_client_secret') || '',
-                spotify_refresh_token: localStorage.getItem('spotify_refresh_token') || '',
-                spotify_access_token: localStorage.getItem('spotify_access_token') || '',
-                gmail_client_id: localStorage.getItem('gmail_client_id') || '',
-                gmail_client_secret: localStorage.getItem('gmail_client_secret') || '',
-                gmail_refresh_token: localStorage.getItem('gmail_refresh_token') || '',
-                gmail_access_token: localStorage.getItem('gmail_access_token') || '',
-                steam_api_key: localStorage.getItem('steam_api_key') || '',
-                steam_id: localStorage.getItem('steam_id') || '',
-                tuya_access_id: localStorage.getItem('tuya_access_id') || '',
-                tuya_access_secret: localStorage.getItem('tuya_access_secret') || '',
-                tuya_device_id: localStorage.getItem('tuya_device_id') || '',
-                tuya_api_base_url: localStorage.getItem('tuya_api_base_url') || 'https://openapi.tuyaus.com',
+                ...globalApiConfigs,
             }
         };
         
@@ -417,6 +426,9 @@ function OverlayProjection() {
             }
             
             setProjectionWindow(projWindow);
+            const initPayloadPromise = api.get('/overlay/window-init', {
+                params: { config_id: selectedConfig.id }
+            });
             const streamResponsePromise = api.post('/overlay/stream', {
                 video_id: selectedVideo?.id || null,
                 config_id: selectedConfig.id
@@ -427,15 +439,17 @@ function OverlayProjection() {
                 if (projWindow.closed) return; // Don't send if window was closed
                 
                 try {
+                    const initPayloadResponse = await initPayloadPromise;
                     const streamResponse = await streamResponsePromise;
+                    const initPayload = initPayloadResponse.data || {};
                     
                     projWindow.postMessage({
                         type: 'init',
-                        config: selectedConfig,
-                        backgroundType: streamResponse.data.background_type,
-                        streamingUrl: streamResponse.data.streaming_url,
-                        mappingScene: streamResponse.data.mapping_scene || null,
-                        videoPath: selectedVideo?.path || null
+                        config: initPayload.config || selectedConfig,
+                        backgroundType: streamResponse.data.background_type || initPayload.background_type,
+                        streamingUrl: streamResponse.data.streaming_url || initPayload.streaming_url,
+                        mappingScene: streamResponse.data.mapping_scene || initPayload.mapping_scene || null,
+                        videoPath: streamResponse.data.video_path || initPayload.video_path || selectedVideo?.path || null
                     }, '*');
                 } catch (error) {
                     console.error('Error getting streaming URL:', error);
@@ -536,33 +550,39 @@ function OverlayProjection() {
         fetchCastSessions();
     }, [selectedConfig]);
     
-    const toggleWidgetVisibility = (widgetId) => {
-        if (!selectedConfig) return;
-        
-        const updatedConfig = {
-            ...selectedConfig,
-            widgets: selectedConfig.widgets.map(w => 
-                w.id === widgetId ? { ...w, visible: !w.visible } : w
-            )
+    const updateApiConfig = async (key, value) => {
+        const nextConfigs = {
+            ...globalApiConfigs,
+            [key]: value
         };
-        updateConfig(updatedConfig);
+        setGlobalApiConfigs(nextConfigs);
+        try {
+            await overlayApi.updateGlobalApiConfigs(nextConfigs);
+        } catch (error) {
+            console.error('Error updating global API config:', error);
+            setError(error.response?.data?.detail || 'Failed to update global API configuration');
+        }
     };
-    
-    const updateApiConfig = (key, value) => {
-        if (!selectedConfig) return;
-        
-        const updatedConfig = {
-            ...selectedConfig,
-            api_configs: {
-                ...selectedConfig.api_configs,
-                [key]: value
-            }
-        };
-        updateConfig(updatedConfig);
-        
-        // Save to localStorage for persistence
-        localStorage.setItem(key, value);
-    };
+
+    const renderApiConfigField = (key, label, extra = {}) => (
+        <TextField
+            label={label}
+            fullWidth
+            value={globalApiConfigs?.[key] || ''}
+            onChange={(e) => updateApiConfig(key, e.target.value)}
+            helperText={extra.helperText}
+            type={extra.type}
+            InputProps={{
+                endAdornment: (
+                    <InputAdornment position="end">
+                        <Tooltip title={apiFieldHelp[key] || ''}>
+                            <InfoIcon fontSize="small" color="action" />
+                        </Tooltip>
+                    </InputAdornment>
+                ),
+            }}
+        />
+    );
 
     const addWidget = (type) => {
         if (!selectedConfig || !widgetTemplates[type]) {
@@ -588,34 +608,6 @@ function OverlayProjection() {
         updateConfig(updatedConfig);
     };
 
-    const addRequestedWidgets = () => {
-        if (!selectedConfig) {
-            return;
-        }
-        const requestedTypes = ['spotify', 'gmail', 'climate', 'steam'];
-        const existingTypes = new Set(selectedConfig.widgets.map((widget) => widget.type));
-        let nextConfig = { ...selectedConfig, widgets: [...selectedConfig.widgets] };
-
-        requestedTypes.forEach((type) => {
-            if (existingTypes.has(type) || !widgetTemplates[type]) {
-                return;
-            }
-            const template = widgetTemplates[type];
-            const count = nextConfig.widgets.filter((widget) => widget.type === type).length + 1;
-            nextConfig.widgets.push({
-                id: `${type}-${count}`,
-                type: template.type,
-                position: { x: 120 + (count * 20), y: 120 + (count * 20) },
-                size: template.size,
-                config: template.config,
-                visible: true,
-                rotation: 0,
-            });
-        });
-
-        updateConfig(nextConfig);
-    };
-    
     const getWidgetIcon = (type) => {
         switch(type) {
             case 'weather': return <WeatherIcon />;
@@ -623,11 +615,21 @@ function OverlayProjection() {
             case 'transit': return <TransitIcon />;
             case 'lights': return <NightsStayIcon />;
             case 'spotify': return <MusicIcon />;
-            case 'gmail': return <EmailIcon />;
-            case 'climate': return <ClimateIcon />;
+            case 'calendar': return <EmailIcon />;
             case 'steam': return <SteamIcon />;
             default: return <SettingsIcon />;
         }
+    };
+
+    const removeWidget = (widgetId) => {
+        if (!selectedConfig) {
+            return;
+        }
+        const updatedConfig = {
+            ...selectedConfig,
+            widgets: selectedConfig.widgets.filter((widget) => widget.id !== widgetId),
+        };
+        updateConfig(updatedConfig);
     };
     
     return (
@@ -818,10 +820,7 @@ function OverlayProjection() {
                         />
                         <CardContent>
                             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 2 }}>
-                                <Button size="small" variant="contained" onClick={addRequestedWidgets}>
-                                    Add Requested Widgets
-                                </Button>
-                                {['spotify', 'gmail', 'climate', 'steam'].map((type) => (
+                                {['weather', 'time', 'transit', 'lights', 'spotify', 'calendar', 'steam'].map((type) => (
                                     <Button key={type} size="small" variant="outlined" onClick={() => addWidget(type)} startIcon={getWidgetIcon(type)}>
                                         Add {type}
                                     </Button>
@@ -843,11 +842,8 @@ function OverlayProjection() {
                                             }
                                         />
                                         <ListItemSecondaryAction>
-                                            <IconButton
-                                                onClick={() => toggleWidgetVisibility(widget.id)}
-                                                color={widget.visible ? 'primary' : 'default'}
-                                            >
-                                                {widget.visible ? <VisibilityIcon /> : <VisibilityOffIcon />}
+                                            <IconButton onClick={() => removeWidget(widget.id)} color="error">
+                                                <DeleteIcon />
                                             </IconButton>
                                         </ListItemSecondaryAction>
                                     </ListItem>
@@ -1203,114 +1199,28 @@ function OverlayProjection() {
                 <DialogTitle>API Configuration</DialogTitle>
                 <DialogContent>
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
-                        <TextField
-                            label="Weather API Key (OpenWeatherMap)"
-                            fullWidth
-                            value={selectedConfig?.api_configs?.weather_api_key || ''}
-                            onChange={(e) => updateApiConfig('weather_api_key', e.target.value)}
-                            helperText="Get your API key from openweathermap.org"
-                        />
-                        <TextField
-                            label="Transit Stop ID"
-                            fullWidth
-                            value={selectedConfig?.api_configs?.transit_stop_id || ''}
-                            onChange={(e) => updateApiConfig('transit_stop_id', e.target.value)}
-                            helperText="e.g., 13915 for Carl St & Stanyan St"
-                        />
-                        <TextField
-                            label="Timezone"
-                            fullWidth
-                            value={selectedConfig?.api_configs?.timezone || 'America/Los_Angeles'}
-                            onChange={(e) => updateApiConfig('timezone', e.target.value)}
-                        />
+                        <Alert severity="info">
+                            These API credentials are now global. Updating them here affects all overlay/mapping configurations unless a config explicitly overrides a value in backend data.
+                        </Alert>
+                        {renderApiConfigField('weather_api_key', 'Weather API Key (OpenWeatherMap)', {
+                            helperText: 'Used by weather widgets across all mappings.',
+                        })}
+                        {renderApiConfigField('transit_stop_id', 'Transit Stop ID', {
+                            helperText: 'Default stop used by transit widgets.',
+                        })}
+                        {renderApiConfigField('timezone', 'Timezone')}
                         <Divider />
-                        <TextField
-                            label="Spotify Client ID"
-                            fullWidth
-                            value={selectedConfig?.api_configs?.spotify_client_id || ''}
-                            onChange={(e) => updateApiConfig('spotify_client_id', e.target.value)}
-                        />
-                        <TextField
-                            label="Spotify Client Secret"
-                            fullWidth
-                            value={selectedConfig?.api_configs?.spotify_client_secret || ''}
-                            onChange={(e) => updateApiConfig('spotify_client_secret', e.target.value)}
-                        />
-                        <TextField
-                            label="Spotify Refresh Token"
-                            fullWidth
-                            value={selectedConfig?.api_configs?.spotify_refresh_token || ''}
-                            onChange={(e) => updateApiConfig('spotify_refresh_token', e.target.value)}
-                        />
-                        <TextField
-                            label="Spotify Access Token Override"
-                            fullWidth
-                            value={selectedConfig?.api_configs?.spotify_access_token || ''}
-                            onChange={(e) => updateApiConfig('spotify_access_token', e.target.value)}
-                        />
+                        {renderApiConfigField('spotify_client_id', 'Spotify Client ID')}
+                        {renderApiConfigField('spotify_client_secret', 'Spotify Client Secret')}
+                        {renderApiConfigField('spotify_refresh_token', 'Spotify Refresh Token')}
+                        {renderApiConfigField('spotify_access_token', 'Spotify Access Token Override')}
                         <Divider />
-                        <TextField
-                            label="Gmail Client ID"
-                            fullWidth
-                            value={selectedConfig?.api_configs?.gmail_client_id || ''}
-                            onChange={(e) => updateApiConfig('gmail_client_id', e.target.value)}
-                        />
-                        <TextField
-                            label="Gmail Client Secret"
-                            fullWidth
-                            value={selectedConfig?.api_configs?.gmail_client_secret || ''}
-                            onChange={(e) => updateApiConfig('gmail_client_secret', e.target.value)}
-                        />
-                        <TextField
-                            label="Gmail Refresh Token"
-                            fullWidth
-                            value={selectedConfig?.api_configs?.gmail_refresh_token || ''}
-                            onChange={(e) => updateApiConfig('gmail_refresh_token', e.target.value)}
-                        />
-                        <TextField
-                            label="Gmail Access Token Override"
-                            fullWidth
-                            value={selectedConfig?.api_configs?.gmail_access_token || ''}
-                            onChange={(e) => updateApiConfig('gmail_access_token', e.target.value)}
-                        />
+                        {renderApiConfigField('google_calendar_api_key', 'Google Calendar API Key')}
+                        {renderApiConfigField('google_calendar_id', 'Google Calendar ID')}
                         <Divider />
-                        <TextField
-                            label="Steam API Key"
-                            fullWidth
-                            value={selectedConfig?.api_configs?.steam_api_key || ''}
-                            onChange={(e) => updateApiConfig('steam_api_key', e.target.value)}
-                        />
-                        <TextField
-                            label="Steam ID"
-                            fullWidth
-                            value={selectedConfig?.api_configs?.steam_id || ''}
-                            onChange={(e) => updateApiConfig('steam_id', e.target.value)}
-                        />
+                        {renderApiConfigField('steam_api_key', 'Steam API Key')}
+                        {renderApiConfigField('steam_id', 'Steam ID')}
                         <Divider />
-                        <TextField
-                            label="Tuya Access ID"
-                            fullWidth
-                            value={selectedConfig?.api_configs?.tuya_access_id || ''}
-                            onChange={(e) => updateApiConfig('tuya_access_id', e.target.value)}
-                        />
-                        <TextField
-                            label="Tuya Access Secret"
-                            fullWidth
-                            value={selectedConfig?.api_configs?.tuya_access_secret || ''}
-                            onChange={(e) => updateApiConfig('tuya_access_secret', e.target.value)}
-                        />
-                        <TextField
-                            label="Tuya Device ID"
-                            fullWidth
-                            value={selectedConfig?.api_configs?.tuya_device_id || ''}
-                            onChange={(e) => updateApiConfig('tuya_device_id', e.target.value)}
-                        />
-                        <TextField
-                            label="Tuya API Base URL"
-                            fullWidth
-                            value={selectedConfig?.api_configs?.tuya_api_base_url || 'https://openapi.tuyaus.com'}
-                            onChange={(e) => updateApiConfig('tuya_api_base_url', e.target.value)}
-                        />
                     </Box>
                 </DialogContent>
                 <DialogActions>

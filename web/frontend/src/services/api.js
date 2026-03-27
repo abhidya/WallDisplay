@@ -128,6 +128,8 @@ const discoveryV2Api = {
 };
 
 const overlayApi = {
+  getGlobalApiConfigs: () => api.get('/overlay/global-api-configs'),
+  updateGlobalApiConfigs: (payload) => api.put('/overlay/global-api-configs', payload),
   startCast: (payload) => api.post('/overlay/cast', payload),
   listCastSessions: () => api.get('/overlay/cast/sessions'),
   stopCastSession: (sessionId) => api.delete(`/overlay/cast/sessions/${sessionId}`),

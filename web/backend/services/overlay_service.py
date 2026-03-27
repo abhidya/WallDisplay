@@ -4,6 +4,7 @@ import os
 import threading
 import time
 from urllib.parse import urlencode
+from urllib.parse import quote
 
 import requests
 from sqlalchemy.orm import Session
@@ -35,6 +36,37 @@ class OverlayService:
     def __init__(self, db: Session):
         self.db = db
         self.streaming_service = get_streaming_service()
+        self._global_api_config_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "uploads",
+            "overlay_global_api_configs.json",
+        )
+
+    def get_global_api_configs(self) -> Dict[str, Any]:
+        defaults = OverlayConfigCreate(
+            name="defaults",
+            background_type="video",
+            video_id=None,
+            mapping_scene_id=None,
+            video_transform={"x": 0, "y": 0, "scale": 1.0, "rotation": 0},
+            widgets=[],
+            api_configs={},
+        ).api_configs.model_dump()
+        if not os.path.exists(self._global_api_config_path):
+            return defaults
+        try:
+            with open(self._global_api_config_path, "r", encoding="utf-8") as handle:
+                stored = json.load(handle) or {}
+        except Exception:
+            stored = {}
+        return {**defaults, **stored}
+
+    def update_global_api_configs(self, api_configs: Dict[str, Any]) -> Dict[str, Any]:
+        merged = {**self.get_global_api_configs(), **(api_configs or {})}
+        os.makedirs(os.path.dirname(self._global_api_config_path), exist_ok=True)
+        with open(self._global_api_config_path, "w", encoding="utf-8") as handle:
+            json.dump(merged, handle, indent=2, sort_keys=True)
+        return merged
 
     def create_config(self, config_data: OverlayConfigCreate) -> OverlayConfigResponse:
         """Create a new overlay configuration"""
@@ -207,7 +239,7 @@ class OverlayService:
 
         stream_info = self.create_stream(config.video_id, config_id)
         return OverlayWindowInitResponse(
-            config=self._to_response(config),
+            config=self._to_response(config, include_global_api_configs=True),
             background_type=stream_info.background_type,
             streaming_url=stream_info.streaming_url,
             video_path=stream_info.video_path,
@@ -222,6 +254,8 @@ class OverlayService:
         revision_parts = [
             f"config:{config.updated_at.isoformat() if config.updated_at else config.created_at.isoformat() if config.created_at else 'none'}"
         ]
+        if os.path.exists(self._global_api_config_path):
+            revision_parts.append(f"global-api:{datetime.utcfromtimestamp(os.path.getmtime(self._global_api_config_path)).isoformat()}")
 
         if config.mapping_scene_id:
             scene = self.db.query(MappingScene).filter(MappingScene.id == config.mapping_scene_id).first()
@@ -252,7 +286,7 @@ class OverlayService:
             for widget in (config.widgets or [])
             if (widget or {}).get("visible", True)
         }
-        api_configs = config.api_configs or {}
+        api_configs = self._merged_api_configs(config.api_configs or {})
         data: Dict[str, Any] = {}
 
         if "spotify" in widget_types:
@@ -260,6 +294,12 @@ class OverlayService:
                 f"spotify:{config_id}",
                 ttl_seconds=8,
                 loader=lambda: self._fetch_spotify_now_playing(api_configs),
+            )
+        if "calendar" in widget_types:
+            data["calendar"] = self._cached_live_widget_value(
+                f"calendar:{config_id}",
+                ttl_seconds=60,
+                loader=lambda: self._fetch_google_calendar_events(api_configs),
             )
         if "gmail" in widget_types:
             data["gmail"] = self._cached_live_widget_value(
@@ -286,8 +326,11 @@ class OverlayService:
             "data": data,
         }
 
-    def _to_response(self, config: OverlayConfig) -> OverlayConfigResponse:
+    def _to_response(self, config: OverlayConfig, include_global_api_configs: bool = False) -> OverlayConfigResponse:
         """Convert database model to response schema"""
+        api_configs = config.api_configs or {}
+        if include_global_api_configs:
+            api_configs = self._merged_api_configs(api_configs)
         return OverlayConfigResponse(
             id=config.id,
             name=config.name,
@@ -296,10 +339,13 @@ class OverlayService:
             mapping_scene_id=config.mapping_scene_id,
             video_transform=config.video_transform,
             widgets=config.widgets,
-            api_configs=config.api_configs,
+            api_configs=api_configs,
             created_at=config.created_at,
             updated_at=config.updated_at
         )
+
+    def _merged_api_configs(self, api_configs: Dict[str, Any]) -> Dict[str, Any]:
+        return {**self.get_global_api_configs(), **(api_configs or {})}
 
     def _validate_background_source(self, background_type: str, video_id: Optional[int], mapping_scene_id: Optional[int]) -> None:
         if background_type == "mapping":
@@ -335,7 +381,7 @@ class OverlayService:
         return value
 
     def _resolve_api_config(self, api_configs: Dict[str, Any], key: str, env_key: str = "") -> str:
-        value = (api_configs or {}).get(key)
+        value = self._merged_api_configs(api_configs).get(key)
         if value not in (None, ""):
             return str(value)
         if env_key:
@@ -436,6 +482,43 @@ class OverlayService:
                 {
                     "sender": headers.get("From", "Unknown Sender"),
                     "title": headers.get("Subject", payload.get("snippet", "Unread message")),
+                }
+            )
+        return {
+            "status": "active" if items else "idle",
+            "items": items,
+            "count": len(items),
+        }
+
+    def _fetch_google_calendar_events(self, api_configs: Dict[str, Any]) -> Dict[str, Any]:
+        api_key = self._resolve_api_config(api_configs, "google_calendar_api_key", "GOOGLE_CALENDAR_API_KEY")
+        calendar_id = self._resolve_api_config(api_configs, "google_calendar_id", "GOOGLE_CALENDAR_ID")
+        if not api_key or not calendar_id:
+            return {"status": "unconfigured", "items": []}
+
+        now_iso = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+        response = requests.get(
+            f"https://www.googleapis.com/calendar/v3/calendars/{quote(calendar_id, safe='')}/events",
+            params={
+                "key": api_key,
+                "singleEvents": "true",
+                "orderBy": "startTime",
+                "timeMin": now_iso,
+                "maxResults": 5,
+            },
+            timeout=10,
+        )
+        response.raise_for_status()
+        payload = response.json() or {}
+        items = []
+        for item in payload.get("items") or []:
+            start_info = item.get("start") or {}
+            start_value = start_info.get("dateTime") or start_info.get("date") or ""
+            items.append(
+                {
+                    "title": item.get("summary") or "Untitled event",
+                    "when": start_value,
+                    "location": item.get("location") or "",
                 }
             )
         return {

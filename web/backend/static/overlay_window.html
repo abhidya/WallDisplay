@@ -255,6 +255,7 @@
 
         .spotify-widget,
         .gmail-widget,
+        .calendar-widget,
         .climate-widget,
         .steam-widget {
             background: linear-gradient(135deg, rgba(18, 18, 18, 0.9), rgba(42, 42, 42, 0.92));
@@ -263,6 +264,7 @@
 
         .spotify-widget .spotify-content,
         .gmail-widget .gmail-content,
+        .calendar-widget .gmail-content,
         .climate-widget .climate-content,
         .steam-widget .steam-content {
             width: 100%;
@@ -1651,11 +1653,11 @@
                             </div>
                         </div>
                     `;
-                } else if (widget.type === 'gmail') {
+                } else if (widget.type === 'gmail' || widget.type === 'calendar') {
                     widgetEl.innerHTML = `
                         <div class="gmail-content">
-                            <div class="gmail-title">Inbox</div>
-                            <div class="gmail-sender">No unread messages yet</div>
+                            <div class="gmail-title">${widget.type === 'calendar' ? 'Calendar' : 'Inbox'}</div>
+                            <div class="gmail-sender">${widget.type === 'calendar' ? 'No upcoming events yet' : 'No unread messages yet'}</div>
                             <ul class="gmail-list"></ul>
                         </div>
                     `;
@@ -2305,7 +2307,7 @@
                 return;
             }
 
-            const hasLiveWidgets = widgets.some((widget) => ['spotify', 'gmail', 'climate', 'steam'].includes(widget.type) && widget.visible !== false);
+            const hasLiveWidgets = widgets.some((widget) => ['spotify', 'gmail', 'calendar', 'climate', 'steam'].includes(widget.type) && widget.visible !== false);
             if (!hasLiveWidgets) {
                 return;
             }
@@ -2319,6 +2321,7 @@
                 const liveData = payload.data || {};
 
                 updateSpotifyWidgets(liveData.spotify || {});
+                updateCalendarWidgets(liveData.calendar || {});
                 updateGmailWidgets(liveData.gmail || {});
                 updateClimateWidgets(liveData.climate || {});
                 updateSteamWidgets(liveData.steam || {});
@@ -2337,7 +2340,9 @@
 
                 if (data.status !== 'active') {
                     title.textContent = data.status === 'idle' ? 'Nothing playing' : 'Spotify unavailable';
-                    artist.textContent = data.status === 'unconfigured' ? 'Configure Spotify API credentials' : 'No active playback';
+                    artist.textContent = data.status === 'unconfigured'
+                        ? 'Configure Spotify API credentials'
+                        : (data.error || 'No active playback');
                     art.removeAttribute('src');
                     progress.style.width = '0%';
                     return;
@@ -2377,6 +2382,35 @@
             });
         }
 
+        function updateCalendarWidgets(data) {
+            document.querySelectorAll('.calendar-widget').forEach((widget) => {
+                const subtitle = widget.querySelector('.gmail-sender');
+                const list = widget.querySelector('.gmail-list');
+                if (!subtitle || !list) return;
+
+                list.innerHTML = '';
+                if (data.status === 'unconfigured') {
+                    subtitle.textContent = 'Configure Google Calendar API key and calendar ID';
+                    return;
+                }
+                if (data.status === 'unavailable') {
+                    subtitle.textContent = data.error || 'Calendar unavailable';
+                    return;
+                }
+                const items = Array.isArray(data.items) ? data.items : [];
+                subtitle.textContent = items.length ? `${items.length} upcoming events` : 'No upcoming events';
+                items.forEach((item) => {
+                    const li = document.createElement('li');
+                    li.className = 'gmail-item';
+                    li.innerHTML = `
+                        <div class="gmail-title">${item.title || 'Untitled event'}</div>
+                        <div class="gmail-sender">${item.when || 'No time set'}${item.location ? ` • ${item.location}` : ''}</div>
+                    `;
+                    list.appendChild(li);
+                });
+            });
+        }
+
         function updateClimateWidgets(data) {
             document.querySelectorAll('.climate-widget').forEach((widget) => {
                 const temperature = widget.querySelector('.climate-temperature');
@@ -2403,7 +2437,9 @@
 
                 if (data.status !== 'active') {
                     game.textContent = data.status === 'unconfigured' ? 'Steam unavailable' : 'Steam idle';
-                    status.textContent = data.status === 'unconfigured' ? 'Configure Steam API credentials' : 'No active game';
+                    status.textContent = data.status === 'unconfigured'
+                        ? 'Configure Steam API credentials'
+                        : (data.error || 'No active game');
                     avatar.removeAttribute('src');
                     return;
                 }

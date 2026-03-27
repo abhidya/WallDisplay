@@ -9,6 +9,7 @@ import asyncio
 
 from database.database import get_db
 from schemas.overlay import (
+    ApiConfigs,
     OverlayConfigCreate,
     OverlayConfigUpdate,
     OverlayConfigResponse,
@@ -179,6 +180,32 @@ async def get_overlay_widget_data(
         return service.get_live_widget_data(config_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/global-api-configs")
+async def get_global_api_configs(
+    db: Session = Depends(get_db)
+):
+    try:
+        service = OverlayService(db)
+        return service.get_global_api_configs()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/global-api-configs")
+async def update_global_api_configs(
+    api_configs: ApiConfigs,
+    db: Session = Depends(get_db)
+):
+    try:
+        service = OverlayService(db)
+        updated = service.update_global_api_configs(api_configs.model_dump())
+        config_ids = [config_id for (config_id,) in db.query(OverlayConfig.id).all()]
+        notify_overlay_config_update(config_ids, "overlay_global_api_configs_updated")
+        return updated
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

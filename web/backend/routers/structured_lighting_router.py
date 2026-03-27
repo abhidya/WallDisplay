@@ -44,12 +44,12 @@ class StructuredLightingWorkerStartRequest(BaseModel):
 
 class StructuredLightingDecodeRequest(BaseModel):
     sample_step: int = Field(1, ge=1, le=16, description="Decode every Nth camera pixel")
-    tuning_params: Optional[Dict[str, float]] = Field(None, description="Optional decode/mask tuning parameters")
+    tuning_params: Optional[Dict[str, float | str | bool]] = Field(None, description="Optional decode/mask tuning parameters")
 
 
 class StructuredLightingParameterSearchRequest(BaseModel):
     sample_step: int = Field(1, ge=1, le=16, description="Decode every Nth camera pixel for search candidates")
-    tuning_params: Optional[Dict[str, float]] = Field(None, description="Base tuning parameters applied to every candidate")
+    tuning_params: Optional[Dict[str, float | str | bool]] = Field(None, description="Base tuning parameters applied to every candidate")
     parameter_grid: Optional[Dict[str, List[float | str]]] = Field(None, description="Explicit parameter grid for candidate generation")
 
 

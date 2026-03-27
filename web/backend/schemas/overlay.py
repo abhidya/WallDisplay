@@ -33,6 +33,8 @@ class ApiConfigs(BaseModel):
     spotify_client_secret: Optional[str] = ""
     spotify_refresh_token: Optional[str] = ""
     spotify_access_token: Optional[str] = ""
+    google_calendar_api_key: Optional[str] = ""
+    google_calendar_id: Optional[str] = ""
     gmail_client_id: Optional[str] = ""
     gmail_client_secret: Optional[str] = ""
     gmail_refresh_token: Optional[str] = ""

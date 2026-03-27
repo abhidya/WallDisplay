@@ -52,6 +52,30 @@ function parseGridValues(value, parser) {
     .filter((item) => Number.isFinite(item));
 }
 
+function formatApiError(err, fallback) {
+  const detail = err?.response?.data?.detail;
+  if (typeof detail === 'string' && detail.trim()) {
+    return detail;
+  }
+  if (Array.isArray(detail) && detail.length) {
+    return detail
+      .map((item) => {
+        if (typeof item === 'string') {
+          return item;
+        }
+        if (item && typeof item === 'object') {
+          return item.msg || JSON.stringify(item);
+        }
+        return String(item);
+      })
+      .join(' | ');
+  }
+  if (detail && typeof detail === 'object') {
+    return detail.msg || JSON.stringify(detail);
+  }
+  return fallback;
+}
+
 function StructuredLighting() {
   const navigate = useNavigate();
   const [capabilities, setCapabilities] = useState(null);
@@ -545,7 +569,7 @@ function StructuredLighting() {
       navigate(`/mappings?scene=${published.scene_id}`);
     } catch (err) {
       console.error('Failed to publish mapping scene', err);
-      setError(err.response?.data?.detail || 'Failed to publish mapping scene.');
+      setError(formatApiError(err, 'Failed to publish mapping scene.'));
     } finally {
       setActionLoading(false);
     }
@@ -592,7 +616,7 @@ function StructuredLighting() {
       setMessage('Generated tuning candidates for operator review.');
     } catch (err) {
       console.error('Failed to run tuning search', err);
-      setError(err.response?.data?.detail || 'Failed to run tuning search.');
+      setError(formatApiError(err, 'Failed to run tuning search.'));
     } finally {
       setActionLoading(false);
     }
@@ -637,7 +661,7 @@ function StructuredLighting() {
       setMessage('Generated preview candidates for operator selection.');
     } catch (err) {
       console.error('Failed to run preview tuning', err);
-      setError(err.response?.data?.detail || 'Failed to run preview tuning.');
+      setError(formatApiError(err, 'Failed to run preview tuning.'));
     } finally {
       setActionLoading(false);
     }
