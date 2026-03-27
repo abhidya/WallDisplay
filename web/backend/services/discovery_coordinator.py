@@ -236,7 +236,13 @@ class DiscoveryCoordinator:
                     new_hostname = device_info.get("hostname")
                     old_location = existing_device.device_info.get("location")
                     new_location = device_info.get("location")
-                    if old_hostname != new_hostname or old_location != new_location:
+                    old_action_url = existing_device.device_info.get("action_url")
+                    new_action_url = device_info.get("action_url")
+                    if (
+                        old_hostname != new_hostname
+                        or old_location != new_location
+                        or old_action_url != new_action_url
+                    ):
                         logger.debug("Device %s parameters changed", device_name)
                         is_changed_device = True
             finally:
@@ -383,9 +389,12 @@ class DiscoveryCoordinator:
                     break
 
             if action_url_path is not None:
-                if not action_url_path.startswith("/"):
-                    action_url_path = "/" + action_url_path
-                action_url = f"http://{hostname}:{port}{action_url_path}"
+                if action_url_path.startswith("http://") or action_url_path.startswith("https://"):
+                    action_url = action_url_path
+                else:
+                    if not action_url_path.startswith("/"):
+                        action_url_path = "/" + action_url_path
+                    action_url = f"http://{hostname}:{port}{action_url_path}"
             else:
                 action_url = f"http://{hostname}:{port}/AVTransport/Control"
                 logger.warning("No action URL found, using default: %s", action_url)
