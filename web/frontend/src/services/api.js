@@ -146,6 +146,8 @@ const structuredLightingApi = {
   getRuntime: (sessionId) => api.get(`/structured-lighting/sessions/${sessionId}/runtime`),
   listCaptures: (sessionId) => api.get(`/structured-lighting/sessions/${sessionId}/captures`),
   decodeSession: (sessionId, payload = {}) => api.post(`/structured-lighting/sessions/${sessionId}/decode`, payload),
+  runPreviewTuning: (sessionId, payload = {}) => api.post(`/structured-lighting/sessions/${sessionId}/preview-tuning`, payload),
+  getPreviewTuning: (sessionId) => api.get(`/structured-lighting/sessions/${sessionId}/preview-tuning`),
   runTuningSearch: (sessionId, payload = {}) => api.post(`/structured-lighting/sessions/${sessionId}/tuning-search`, payload),
   getTuningSearch: (sessionId) => api.get(`/structured-lighting/sessions/${sessionId}/tuning-search`),
   getCalibration: (sessionId) => api.get(`/structured-lighting/sessions/${sessionId}/calibration`),
@@ -156,6 +158,7 @@ const structuredLightingApi = {
   getStepImageUrl: (sessionId, stepIndex) => `/api/structured-lighting/sessions/${sessionId}/steps/${stepIndex}/image`,
   getCaptureImageUrl: (sessionId, stepIndex) => `/api/structured-lighting/sessions/${sessionId}/captures/${stepIndex}/image`,
   getArtifactPreviewUrl: (sessionId, previewId) => `/api/structured-lighting/sessions/${sessionId}/artifacts/previews/${previewId}`,
+  getPreviewTuningPreviewUrl: (sessionId, candidateId, previewName) => `/api/structured-lighting/sessions/${sessionId}/preview-tuning/${candidateId}/previews/${previewName}`,
   getTuningSearchPreviewUrl: (sessionId, candidateId, previewName) => `/api/structured-lighting/sessions/${sessionId}/tuning-search/${candidateId}/previews/${previewName}`,
   getExportUrl: (sessionId) => `/api/structured-lighting/sessions/${sessionId}/export`,
 };

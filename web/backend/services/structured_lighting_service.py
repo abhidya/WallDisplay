@@ -586,6 +586,149 @@ class StructuredLightingService:
             return None
         return session.get("tuning_search", self._default_tuning_search_state())
 
+    def run_preview_tuning(
+        self,
+        session_id: str,
+        sample_step: int = 1,
+        tuning_params: Optional[Dict] = None,
+        parameter_grid: Optional[Dict] = None,
+    ) -> Optional[Dict]:
+        session = self.get_session(session_id)
+        if not session:
+            return None
+
+        base_params = self._normalize_tuning_params(tuning_params)
+        decode_dir = self._ensure_decode_dir(session_id)
+        preview_dir = os.path.join(decode_dir, "preview_tuning")
+        if os.path.isdir(preview_dir):
+            shutil.rmtree(preview_dir)
+        os.makedirs(preview_dir, exist_ok=True)
+
+        search_candidates = self._parameter_search_candidates(base_params, parameter_grid)
+        total_candidates = len(search_candidates)
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return None
+            session["preview_tuning"] = {
+                "status": "running",
+                "message": "Preparing preview tuning candidates.",
+                "generated_at": None,
+                "sample_step": sample_step,
+                "base_tuning_params": base_params,
+                "parameter_grid": parameter_grid or {},
+                "candidates": [],
+                "progress": {
+                    "current": 0,
+                    "total": total_candidates,
+                    "percent": 0,
+                    "label": "Preparing preview tuning",
+                },
+            }
+            session["updated_at"] = datetime.utcnow().isoformat()
+            self._persist_session(session)
+
+        candidates = []
+        for candidate_index, candidate in enumerate(search_candidates):
+            candidate_id = f"candidate_{candidate_index:02d}"
+            candidate_dir = os.path.join(preview_dir, candidate_id)
+            os.makedirs(candidate_dir, exist_ok=True)
+            with self._lock:
+                session = self._sessions.get(session_id)
+                if session:
+                    session["preview_tuning"] = {
+                        **session.get("preview_tuning", self._default_preview_tuning_state()),
+                        "status": "running",
+                        "message": f"Building preview candidate {candidate_index + 1} of {total_candidates}.",
+                        "progress": {
+                            "current": candidate_index,
+                            "total": total_candidates,
+                            "percent": int((candidate_index / max(total_candidates, 1)) * 100),
+                            "label": f"Previewing {candidate['label']}",
+                        },
+                        "candidates": list(candidates),
+                    }
+                    session["updated_at"] = datetime.utcnow().isoformat()
+                    self._persist_session(session)
+
+            cam2proj, white_path, black_path = self._decode_raw_cam2proj(
+                session_id,
+                sample_step=max(1, sample_step),
+                tuning_params=candidate["params"],
+            )
+            preview_result = self._generate_preview_tuning_candidate(
+                session_id=session_id,
+                candidate_id=candidate_id,
+                white_path=white_path,
+                black_path=black_path,
+                cam2proj=cam2proj,
+                projector_width=session["projector_width"],
+                projector_height=session["projector_height"],
+                tuning_params=candidate["params"],
+                output_dir=candidate_dir,
+            )
+            candidates.append(
+                {
+                    "id": candidate_id,
+                    "label": candidate["label"],
+                    "description": candidate["description"],
+                    "params": candidate["params"],
+                    "metrics": preview_result["metrics"],
+                    "previews": {
+                        "edge": f"/api/structured-lighting/sessions/{session_id}/preview-tuning/{candidate_id}/previews/edge",
+                        "segmentation": f"/api/structured-lighting/sessions/{session_id}/preview-tuning/{candidate_id}/previews/segmentation",
+                        "trusted_mask": f"/api/structured-lighting/sessions/{session_id}/preview-tuning/{candidate_id}/previews/trusted_mask",
+                        "projector_occupancy": f"/api/structured-lighting/sessions/{session_id}/preview-tuning/{candidate_id}/previews/projector_occupancy",
+                    },
+                }
+            )
+            with self._lock:
+                session = self._sessions.get(session_id)
+                if session:
+                    session["preview_tuning"] = {
+                        **session.get("preview_tuning", self._default_preview_tuning_state()),
+                        "status": "running",
+                        "message": f"Completed preview candidate {candidate_index + 1} of {total_candidates}.",
+                        "progress": {
+                            "current": candidate_index + 1,
+                            "total": total_candidates,
+                            "percent": int(((candidate_index + 1) / max(total_candidates, 1)) * 100),
+                            "label": f"Completed {candidate['label']}",
+                        },
+                        "candidates": list(candidates),
+                    }
+                    session["updated_at"] = datetime.utcnow().isoformat()
+                    self._persist_session(session)
+
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return None
+            session["preview_tuning"] = {
+                "status": "completed",
+                "message": f"Generated {len(candidates)} preview candidates.",
+                "generated_at": datetime.utcnow().isoformat(),
+                "sample_step": sample_step,
+                "base_tuning_params": base_params,
+                "parameter_grid": parameter_grid or {},
+                "candidates": candidates,
+                "progress": {
+                    "current": len(candidates),
+                    "total": total_candidates,
+                    "percent": 100,
+                    "label": "Preview tuning completed",
+                },
+            }
+            session["updated_at"] = datetime.utcnow().isoformat()
+            self._persist_session(session)
+            return dict(session["preview_tuning"])
+
+    def get_preview_tuning(self, session_id: str) -> Optional[Dict]:
+        session = self.get_session(session_id)
+        if not session:
+            return None
+        return session.get("preview_tuning", self._default_preview_tuning_state())
+
     def render_tuning_search_preview(self, session_id: str, candidate_id: str, preview_name: str) -> Optional[bytes]:
         session = self.get_session(session_id)
         if not session:
@@ -599,6 +742,30 @@ class StructuredLightingService:
         file_name = {
             "warp": "warped_for_projector_second_pass_filled.png",
             "mask": "projector_wall_mask_second_pass.png",
+        }.get(preview_name)
+        if not file_name:
+            return None
+        file_path = os.path.join(candidate_dir, file_name)
+        if not os.path.exists(file_path):
+            return None
+        with open(file_path, "rb") as handle:
+            return handle.read()
+
+    def render_preview_tuning_preview(self, session_id: str, candidate_id: str, preview_name: str) -> Optional[bytes]:
+        session = self.get_session(session_id)
+        if not session:
+            return None
+        search = session.get("preview_tuning", {})
+        candidate = next((item for item in search.get("candidates", []) if item.get("id") == candidate_id), None)
+        if not candidate:
+            return None
+        decode_dir = self._ensure_decode_dir(session_id)
+        candidate_dir = os.path.join(decode_dir, "preview_tuning", candidate_id)
+        file_name = {
+            "edge": "edge_map.png",
+            "segmentation": "segmentation.png",
+            "trusted_mask": "trusted_cam_mask.png",
+            "projector_occupancy": "projector_occupancy.png",
         }.get(preview_name)
         if not file_name:
             return None
@@ -775,6 +942,7 @@ class StructuredLightingService:
             "calibration": self._default_calibration_state(),
             "review": self._default_review_state(),
             "tuning_search": self._default_tuning_search_state(),
+            "preview_tuning": self._default_preview_tuning_state(),
             "created_at": now,
             "updated_at": now,
         }
@@ -1393,6 +1561,103 @@ class StructuredLightingService:
             "projector_hit_count": projector_hit_count,
             "trusted_sample_count": len(px),
         }
+
+    def _generate_preview_tuning_candidate(
+        self,
+        *,
+        session_id: str,
+        candidate_id: str,
+        white_path: str,
+        black_path: str,
+        cam2proj,
+        projector_width: int,
+        projector_height: int,
+        tuning_params: Optional[Dict] = None,
+        output_dir: Optional[str] = None,
+    ) -> Dict[str, object]:
+        try:
+            import cv2
+            import numpy as np
+        except ImportError as exc:
+            raise RuntimeError("Preview tuning requires opencv-contrib-python and numpy.") from exc
+
+        white_bgr = cv2.imread(white_path, cv2.IMREAD_COLOR)
+        black_bgr = cv2.imread(black_path, cv2.IMREAD_COLOR)
+        if white_bgr is None or black_bgr is None:
+            raise RuntimeError("Failed to load white/black reference images for preview tuning.")
+
+        params = self._normalize_tuning_params(tuning_params)
+        brightness_gain = float(params["brightness_gain"])
+        white_bgr = self._apply_brightness_gain(white_bgr, brightness_gain)
+        black_bgr = self._apply_brightness_gain(black_bgr, brightness_gain)
+        candidate_dir = output_dir or os.path.join(self._ensure_decode_dir(session_id), "preview_tuning", candidate_id)
+        os.makedirs(candidate_dir, exist_ok=True)
+
+        edge_data = self._build_wall_edge_map(
+            white_bgr,
+            blur_ksize=int(params["median_blur_ksize"]),
+            bilateral_params=(
+                int(params["bilateral_d"]),
+                int(params["bilateral_sigma_color"]),
+                int(params["bilateral_sigma_space"]),
+            ),
+            gradient_kernel=int(params["gradient_kernel_size"]),
+            edge_mode=str(params["edge_mode"]),
+            canny_low=int(params["canny_low_threshold"]),
+            canny_high=int(params["canny_high_threshold"]),
+            laplacian_ksize=int(params["laplacian_ksize"]),
+        )
+        segmentation = self._segment_projector_source(
+            edge_data["gradient"],
+            scale=float(params["segmentation_scale"]),
+            threshold_value=int(params["segmentation_threshold"]),
+            blur_value=int(params["segmentation_blur"]),
+            min_area_fraction=float(params["min_area_ratio"]),
+            close_kernel=int(params["room_close_kernel_size"]),
+        )
+        decode_diag = self._build_decode_diagnostics(
+            cam2proj,
+            white_bgr,
+            black_bgr,
+            projector_width,
+            projector_height,
+            contrast_thresh=int(params["contrast_threshold"]),
+        )
+
+        cv2.imwrite(os.path.join(candidate_dir, "edge_map.png"), edge_data["gradient"])
+        cv2.imwrite(
+            os.path.join(candidate_dir, "segmentation.png"),
+            cv2.cvtColor(segmentation["final_rgb"], cv2.COLOR_RGB2BGR),
+        )
+        cv2.imwrite(
+            os.path.join(candidate_dir, "trusted_cam_mask.png"),
+            (decode_diag["trusted_cam_mask"].astype(np.uint8) * 255),
+        )
+        cv2.imwrite(
+            os.path.join(candidate_dir, "projector_occupancy.png"),
+            decode_diag["projector_occupancy"],
+        )
+
+        labels = segmentation["labels"]
+        kept_labels = [int(label_id) for label_id in np.unique(labels) if int(label_id) > 0]
+        coverage_ratio = (
+            float(np.count_nonzero(decode_diag["projector_occupancy"])) / float(decode_diag["projector_occupancy"].size)
+            if decode_diag["projector_occupancy"].size
+            else 0.0
+        )
+        metrics = {
+            "edge_mode": params["edge_mode"],
+            "trusted_sample_count": int(decode_diag["trusted_sample_count"]),
+            "camera_valid_ratio": round(
+                float(np.count_nonzero(decode_diag["trusted_cam_mask"])) / float(decode_diag["trusted_cam_mask"].size),
+                4,
+            ) if decode_diag["trusted_cam_mask"].size else 0.0,
+            "projector_coverage_ratio": round(coverage_ratio, 4),
+            "segmentation_region_count": len(kept_labels),
+        }
+        with open(os.path.join(candidate_dir, "manifest.json"), "w", encoding="utf-8") as handle:
+            json.dump({"params": params, "metrics": metrics}, handle, indent=2, sort_keys=True)
+        return {"metrics": metrics}
 
     def _filter_projector_occupancy(self, occupancy_mask, *, min_area: int, close_kernel_size: int):
         import cv2
@@ -2376,6 +2641,16 @@ class StructuredLightingService:
         return {
             "status": "not_started",
             "message": "Parameter search has not run yet.",
+            "generated_at": None,
+            "sample_step": 1,
+            "candidates": [],
+            "progress": None,
+        }
+
+    def _default_preview_tuning_state(self) -> Dict:
+        return {
+            "status": "not_started",
+            "message": "Preview tuning has not run yet.",
             "generated_at": None,
             "sample_step": 1,
             "candidates": [],

@@ -61,6 +61,7 @@ function StructuredLighting() {
   const [runtime, setRuntime] = useState(null);
   const [captures, setCaptures] = useState(null);
   const [artifactReview, setArtifactReview] = useState(null);
+  const [previewTuning, setPreviewTuning] = useState(null);
   const [tuningSearch, setTuningSearch] = useState(null);
   const [projectors, setProjectors] = useState([]);
   const [selectedSessionId, setSelectedSessionId] = useState('');
@@ -92,6 +93,7 @@ function StructuredLighting() {
     projector_height: 720,
   });
   const [decodeControls, setDecodeControls] = useState({
+    edge_mode: 'morph_gradient',
     brightness_gain: 1.0,
     white_threshold: 5,
     black_threshold: 40,
@@ -194,16 +196,18 @@ function StructuredLighting() {
         setRuntime(null);
         setCaptures(null);
         setArtifactReview(null);
+        setPreviewTuning(null);
         setTuningSearch(null);
         setReviewNotes('');
         return;
       }
       try {
-        const [planResponse, runtimeResponse, capturesResponse, reviewResponse, tuningSearchResponse] = await Promise.all([
+        const [planResponse, runtimeResponse, capturesResponse, reviewResponse, previewTuningResponse, tuningSearchResponse] = await Promise.all([
           structuredLightingApi.getCapturePlan(selectedSessionId),
           structuredLightingApi.getRuntime(selectedSessionId),
           structuredLightingApi.listCaptures(selectedSessionId),
           structuredLightingApi.getArtifactReview(selectedSessionId),
+          structuredLightingApi.getPreviewTuning(selectedSessionId),
           structuredLightingApi.getTuningSearch(selectedSessionId),
         ]);
         if (active) {
@@ -211,6 +215,7 @@ function StructuredLighting() {
           setRuntime(runtimeResponse.data);
           setCaptures(capturesResponse.data);
           setArtifactReview(reviewResponse.data);
+          setPreviewTuning(previewTuningResponse.data);
           setTuningSearch(tuningSearchResponse.data);
           syncSessionSnapshot(runtimeResponse.data?.session || planResponse.data?.session);
           setReviewNotes(reviewResponse.data?.review?.notes || '');
@@ -223,6 +228,7 @@ function StructuredLighting() {
           setRuntime(null);
           setCaptures(null);
           setArtifactReview(null);
+          setPreviewTuning(null);
           setTuningSearch(null);
           setReviewNotes('');
           setReviewedBy('');
@@ -242,6 +248,7 @@ function StructuredLighting() {
     }
     setDecodeControls((current) => ({
       ...current,
+      edge_mode: tuningParams.edge_mode ?? current.edge_mode,
       brightness_gain: tuningParams.brightness_gain ?? current.brightness_gain,
       white_threshold: tuningParams.white_threshold ?? current.white_threshold,
       black_threshold: tuningParams.black_threshold ?? current.black_threshold,
@@ -255,6 +262,7 @@ function StructuredLighting() {
   const shouldPollRuntime = Boolean(selectedSessionId) && (
     ['waiting_for_worker', 'ready', 'capturing'].includes(selectedSessionStatus)
     || decodeStatus === 'running'
+    || previewTuning?.status === 'running'
     || tuningSearchStatus === 'running'
   );
 
@@ -277,11 +285,12 @@ function StructuredLighting() {
 
       runtimeRefreshInFlightRef.current = true;
       try {
-        const [statusResponse, runtimeResponse, capturesResponse, reviewResponse, tuningSearchResponse] = await Promise.all([
+        const [statusResponse, runtimeResponse, capturesResponse, reviewResponse, previewTuningResponse, tuningSearchResponse] = await Promise.all([
           structuredLightingApi.getStatus(),
           structuredLightingApi.getRuntime(selectedSessionId),
           structuredLightingApi.listCaptures(selectedSessionId),
           structuredLightingApi.getArtifactReview(selectedSessionId),
+          structuredLightingApi.getPreviewTuning(selectedSessionId),
           structuredLightingApi.getTuningSearch(selectedSessionId),
         ]);
         if (cancelled) {
@@ -291,6 +300,7 @@ function StructuredLighting() {
         setRuntime(runtimeResponse.data);
         setCaptures(capturesResponse.data);
         setArtifactReview(reviewResponse.data);
+        setPreviewTuning(previewTuningResponse.data);
         setTuningSearch(tuningSearchResponse.data);
         syncSessionSnapshot(runtimeResponse.data?.session);
         setReviewNotes((current) => current || reviewResponse.data?.review?.notes || '');
@@ -400,15 +410,17 @@ function StructuredLighting() {
       await structuredLightingApi.startSession(sessionId);
       await refreshSessions();
       await refreshStatus();
-      const [runtimeResponse, capturesResponse, reviewResponse, tuningSearchResponse] = await Promise.all([
+      const [runtimeResponse, capturesResponse, reviewResponse, previewTuningResponse, tuningSearchResponse] = await Promise.all([
         structuredLightingApi.getRuntime(sessionId),
         structuredLightingApi.listCaptures(sessionId),
         structuredLightingApi.getArtifactReview(sessionId),
+        structuredLightingApi.getPreviewTuning(sessionId),
         structuredLightingApi.getTuningSearch(sessionId),
       ]);
       setRuntime(runtimeResponse.data);
       setCaptures(capturesResponse.data);
       setArtifactReview(reviewResponse.data);
+      setPreviewTuning(previewTuningResponse.data);
       setTuningSearch(tuningSearchResponse.data);
       setReviewNotes(reviewResponse.data?.review?.notes || '');
       setReviewedBy(reviewResponse.data?.review?.reviewed_by || '');
@@ -445,21 +457,21 @@ function StructuredLighting() {
             }
           : current
       ));
-      const effectiveTuningParams = tuningParams || {
-        ...decodeControls,
-      };
+      const effectiveTuningParams = tuningParams || { ...decodeControls };
       await structuredLightingApi.decodeSession(sessionId, { sample_step: 1, tuning_params: effectiveTuningParams });
-      const [runtimeResponse, capturesResponse, sessionsResponse, reviewResponse, tuningSearchResponse] = await Promise.all([
+      const [runtimeResponse, capturesResponse, sessionsResponse, reviewResponse, previewTuningResponse, tuningSearchResponse] = await Promise.all([
         structuredLightingApi.getRuntime(sessionId),
         structuredLightingApi.listCaptures(sessionId),
         structuredLightingApi.listSessions(),
         structuredLightingApi.getArtifactReview(sessionId),
+        structuredLightingApi.getPreviewTuning(sessionId),
         structuredLightingApi.getTuningSearch(sessionId),
       ]);
       setRuntime(runtimeResponse.data);
       setCaptures(capturesResponse.data);
       setSessions(sessionsResponse.data || []);
       setArtifactReview(reviewResponse.data);
+      setPreviewTuning(previewTuningResponse.data);
       setTuningSearch(tuningSearchResponse.data);
       setReviewNotes(reviewResponse.data?.review?.notes || '');
       setReviewedBy(reviewResponse.data?.review?.reviewed_by || '');
@@ -584,6 +596,60 @@ function StructuredLighting() {
     } finally {
       setActionLoading(false);
     }
+  };
+
+  const handleRunPreviewTuning = async (sessionId) => {
+    try {
+      setActionLoading(true);
+      const edgeModes = Object.entries(searchGrid.edge_modes)
+        .filter(([, enabled]) => enabled)
+        .map(([edgeMode]) => edgeMode);
+      const brightnessValues = parseGridValues(searchGrid.brightness_gain, Number);
+      const whiteValues = parseGridValues(searchGrid.white_threshold, Number);
+      const blackValues = parseGridValues(searchGrid.black_threshold, Number);
+      const totalCandidates = Math.min(
+        Math.max(edgeModes.length, 1) * Math.max(brightnessValues.length, 1) * Math.max(whiteValues.length, 1) * Math.max(blackValues.length, 1),
+        18,
+      );
+      setPreviewTuning({
+        status: 'running',
+        message: 'Generating preview candidates.',
+        candidates: [],
+        progress: {
+          current: 0,
+          total: totalCandidates,
+          percent: 0,
+          label: 'Preparing preview tuning',
+        },
+      });
+      const response = await structuredLightingApi.runPreviewTuning(sessionId, {
+        sample_step: 1,
+        tuning_params: { ...decodeControls },
+        parameter_grid: {
+          edge_mode: edgeModes.length ? edgeModes : ['morph_gradient'],
+          brightness_gain: brightnessValues,
+          white_threshold: whiteValues,
+          black_threshold: blackValues,
+        },
+      });
+      setPreviewTuning(response.data);
+      setError('');
+      setMessage('Generated preview candidates for operator selection.');
+    } catch (err) {
+      console.error('Failed to run preview tuning', err);
+      setError(err.response?.data?.detail || 'Failed to run preview tuning.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleApplyPreviewParams = (params) => {
+    setDecodeControls((current) => ({
+      ...current,
+      ...params,
+    }));
+    setError('');
+    setMessage('Applied preview candidate settings to decode controls.');
   };
 
   const visibleSessions = sessions.filter((session) => {
@@ -1452,6 +1518,13 @@ function StructuredLighting() {
                     <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 1.5 }}>
                       <Button
                         variant="outlined"
+                        onClick={() => handleRunPreviewTuning(runtime.session.session_id)}
+                        disabled={actionLoading}
+                      >
+                        Preview Tuning
+                      </Button>
+                      <Button
+                        variant="outlined"
                         onClick={() => handleRunTuningSearch(runtime.session.session_id)}
                         disabled={actionLoading}
                       >
@@ -1472,7 +1545,23 @@ function StructuredLighting() {
                           Adjust brightness and GrayCode thresholds before running decode or parameter search.
                         </Typography>
                         <Grid container spacing={2}>
-                          <Grid item xs={12} md={4}>
+                          <Grid item xs={12} md={3}>
+                            <TextField
+                              select
+                              label="Edge Detector"
+                              value={decodeControls.edge_mode}
+                              onChange={(event) => setDecodeControls((current) => ({
+                                ...current,
+                                edge_mode: event.target.value,
+                              }))}
+                              fullWidth
+                            >
+                              <MenuItem value="morph_gradient">morph_gradient</MenuItem>
+                              <MenuItem value="canny">canny</MenuItem>
+                              <MenuItem value="laplacian">laplacian</MenuItem>
+                            </TextField>
+                          </Grid>
+                          <Grid item xs={12} md={3}>
                             <TextField
                               label="Brightness Gain"
                               type="number"
@@ -1485,7 +1574,7 @@ function StructuredLighting() {
                               inputProps={{ step: 0.05, min: 0.1, max: 3 }}
                             />
                           </Grid>
-                          <Grid item xs={12} md={4}>
+                          <Grid item xs={12} md={3}>
                             <TextField
                               label="White Threshold"
                               type="number"
@@ -1498,7 +1587,7 @@ function StructuredLighting() {
                               inputProps={{ min: 0, max: 255 }}
                             />
                           </Grid>
-                          <Grid item xs={12} md={4}>
+                          <Grid item xs={12} md={3}>
                             <TextField
                               label="Black Threshold"
                               type="number"
@@ -1576,6 +1665,109 @@ function StructuredLighting() {
                         </Grid>
                       </Stack>
                     </Paper>
+                    {previewTuning?.status === 'running' ? (
+                      <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
+                        <Stack spacing={1}>
+                          <Stack direction="row" justifyContent="space-between" alignItems="center">
+                            <Typography variant="subtitle2">
+                              {previewTuning.progress?.label || 'Preview tuning in progress'}
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary">
+                              {previewTuning.progress?.percent ?? 0}%
+                            </Typography>
+                          </Stack>
+                          <LinearProgress
+                            variant="determinate"
+                            value={previewTuning.progress?.percent ?? 0}
+                            sx={{ height: 8, borderRadius: 999 }}
+                          />
+                          <Typography variant="body2" color="text.secondary">
+                            {previewTuning.message || 'Building preview candidates.'}
+                            {previewTuning.progress?.total ? ` ${previewTuning.progress.current || 0}/${previewTuning.progress.total} candidates complete.` : ''}
+                          </Typography>
+                        </Stack>
+                      </Paper>
+                    ) : null}
+                    {previewTuning?.candidates?.length ? (
+                      <Stack spacing={2} sx={{ mb: 2 }}>
+                        <Typography variant="subtitle2">
+                          Preview Tuning Results
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          These are lightweight previews only: edge map, segmentation, trusted camera mask, and projector occupancy. Pick one before running the full decode pipeline.
+                        </Typography>
+                        <Grid container spacing={2}>
+                          {previewTuning.candidates.map((candidate) => (
+                            <Grid item xs={12} xl={6} key={candidate.id}>
+                              <Card variant="outlined">
+                                <CardContent>
+                                  <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={1} sx={{ mb: 1 }}>
+                                    <Box>
+                                      <Typography variant="subtitle2">{candidate.label}</Typography>
+                                      <Typography variant="body2" color="text.secondary">
+                                        {candidate.description}
+                                      </Typography>
+                                    </Box>
+                                    <Stack direction="row" spacing={1}>
+                                      <Button
+                                        size="small"
+                                        variant="outlined"
+                                        disabled={actionLoading}
+                                        onClick={() => handleApplyPreviewParams(candidate.params)}
+                                      >
+                                        Use These Params
+                                      </Button>
+                                      <Button
+                                        size="small"
+                                        variant="contained"
+                                        disabled={actionLoading}
+                                        onClick={() => handleDecodeSession(runtime.session.session_id, candidate.params)}
+                                      >
+                                        Decode With This
+                                      </Button>
+                                    </Stack>
+                                  </Stack>
+                                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 1.5 }}>
+                                    <Chip label={`edge ${candidate.params.edge_mode}`} size="small" variant="outlined" />
+                                    <Chip label={`brightness ${candidate.params.brightness_gain}`} size="small" variant="outlined" />
+                                    <Chip label={`white ${candidate.params.white_threshold}`} size="small" variant="outlined" />
+                                    <Chip label={`black ${candidate.params.black_threshold}`} size="small" variant="outlined" />
+                                    <Chip label={`trusted ${candidate.metrics.trusted_sample_count}`} size="small" />
+                                    <Chip label={`cam valid ${candidate.metrics.camera_valid_ratio}`} size="small" />
+                                    <Chip label={`proj coverage ${candidate.metrics.projector_coverage_ratio}`} size="small" />
+                                    <Chip label={`regions ${candidate.metrics.segmentation_region_count}`} size="small" />
+                                  </Box>
+                                  <Grid container spacing={1}>
+                                    {[
+                                      ['edge', 'Edge Map'],
+                                      ['segmentation', 'Segmentation'],
+                                      ['trusted_mask', 'Trusted Mask'],
+                                      ['projector_occupancy', 'Projector Coverage'],
+                                    ].map(([previewName, label]) => (
+                                      <Grid item xs={12} md={6} key={previewName}>
+                                        <Typography variant="caption" color="text.secondary">{label}</Typography>
+                                        <Box
+                                          component="img"
+                                          src={structuredLightingApi.getPreviewTuningPreviewUrl(runtime.session.session_id, candidate.id, previewName)}
+                                          alt={`${candidate.label} ${label}`}
+                                          sx={{
+                                            width: '100%',
+                                            display: 'block',
+                                            border: '1px solid rgba(0,0,0,0.16)',
+                                            borderRadius: 1,
+                                            bgcolor: '#000',
+                                          }}
+                                        />
+                                      </Grid>
+                                    ))}
+                                  </Grid>
+                                </CardContent>
+                              </Card>
+                            </Grid>
+                          ))}
+                        </Grid>
+                      </Stack>
+                    ) : null}
                     {tuningSearch?.status === 'running' ? (
                       <Paper variant="outlined" sx={{ p: 2 }}>
                         <Stack spacing={1}>

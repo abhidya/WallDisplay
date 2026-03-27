@@ -194,10 +194,36 @@ def run_tuning_search(session_id: str, payload: StructuredLightingParameterSearc
     return result
 
 
+@router.post("/sessions/{session_id}/preview-tuning")
+def run_preview_tuning(session_id: str, payload: StructuredLightingParameterSearchRequest) -> Dict:
+    service = get_structured_lighting_service()
+    try:
+        result = service.run_preview_tuning(
+            session_id,
+            sample_step=payload.sample_step,
+            tuning_params=payload.tuning_params,
+            parameter_grid=payload.parameter_grid,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not result:
+        raise HTTPException(status_code=404, detail="Structured lighting session not found")
+    return result
+
+
 @router.get("/sessions/{session_id}/tuning-search")
 def get_tuning_search(session_id: str) -> Dict:
     service = get_structured_lighting_service()
     result = service.get_tuning_search(session_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Structured lighting session not found")
+    return result
+
+
+@router.get("/sessions/{session_id}/preview-tuning")
+def get_preview_tuning(session_id: str) -> Dict:
+    service = get_structured_lighting_service()
+    result = service.get_preview_tuning(session_id)
     if not result:
         raise HTTPException(status_code=404, detail="Structured lighting session not found")
     return result
@@ -209,6 +235,15 @@ def get_tuning_search_preview(session_id: str, candidate_id: str, preview_name: 
     preview_bytes = service.render_tuning_search_preview(session_id, candidate_id, preview_name)
     if preview_bytes is None:
         raise HTTPException(status_code=404, detail="Structured lighting tuning preview not found")
+    return Response(content=preview_bytes, media_type="image/png")
+
+
+@router.get("/sessions/{session_id}/preview-tuning/{candidate_id}/previews/{preview_name}")
+def get_preview_tuning_preview(session_id: str, candidate_id: str, preview_name: str) -> Response:
+    service = get_structured_lighting_service()
+    preview_bytes = service.render_preview_tuning_preview(session_id, candidate_id, preview_name)
+    if preview_bytes is None:
+        raise HTTPException(status_code=404, detail="Structured lighting preview-tuning preview not found")
     return Response(content=preview_bytes, media_type="image/png")
 
 
