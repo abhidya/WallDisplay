@@ -3,6 +3,7 @@ DLNA/UPnP discovery backend implementation.
 """
 
 import asyncio
+import os
 import socket
 import struct
 import xml.etree.ElementTree as ET
@@ -44,55 +45,102 @@ class DLNADiscoveryBackend(DiscoveryBackend):
     def __init__(self):
         super().__init__("DLNA", CastingMethod.DLNA)
         self.discovery_timeout = 2.0
+
+    def _candidate_discovery_hosts(self) -> List[str]:
+        candidates: List[str] = []
+        seen = set()
+
+        def add_candidate(value: Optional[str]) -> None:
+            if not value or value in seen or value.startswith("127."):
+                return
+            seen.add(value)
+            candidates.append(value)
+
+        add_candidate(os.environ.get("NANODLNA_DISCOVERY_INTERFACE_IP"))
+        add_candidate(os.environ.get("SERVE_IP"))
+
+        try:
+            probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                probe.connect(("8.8.8.8", 80))
+                add_candidate(probe.getsockname()[0])
+            finally:
+                probe.close()
+        except OSError:
+            logger.debug("Unified DLNA discovery outbound IP probe failed", exc_info=True)
+
+        try:
+            hostname = socket.gethostname()
+            for family, _, _, _, sockaddr in socket.getaddrinfo(hostname, None, socket.AF_INET):
+                if family == socket.AF_INET and sockaddr:
+                    add_candidate(sockaddr[0])
+        except OSError:
+            logger.debug("Unified DLNA discovery hostname lookup failed", exc_info=True)
+
+        if not candidates:
+            add_candidate("0.0.0.0")
+
+        return candidates
         
     async def discover_devices(self) -> List[Device]:
         """
         Discover DLNA devices on the network using SSDP.
         """
         logger.debug("Starting DLNA device discovery")
-        
-        # Create socket for SSDP broadcast
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-        ttl = struct.pack("B", 4)
-        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl)
-        sock.bind(("0.0.0.0", 0))
-        sock.settimeout(self.discovery_timeout)
-        
-        # Send SSDP broadcast
-        sock.sendto(SSDP_BROADCAST_MSG.encode("UTF-8"), 
-                   (SSDP_BROADCAST_ADDR, SSDP_BROADCAST_PORT))
-        
-        # Collect responses
+
+        candidate_hosts = self._candidate_discovery_hosts()
         devices = []
         device_locations = set()
-        
-        while True:
+
+        for candidate_host in candidate_hosts:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
             try:
-                data, addr = sock.recvfrom(1024)
-                response = data.decode("UTF-8")
-                
-                # Parse SSDP response
-                headers = {}
-                for line in response.split("\r\n")[1:]:
-                    if ": " in line:
-                        key, value = line.split(": ", 1)
-                        headers[key.strip().lower()] = value.strip()
-                
-                # Check if it's an AVTransport device
-                if "st" in headers and "AVTransport" in headers["st"]:
-                    location = headers.get("location")
-                    if location and location not in device_locations:
-                        device_locations.add(location)
-                        device = await self._parse_device_description(location)
-                        if device:
-                            devices.append(device)
-                            
-            except socket.timeout:
-                break
-            except Exception as e:
-                logger.error(f"Error processing SSDP response: {e}")
-                
-        sock.close()
+                ttl = struct.pack("B", 4)
+                sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl)
+                if candidate_host != "0.0.0.0":
+                    sock.setsockopt(
+                        socket.IPPROTO_IP,
+                        socket.IP_MULTICAST_IF,
+                        socket.inet_aton(candidate_host),
+                    )
+                sock.bind((candidate_host, 0))
+                sock.settimeout(self.discovery_timeout)
+                sock.sendto(
+                    SSDP_BROADCAST_MSG.encode("UTF-8"),
+                    (SSDP_BROADCAST_ADDR, SSDP_BROADCAST_PORT),
+                )
+
+                while True:
+                    try:
+                        data, addr = sock.recvfrom(1024)
+                        response = data.decode("UTF-8")
+
+                        headers = {}
+                        for line in response.split("\r\n")[1:]:
+                            if ": " in line:
+                                key, value = line.split(": ", 1)
+                                headers[key.strip().lower()] = value.strip()
+
+                        if "st" in headers and "AVTransport" in headers["st"]:
+                            location = headers.get("location")
+                            if location and location not in device_locations:
+                                device_locations.add(location)
+                                device = await self._parse_device_description(location)
+                                if device:
+                                    devices.append(device)
+                    except socket.timeout:
+                        break
+                    except Exception as e:
+                        logger.error(f"Error processing SSDP response: {e}")
+            except OSError as exc:
+                logger.warning(
+                    "Unified DLNA discovery send failed on host %s: %s",
+                    candidate_host,
+                    exc,
+                )
+            finally:
+                sock.close()
+
         logger.info(f"Discovered {len(devices)} DLNA devices")
         return devices
     

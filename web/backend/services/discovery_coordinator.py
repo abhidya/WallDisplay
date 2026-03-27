@@ -73,6 +73,52 @@ class DiscoveryCoordinator:
             return
         getattr(self.manager, "devices", {}).pop(device_name, None)
 
+    def _candidate_discovery_hosts(self, host: Optional[str] = None) -> List[str]:
+        if host and host != "0.0.0.0":
+            return [host]
+
+        candidates: List[str] = []
+        seen = set()
+
+        def add_candidate(value: Optional[str]) -> None:
+            if not value or value in seen or value.startswith("127."):
+                return
+            seen.add(value)
+            candidates.append(value)
+
+        env_host = os.environ.get("NANODLNA_DISCOVERY_INTERFACE_IP") or os.environ.get("SERVE_IP")
+        add_candidate(env_host)
+
+        get_serve_ip = getattr(self.manager, "get_serve_ip", None)
+        if callable(get_serve_ip):
+            try:
+                add_candidate(get_serve_ip())
+            except Exception:
+                logger.debug("Could not derive discovery interface from get_serve_ip()", exc_info=True)
+
+        try:
+            probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                probe.connect(("8.8.8.8", 80))
+                add_candidate(probe.getsockname()[0])
+            finally:
+                probe.close()
+        except OSError:
+            logger.debug("Outbound IP probe failed during discovery host selection", exc_info=True)
+
+        try:
+            hostname = socket.gethostname()
+            for family, _, _, _, sockaddr in socket.getaddrinfo(hostname, None, socket.AF_INET):
+                if family == socket.AF_INET and sockaddr:
+                    add_candidate(sockaddr[0])
+        except OSError:
+            logger.debug("Hostname address lookup failed during discovery host selection", exc_info=True)
+
+        if host == "0.0.0.0" or not candidates:
+            add_candidate("0.0.0.0")
+
+        return candidates
+
     def start(self) -> None:
         authority = os.environ.get("NANODLNA_DISCOVERY_AUTHORITY", "legacy").strip().lower()
         if authority == "unified":
@@ -168,41 +214,47 @@ class DiscoveryCoordinator:
         logger.info("Discovery loop exited")
 
     def discover_dlna_devices(self, timeout: float = 2.0, host: Optional[str] = None) -> List[Dict[str, Any]]:
-        if not host:
-            host = "0.0.0.0"
-        logger.debug("Searching for DLNA devices on %s", host)
-
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-        try:
-            ttl = struct.pack("B", 4)
-            sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl)
-            sock.bind((host, 0))
-
-            logger.debug("Sending SSDP broadcast message")
-            sock.sendto(SSDP_BROADCAST_MSG.encode("UTF-8"), (SSDP_BROADCAST_ADDR, SSDP_BROADCAST_PORT))
-        except OSError as exc:
-            logger.warning("DLNA discovery send failed on host %s: %s", host, exc)
-            sock.close()
-            return []
-
-        logger.debug("Waiting for DLNA devices (%s seconds)", timeout)
-        sock.settimeout(timeout)
-
         devices = []
-        while True:
-            try:
-                data, _addr = sock.recvfrom(1024)
-            except socket.timeout:
-                break
+        attempted_hosts = self._candidate_discovery_hosts(host)
+        logger.debug("Searching for DLNA devices on candidate hosts %s", attempted_hosts)
 
+        for candidate_host in attempted_hosts:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
             try:
-                info = [line.split(":", 1) for line in data.decode("UTF-8").split("\r\n")[1:]]
-                device = {left[0].strip().lower(): left[1].strip() for left in info if len(left) >= 2}
-                devices.append(device)
-            except Exception as exc:
-                logger.error("Error parsing DLNA device response: %s", exc)
+                ttl = struct.pack("B", 4)
+                sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl)
+                if candidate_host != "0.0.0.0":
+                    sock.setsockopt(
+                        socket.IPPROTO_IP,
+                        socket.IP_MULTICAST_IF,
+                        socket.inet_aton(candidate_host),
+                    )
+                sock.bind((candidate_host, 0))
 
-        sock.close()
+                logger.debug("Sending SSDP broadcast message on %s", candidate_host)
+                sock.sendto(SSDP_BROADCAST_MSG.encode("UTF-8"), (SSDP_BROADCAST_ADDR, SSDP_BROADCAST_PORT))
+                sock.settimeout(timeout)
+
+                while True:
+                    try:
+                        data, _addr = sock.recvfrom(1024)
+                    except socket.timeout:
+                        break
+
+                    try:
+                        info = [line.split(":", 1) for line in data.decode("UTF-8").split("\r\n")[1:]]
+                        device = {
+                            left[0].strip().lower(): left[1].strip()
+                            for left in info
+                            if len(left) >= 2
+                        }
+                        devices.append(device)
+                    except Exception as exc:
+                        logger.error("Error parsing DLNA device response: %s", exc)
+            except OSError as exc:
+                logger.warning("DLNA discovery send failed on host %s: %s", candidate_host, exc)
+            finally:
+                sock.close()
 
         devices_urls = [
             dev["location"]
