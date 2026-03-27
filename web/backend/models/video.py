@@ -21,6 +21,9 @@ class VideoModel(Base):
     category = Column(String, nullable=False, default="background")
     source_type = Column(String, nullable=False, default="upload")
     source_directory_id = Column(Integer, nullable=True)
+    preprocessing_status = Column(String, nullable=False, default="pending")
+    preprocessing_error = Column(String, nullable=True)
+    overlay_optimized = Column(Boolean, default=False, nullable=False)
     has_subtitle = Column(Boolean, default=False, nullable=False)
     subtitle_path = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -48,6 +51,9 @@ class VideoModel(Base):
             "category": self.category,
             "source_type": self.source_type,
             "source_directory_id": self.source_directory_id,
+            "preprocessing_status": self.preprocessing_status,
+            "preprocessing_error": self.preprocessing_error,
+            "overlay_optimized": self.overlay_optimized,
             "has_subtitle": self.has_subtitle,
             "subtitle_path": self.subtitle_path,
             "created_at": self.created_at.isoformat() if self.created_at else None,

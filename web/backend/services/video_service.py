@@ -2,6 +2,7 @@ import os
 import logging
 import shutil
 import socket
+import tempfile
 from typing import List, Optional, Dict, Any, BinaryIO
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
@@ -15,6 +16,13 @@ from core.twisted_streaming import get_instance as get_twisted_streaming
 from database.database import ensure_sqlite_schema_compatibility, get_db
 
 logger = logging.getLogger(__name__)
+
+PREPROCESS_ENABLED = os.environ.get("NANODLNA_PREPROCESS_VIDEOS", "1").lower() not in {"0", "false", "no"}
+PREPROCESS_EXTENSIONS = {".mp4", ".m4v", ".mov", ".mkv"}
+PREPROCESS_CRF = os.environ.get("NANODLNA_PREPROCESS_CRF", "23")
+PREPROCESS_PRESET = os.environ.get("NANODLNA_PREPROCESS_PRESET", "medium")
+PREPROCESS_FPS = os.environ.get("NANODLNA_PREPROCESS_FPS", "30")
+PREPROCESS_WIDTH = os.environ.get("NANODLNA_PREPROCESS_WIDTH", "1920")
 
 def get_video_service(db: Session = Depends(get_db)) -> 'VideoService':
     """
@@ -115,7 +123,7 @@ class VideoService:
             # Check if the video file exists
             if not os.path.exists(video.path):
                 raise ValueError(f"Video file not found: {video.path}")
-            
+
             # Check for duplicate path
             existing = self.get_video_by_path(video.path)
             if existing:
@@ -148,6 +156,9 @@ class VideoService:
                 category=video.category,
                 source_type=video.source_type,
                 source_directory_id=video.source_directory_id,
+                preprocessing_status=video.preprocessing_status or "pending",
+                preprocessing_error=video.preprocessing_error,
+                overlay_optimized=bool(video.overlay_optimized),
                 has_subtitle=bool(has_subtitle),  # Ensure it's a boolean
                 subtitle_path=subtitle_path,
             )
@@ -208,6 +219,9 @@ class VideoService:
                 subtitle_path = self._find_subtitle_file(path)
                 update_data["has_subtitle"] = subtitle_path is not None
                 update_data["subtitle_path"] = subtitle_path
+                update_data["preprocessing_status"] = "pending"
+                update_data["preprocessing_error"] = None
+                update_data["overlay_optimized"] = False
             
             # Update the video
             for key, value in update_data.items():
@@ -276,10 +290,16 @@ class VideoService:
             # Save the file
             with open(file_path, "wb") as f:
                 shutil.copyfileobj(file, f)
-            
+
             # Create the video
-            video_name = name or os.path.splitext(filename)[0]
-            video = VideoCreate(name=video_name, path=file_path)
+            video_name = name or os.path.splitext(os.path.basename(file_path))[0]
+            video = VideoCreate(
+                name=video_name,
+                path=file_path,
+                preprocessing_status="pending",
+                preprocessing_error=None,
+                overlay_optimized=False,
+            )
             
             return self.create_video(video)
         except Exception as e:
@@ -417,6 +437,135 @@ class VideoService:
         except Exception as e:
             logger.error(f"Error getting video metadata: {e}")
             return None, None, None
+
+    def _preprocess_video_for_overlay(self, path: str) -> str:
+        """
+        Normalize a video for overlay playback.
+
+        This strips audio and re-encodes to a browser-friendly H.264 profile.
+        When the container supports it, the source file is replaced in place.
+        """
+        if not PREPROCESS_ENABLED:
+            return path
+
+        ext = os.path.splitext(path)[1].lower()
+        if ext not in PREPROCESS_EXTENSIONS:
+            logger.info("Skipping preprocessing for %s due to unsupported in-place container", path)
+            return path
+
+        if not os.path.exists(path):
+            raise ValueError(f"Video file not found: {path}")
+
+        temp_handle = None
+        temp_output_path = None
+        try:
+            directory = os.path.dirname(path) or "."
+            temp_handle = tempfile.NamedTemporaryFile(
+                prefix=".preprocess_",
+                suffix=ext,
+                dir=directory,
+                delete=False,
+            )
+            temp_output_path = temp_handle.name
+            temp_handle.close()
+
+            ffmpeg_cmd = [
+                "ffmpeg",
+                "-y",
+                "-i",
+                path,
+                "-an",
+                "-c:v",
+                "libx264",
+                "-preset",
+                PREPROCESS_PRESET,
+                "-crf",
+                PREPROCESS_CRF,
+                "-pix_fmt",
+                "yuv420p",
+                "-r",
+                PREPROCESS_FPS,
+                "-vf",
+                f"scale='min(iw,{PREPROCESS_WIDTH})':-2:force_original_aspect_ratio=decrease",
+            ]
+
+            if ext in {".mp4", ".m4v", ".mov"}:
+                ffmpeg_cmd.extend(["-movflags", "+faststart"])
+
+            ffmpeg_cmd.append(temp_output_path)
+
+            logger.info("Preprocessing video for overlay playback: %s", path)
+            result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                stderr = (result.stderr or "").strip()
+                logger.error("Video preprocessing failed for %s: %s", path, stderr)
+                raise ValueError(f"Failed to preprocess video {os.path.basename(path)}")
+
+            os.replace(temp_output_path, path)
+            logger.info("Preprocessed video in place: %s", path)
+            return path
+        finally:
+            if temp_handle is not None:
+                try:
+                    temp_handle.close()
+                except Exception:
+                    pass
+            if temp_output_path and os.path.exists(temp_output_path):
+                try:
+                    os.unlink(temp_output_path)
+                except OSError:
+                    logger.debug("Failed to remove temporary preprocessed file: %s", temp_output_path)
+
+    def process_video_for_overlay(self, video_id: int) -> Optional[VideoModel]:
+        """
+        Process a queued video for overlay playback.
+        """
+        db_video = self.get_video_by_id(video_id)
+        if not db_video:
+            return None
+
+        if not os.path.exists(db_video.path):
+            db_video.preprocessing_status = "failed"
+            db_video.preprocessing_error = f"Video file not found: {db_video.path}"
+            db_video.overlay_optimized = False
+            self.db.commit()
+            self.db.refresh(db_video)
+            return db_video
+
+        db_video.preprocessing_status = "processing"
+        db_video.preprocessing_error = None
+        self.db.commit()
+        self.db.refresh(db_video)
+
+        try:
+            ext = os.path.splitext(db_video.path)[1].lower()
+            optimized_path = self._preprocess_video_for_overlay(db_video.path)
+            optimized = ext in PREPROCESS_EXTENSIONS and optimized_path == db_video.path
+
+            db_video.path = optimized_path
+            db_video.file_name = os.path.basename(optimized_path)
+            db_video.file_size = os.path.getsize(optimized_path)
+            db_video.duration, db_video.format, db_video.resolution = self._get_video_metadata(optimized_path)
+            subtitle_path = self._find_subtitle_file(optimized_path)
+            db_video.has_subtitle = subtitle_path is not None
+            db_video.subtitle_path = subtitle_path
+            db_video.overlay_optimized = optimized
+            db_video.preprocessing_status = "ready"
+            db_video.preprocessing_error = None
+            self.db.commit()
+            self.db.refresh(db_video)
+            return db_video
+        except Exception as exc:
+            self.db.rollback()
+            db_video = self.get_video_by_id(video_id)
+            if db_video:
+                db_video.preprocessing_status = "failed"
+                db_video.preprocessing_error = str(exc)
+                db_video.overlay_optimized = False
+                self.db.commit()
+                self.db.refresh(db_video)
+            logger.error("Error preprocessing video %s: %s", video_id, exc)
+            return db_video
     
     def _find_subtitle_file(self, video_path: str) -> Optional[str]:
         """

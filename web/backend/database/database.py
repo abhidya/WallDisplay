@@ -61,6 +61,18 @@ def ensure_sqlite_schema_compatibility():
                 connection.exec_driver_sql(
                     "ALTER TABLE videos ADD COLUMN source_directory_id INTEGER"
                 )
+            if "preprocessing_status" not in video_columns:
+                connection.exec_driver_sql(
+                    "ALTER TABLE videos ADD COLUMN preprocessing_status VARCHAR NOT NULL DEFAULT 'pending'"
+                )
+            if "preprocessing_error" not in video_columns:
+                connection.exec_driver_sql(
+                    "ALTER TABLE videos ADD COLUMN preprocessing_error VARCHAR"
+                )
+            if "overlay_optimized" not in video_columns:
+                connection.exec_driver_sql(
+                    "ALTER TABLE videos ADD COLUMN overlay_optimized BOOLEAN NOT NULL DEFAULT 0"
+                )
 
         if "overlay_configs" in tables:
             overlay_columns = set(_sqlite_column_names(connection, "overlay_configs"))

@@ -18,6 +18,7 @@ from core.twisted_streaming import get_instance as get_twisted_streaming
 from core.streaming_service import get_streaming_service
 from services.overlay_cast_service import get_overlay_cast_service
 from services.app_runtime import get_app_runtime
+from services.video_preprocessing_service import get_video_preprocessing_service
 
 # Configure logging - check if already configured by run.py
 import logging.handlers
@@ -143,6 +144,7 @@ streaming_service = None
 streaming_registry = None
 renderer_service = None
 migration_adapter = None
+video_preprocessing_service = None
 
 
 def _resolve_config_path(root_dir: str, path_value: str) -> str:
@@ -178,7 +180,7 @@ def _get_startup_config_files(root_dir: str, backend_dir: str) -> List[str]:
 # Mount static files for the frontend
 @app.on_event("startup")
 async def startup_event():
-    global device_manager, streaming_service, streaming_registry, renderer_service, migration_adapter
+    global device_manager, streaming_service, streaming_registry, renderer_service, migration_adapter, video_preprocessing_service
     
     logger.info("Starting nano-dlna Dashboard API")
     
@@ -220,6 +222,12 @@ async def startup_event():
         logger.info("Database initialized")
     except Exception as e:
         logger.error(f"Error initializing database: {e}")
+
+    try:
+        video_preprocessing_service = get_video_preprocessing_service()
+        video_preprocessing_service.start()
+    except Exception as e:
+        logger.error(f"Failed to start video preprocessing worker: {e}")
     
     # Create and set device service
     try:
@@ -296,7 +304,7 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    global migration_adapter
+    global migration_adapter, video_preprocessing_service
     logger.info("Shutting down nano-dlna Dashboard API")
     
     # Stop log aggregation service
@@ -327,6 +335,13 @@ async def shutdown_event():
     if app_runtime:
         app_runtime.stop_background_services()
         migration_adapter = app_runtime.migration_adapter
+    if video_preprocessing_service is not None:
+        try:
+            video_preprocessing_service.stop()
+        except Exception as e:
+            logger.error(f"Failed to stop video preprocessing worker: {e}")
+        finally:
+            video_preprocessing_service = None
     
     # Stop renderer service if it's running
     if renderer_service:
