@@ -302,11 +302,23 @@ class OverlayService:
                 ttl_seconds=60,
                 loader=lambda: self._fetch_google_calendar_events(api_configs),
             )
+        if "weather" in widget_types:
+            data["weather"] = self._cached_live_widget_value(
+                f"weather:{config_id}:{api_revision}",
+                ttl_seconds=300,
+                loader=lambda: self._fetch_weather_summary(api_configs),
+            )
         if "gmail" in widget_types:
             data["gmail"] = self._cached_live_widget_value(
                 f"gmail:{config_id}:{api_revision}",
                 ttl_seconds=20,
                 loader=lambda: self._fetch_gmail_summary(api_configs),
+            )
+        if "transit" in widget_types:
+            data["transit"] = self._cached_live_widget_value(
+                f"transit:{config_id}:{api_revision}",
+                ttl_seconds=30,
+                loader=lambda: self._fetch_transit_predictions(api_configs),
             )
         if "steam" in widget_types:
             data["steam"] = self._cached_live_widget_value(
@@ -411,6 +423,97 @@ class OverlayService:
         response.raise_for_status()
         payload = response.json()
         return payload.get("access_token", "")
+
+    def _fetch_default_city(self) -> str:
+        cache_key = "weather-default-city"
+        cached = self._cached_live_widget_value(cache_key, ttl_seconds=3600, loader=lambda: {"_city_loader": True})
+        if isinstance(cached, dict) and cached.get("city"):
+            return str(cached["city"])
+
+        city = "San Francisco"
+        try:
+            response = requests.get("https://ipinfo.io/json", timeout=5)
+            response.raise_for_status()
+            city = ((response.json() or {}).get("city") or city).strip() or city
+        except Exception:
+            pass
+
+        with _LIVE_WIDGET_CACHE_LOCK:
+            _LIVE_WIDGET_CACHE[cache_key] = {
+                "expires_at": time.time() + 3600,
+                "value": {"city": city},
+            }
+        return city
+
+    def _fetch_weather_summary(self, api_configs: Dict[str, Any]) -> Dict[str, Any]:
+        api_key = self._resolve_api_config(api_configs, "weather_api_key", "WEATHER_API_KEY")
+        if not api_key:
+            return {"status": "unconfigured"}
+
+        city = self._fetch_default_city()
+        response = requests.get(
+            "https://api.openweathermap.org/data/2.5/weather",
+            params={
+                "q": city,
+                "appid": api_key,
+                "units": "imperial",
+            },
+            timeout=10,
+        )
+        response.raise_for_status()
+        payload = response.json() or {}
+        weather_info = (payload.get("weather") or [{}])[0]
+        main = payload.get("main") or {}
+        wind = payload.get("wind") or {}
+        return {
+            "status": "active",
+            "temperature": main.get("temp"),
+            "humidity": main.get("humidity"),
+            "windSpeed": wind.get("speed", 0),
+            "windDirection": wind.get("deg", 0),
+            "conditions": weather_info.get("main", ""),
+            "description": weather_info.get("description", "Weather unavailable"),
+            "location": payload.get("name") or city,
+        }
+
+    def _fetch_transit_predictions(self, api_configs: Dict[str, Any]) -> Dict[str, Any]:
+        stop_id = self._resolve_api_config(api_configs, "transit_stop_id", "TRANSIT_STOP_ID")
+        if not stop_id:
+            return {"status": "unconfigured", "routes": []}
+
+        response = requests.get(
+            f"https://webservices.umoiq.com/api/pub/v1/agencies/sfmta-cis/stopcodes/{quote(stop_id, safe='')}/predictions",
+            params={"key": "0be8ebd0284ce712a63f29dcaf7798c4"},
+            timeout=10,
+        )
+        response.raise_for_status()
+        payload = response.json() or []
+        routes = []
+        for route_data in payload:
+            values = route_data.get("values") or []
+            times = sorted(
+                [
+                    value.get("minutes")
+                    for value in values
+                    if value.get("minutes") is not None
+                ]
+            )
+            if not times:
+                continue
+            route = route_data.get("route") or {}
+            routes.append(
+                {
+                    "title": route.get("title") or route.get("id") or "Route",
+                    "id": route.get("id") or "",
+                    "times": times,
+                }
+            )
+
+        return {
+            "status": "active" if routes else "idle",
+            "routes": routes,
+            "stop_id": stop_id,
+        }
 
     def _spotify_currently_playing(self, access_token: str) -> requests.Response:
         return requests.get(

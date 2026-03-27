@@ -26,6 +26,7 @@
             width: 100%;
             height: 100%;
             transform-origin: center;
+            will-change: transform;
         }
 
         #video-container,
@@ -57,21 +58,22 @@
             height: 100%;
             display: block;
             background: black;
+            will-change: transform;
         }
         
         /* Widget base styles */
         .widget {
             position: absolute;
-            background: rgba(0, 0, 0, 0.8);
+            background: rgba(20, 20, 20, 0.92);
             color: white;
             padding: 20px;
             border-radius: 10px;
             cursor: move;
             user-select: none;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            transition: box-shadow 0.3s ease;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            transition: opacity 0.15s ease;
             overflow: visible;
+            contain: layout paint style;
         }
         
         /* Blackout overlay */
@@ -153,13 +155,13 @@
         }
         
         .widget:hover {
-            box-shadow: 0 0 20px rgba(255, 255, 255, 0.2);
+            box-shadow: 0 0 8px rgba(255, 255, 255, 0.12);
         }
         
         .widget.dragging {
-            opacity: 0.8;
+            opacity: 0.9;
             z-index: 1000;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            will-change: transform;
         }
         
         .widget-handle {
@@ -789,7 +791,7 @@
         
         /* Active flipping state */
         .flap-char.flipping-active {
-            box-shadow: 0 0 10px rgba(255, 204, 0, 0.5);
+            box-shadow: none;
         }
         
         /* Single flip animation */
@@ -815,7 +817,8 @@
         
         /* Blur during rapid flipping */
         .flap-char.flipping-active:not(.flip) {
-            filter: blur(0.8px);
+            filter: none;
+            opacity: 0.95;
         }
         
         /* Section labels */
@@ -1037,28 +1040,6 @@
     
     <script src="/backend-static/js/vendor/gifler.min.js"></script>
     <script src="/backend-static/js/projection/animation_engine.js"></script>
-    <script src="/backend-static/js/projection/animations/shadertoy_single_pass.js"></script>
-    <script src="/backend-static/js/projection/animations/shadertoy_multi_pass.js"></script>
-    <script src="/backend-static/js/projection/animations/neural_noise.js"></script>
-    <script src="/backend-static/js/projection/animations/moving_clouds.js"></script>
-    <script src="/backend-static/js/projection/animations/koi_fish.js"></script>
-    <script src="/backend-static/js/projection/animations/swimming_fish.js"></script>
-    <script src="/backend-static/js/projection/animations/blob_fish.js"></script>
-    <script src="/backend-static/js/projection/animations/fish_pond.js"></script>
-    <script src="/backend-static/js/projection/animations/koi_pond_8bit.js"></script>
-    <script src="/backend-static/js/projection/animations/pokedex.js"></script>
-    <script src="/backend-static/js/projection/animations/moon_view.js"></script>
-    <script src="/backend-static/js/projection/animations/meduses.js"></script>
-    <script src="/backend-static/js/projection/animations/kelp_forest.js"></script>
-    <script src="/backend-static/js/projection/animations/train_up_in_the_cloud_sea.js"></script>
-    <script src="/backend-static/js/projection/animations/cyber_fuji_2020.js"></script>
-    <script src="/backend-static/js/projection/animations/whale_raymarching.js"></script>
-    <script src="/backend-static/js/projection/animations/fractal_land.js"></script>
-    <script src="/backend-static/js/projection/animations/swarming_anchoveta.js"></script>
-    <script src="/backend-static/js/projection/animations/spectrum_bars.js"></script>
-    <script src="/backend-static/js/projection/animations/webgl_flowers.js"></script>
-    <script src="/backend-static/js/projection/animations/rainstorm.js"></script>
-    <script src="/backend-static/js/projection/animations/pride_spectrum.js"></script>
     <script src="/backend-static/js/widgets/dothebay_lgbtq_widget.js"></script>
     <script>
         let config = null;
@@ -1070,14 +1051,22 @@
         let mappingMediaCache = new Map();
         let mappingMediaState = new Map();
         let mappingMediaAdvanceTimers = new Map();
+        let mappingGroupRenderCache = new Map();
+        let mappingSharedSourceMeta = new Map();
+        let mappingSharedAnimationStates = new Map();
+        let mappingRenderableGroups = [];
         let mappingAnimationFrame = null;
         let mappingAnimationEngine = null;
+        let mappingCanvasContext = null;
+        let mappingLastRenderTimestamp = 0;
+        let mappingDirty = true;
         let animationListCache = new Map();
         let latestMappingWeather = null;
         let latestMappingTransit = null;
         const MIN_MAPPING_CLIP_SECONDS = 60;
         const MAPPING_IMAGE_ADVANCE_MS = 10000;
         const MAPPING_IMAGE_CROSSFADE_MS = 1400;
+        const MAPPING_TARGET_FRAME_MS = 1000 / 30;
         let isDragging = false;
         let isResizing = false;
         let isRotating = false;
@@ -1089,10 +1078,170 @@
         let dataUpdateIntervals = {};
         let appleHealthWidgetInstances = new Map();
         let doTheBayWidgetInstances = new Map();
+        let widgetElementsByType = new Map();
+        let liveWidgetFetchInFlight = false;
+        let lastLiveWidgetPayloadKey = '';
+        let lastRenderedTimeString = '';
+        let lastRenderedDateString = '';
         let initialUrlParams = new URLSearchParams(window.location.search);
         let currentConfigId = initialUrlParams.get('config_id');
         let currentConfigRevision = null;
         let refreshStatePollInterval = null;
+        let widgetLayoutFrame = null;
+        let dirtyWidgetIds = new Set();
+        const loadedAnimationScripts = new Set();
+        const animationScriptPromises = new Map();
+        const ANIMATION_SCRIPT_MANIFEST = {
+            shadertoy_single_pass: {
+                src: '/backend-static/js/projection/animations/shadertoy_single_pass.js',
+            },
+            shadertoy_multi_pass: {
+                src: '/backend-static/js/projection/animations/shadertoy_multi_pass.js',
+            },
+            neural_noise: {
+                src: '/backend-static/js/projection/animations/neural_noise.js',
+            },
+            moving_clouds: {
+                src: '/backend-static/js/projection/animations/moving_clouds.js',
+            },
+            koi_fish: {
+                src: '/backend-static/js/projection/animations/koi_fish.js',
+            },
+            swimming_fish: {
+                src: '/backend-static/js/projection/animations/swimming_fish.js',
+            },
+            blob_fish: {
+                src: '/backend-static/js/projection/animations/blob_fish.js',
+            },
+            fish_pond: {
+                src: '/backend-static/js/projection/animations/fish_pond.js',
+            },
+            koi_pond_8bit: {
+                src: '/backend-static/js/projection/animations/koi_pond_8bit.js',
+            },
+            pokedex: {
+                src: '/backend-static/js/projection/animations/pokedex.js',
+            },
+            moon_view: {
+                src: '/backend-static/js/projection/animations/moon_view.js',
+            },
+            meduses: {
+                src: '/backend-static/js/projection/animations/meduses.js',
+            },
+            kelp_forest: {
+                src: '/backend-static/js/projection/animations/kelp_forest.js',
+            },
+            train_up_in_the_cloud_sea: {
+                src: '/backend-static/js/projection/animations/train_up_in_the_cloud_sea.js',
+            },
+            cyber_fuji_2020: {
+                src: '/backend-static/js/projection/animations/cyber_fuji_2020.js',
+                deps: ['shadertoy_single_pass'],
+            },
+            whale_raymarching: {
+                src: '/backend-static/js/projection/animations/whale_raymarching.js',
+                deps: ['shadertoy_single_pass'],
+            },
+            fractal_land: {
+                src: '/backend-static/js/projection/animations/fractal_land.js',
+                deps: ['shadertoy_single_pass'],
+            },
+            swarming_anchoveta: {
+                src: '/backend-static/js/projection/animations/swarming_anchoveta.js',
+                deps: ['shadertoy_multi_pass'],
+            },
+            spectrum_bars: {
+                src: '/backend-static/js/projection/animations/spectrum_bars.js',
+            },
+            webgl_flowers: {
+                src: '/backend-static/js/projection/animations/webgl_flowers.js',
+            },
+            rainstorm: {
+                src: '/backend-static/js/projection/animations/rainstorm.js',
+            },
+            pride_spectrum: {
+                src: '/backend-static/js/projection/animations/pride_spectrum.js',
+            },
+        };
+
+        function loadScriptOnce(src) {
+            if (loadedAnimationScripts.has(src)) {
+                return Promise.resolve();
+            }
+            if (animationScriptPromises.has(src)) {
+                return animationScriptPromises.get(src);
+            }
+            const promise = new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = src;
+                script.async = true;
+                script.onload = () => {
+                    loadedAnimationScripts.add(src);
+                    resolve();
+                };
+                script.onerror = () => reject(new Error(`Failed to load script ${src}`));
+                document.head.appendChild(script);
+            });
+            animationScriptPromises.set(src, promise);
+            return promise;
+        }
+
+        async function ensureAnimationScriptLoaded(animationId) {
+            if (!animationId) {
+                return;
+            }
+            const manifestEntry = ANIMATION_SCRIPT_MANIFEST[animationId] || {
+                src: `/backend-static/js/projection/animations/${animationId}.js`,
+            };
+            await Promise.all((manifestEntry.deps || []).map(ensureAnimationScriptLoaded));
+            await loadScriptOnce(manifestEntry.src);
+            if (mappingAnimationEngine?.registerBuiltInAnimations) {
+                mappingAnimationEngine.registerBuiltInAnimations();
+            }
+        }
+
+        function applyWidgetLayout(widgetEl, widget) {
+            if (!widgetEl || !widget) {
+                return;
+            }
+            widgetEl.style.width = `${widget.size.width}px`;
+            widgetEl.style.height = `${widget.size.height}px`;
+            widgetEl.style.transform = `translate3d(${widget.position.x}px, ${widget.position.y}px, 0) rotate(${widget.rotation || 0}deg)`;
+        }
+
+        function flushDirtyWidgetLayouts() {
+            widgetLayoutFrame = null;
+            dirtyWidgetIds.forEach((widgetId) => {
+                const widget = widgets.find((item) => item.id === widgetId);
+                const widgetEl = document.getElementById(widgetId);
+                if (widget && widgetEl) {
+                    applyWidgetLayout(widgetEl, widget);
+                }
+            });
+            dirtyWidgetIds.clear();
+        }
+
+        function scheduleWidgetLayout(widgetId) {
+            if (!widgetId) {
+                return;
+            }
+            dirtyWidgetIds.add(widgetId);
+            if (widgetLayoutFrame != null) {
+                return;
+            }
+            widgetLayoutFrame = requestAnimationFrame(flushDirtyWidgetLayouts);
+        }
+
+        function registerWidgetElement(widgetType, widgetEl) {
+            if (!widgetElementsByType.has(widgetType)) {
+                widgetElementsByType.set(widgetType, []);
+            }
+            widgetElementsByType.get(widgetType).push(widgetEl);
+        }
+
+        function getWidgetElements(widgetType) {
+            return widgetElementsByType.get(widgetType) || [];
+        }
 
         function createAppleHealthStatsWidget(root) {
             let currentConfig = {};
@@ -1613,6 +1762,10 @@
             mappingMediaAdvanceTimers.clear();
         }
 
+        function markMappingDirty() {
+            mappingDirty = true;
+        }
+
         function resetMappingPlaybackState() {
             clearMappingAdvanceTimers();
             if (mappingAnimationFrame) {
@@ -1631,6 +1784,13 @@
             mappingMaskCache = new Map();
             mappingMediaCache = new Map();
             mappingMediaState = new Map();
+            mappingGroupRenderCache = new Map();
+            mappingSharedSourceMeta = new Map();
+            mappingSharedAnimationStates = new Map();
+            mappingRenderableGroups = [];
+            mappingCanvasContext = null;
+            mappingLastRenderTimestamp = 0;
+            mappingDirty = true;
         }
 
         function getNextMappingSourceIndex(state, group) {
@@ -1680,6 +1840,7 @@
                     latestState.transitionDuration = MAPPING_IMAGE_CROSSFADE_MS;
                     mappingMediaCache.set(group.id, nextImage);
                     mappingMediaState.set(group.id, latestState);
+                    markMappingDirty();
                     scheduleImageAdvance(group, latestState);
                 };
                 nextImage.onerror = () => {
@@ -1698,8 +1859,10 @@
             canvas.width = scene.canvas_width || 1280;
             canvas.height = scene.canvas_height || 720;
             resetMappingPlaybackState();
+            mappingCanvasContext = canvas.getContext('2d');
             mappingAnimationEngine = new AnimationEngine();
             await Promise.all((scene.masks || []).map(loadMappingMask));
+            prepareMappingGroupRenderCaches(scene, canvas.width, canvas.height);
             await Promise.all((scene.groups || []).map(loadGroupMedia));
             if (mappingAnimationEngine && (latestMappingWeather || latestMappingTransit)) {
                 mappingAnimationEngine.updateData({
@@ -1707,11 +1870,137 @@
                     transit: latestMappingTransit,
                 });
             }
+            markMappingDirty();
             startMappingRenderLoop();
         }
 
         function getGroupMaskImages(group) {
             return (group.mask_ids || []).map(maskId => mappingMaskCache.get(maskId)).filter(Boolean);
+        }
+
+        function mergeBounds(a, b) {
+            const minX = Math.min(a.x, b.x);
+            const minY = Math.min(a.y, b.y);
+            const maxX = Math.max(a.x + a.width, b.x + b.width);
+            const maxY = Math.max(a.y + a.height, b.y + b.height);
+            return {
+                x: minX,
+                y: minY,
+                width: Math.max(1, maxX - minX),
+                height: Math.max(1, maxY - minY),
+            };
+        }
+
+        function getGroupSharedSourceKey(group) {
+            const bindingType = (group.media_binding_type || '').toLowerCase();
+            if (bindingType === 'animation' && group.animation_id) {
+                return `animation:${group.animation_id}`;
+            }
+            if (bindingType === 'animation_list' && group.animation_list_id) {
+                return `animation_list:${group.animation_list_id}`;
+            }
+            const mediaSources = Array.isArray(group.media_urls) && group.media_urls.length
+                ? group.media_urls
+                : (group.media_url ? [group.media_url] : []);
+            if (mediaSources.length) {
+                return `${bindingType}:${mediaSources.join('|')}`;
+            }
+            return `${bindingType}:group:${group.id}`;
+        }
+
+        function applySharedSourceState(sourceKey, state) {
+            const sharedMeta = mappingSharedSourceMeta.get(sourceKey);
+            const groupIds = sharedMeta?.groupIds || [];
+            groupIds.forEach((groupId) => {
+                mappingMediaCache.set(groupId, state.element);
+                mappingMediaState.set(groupId, state);
+            });
+        }
+
+        function buildCombinedMaskCanvas(maskImages, width, height) {
+            const maskCanvas = document.createElement('canvas');
+            maskCanvas.width = width;
+            maskCanvas.height = height;
+            const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
+            const combinedImageData = maskCtx.createImageData(width, height);
+            const combinedPixels = combinedImageData.data;
+
+            maskImages.forEach((image) => {
+                maskCtx.clearRect(0, 0, width, height);
+                maskCtx.drawImage(image, 0, 0, width, height);
+                const { data } = maskCtx.getImageData(0, 0, width, height);
+
+                for (let i = 0; i < data.length; i += 4) {
+                    const alpha = data[i + 3];
+                    if (alpha <= 5) {
+                        continue;
+                    }
+
+                    const lum = (data[i] + data[i + 1] + data[i + 2]) / 3;
+                    if (lum > combinedPixels[i + 3]) {
+                        combinedPixels[i] = 255;
+                        combinedPixels[i + 1] = 255;
+                        combinedPixels[i + 2] = 255;
+                        combinedPixels[i + 3] = lum > 127 ? 255 : 0;
+                    }
+                }
+            });
+
+            maskCtx.putImageData(combinedImageData, 0, 0);
+            return maskCanvas;
+        }
+
+        function prepareMappingGroupRenderCaches(scene, canvasWidth, canvasHeight) {
+            mappingGroupRenderCache = new Map();
+            mappingSharedSourceMeta = new Map();
+            mappingRenderableGroups = (scene.groups || [])
+                .filter(group => group.visible !== false && group.mask_ids && group.mask_ids.length)
+                .sort((a, b) => (a.z_index || 0) - (b.z_index || 0));
+
+            mappingRenderableGroups.forEach((group) => {
+                const maskImages = getGroupMaskImages(group);
+                if (!maskImages.length) {
+                    return;
+                }
+
+                const bounds = computeMaskBounds(maskImages, canvasWidth, canvasHeight);
+                const sourceKey = getGroupSharedSourceKey(group);
+                const groupCanvas = document.createElement('canvas');
+                groupCanvas.width = canvasWidth;
+                groupCanvas.height = canvasHeight;
+                const maskCanvas = buildCombinedMaskCanvas(maskImages, canvasWidth, canvasHeight);
+                const sharedMeta = mappingSharedSourceMeta.get(sourceKey);
+                if (sharedMeta) {
+                    sharedMeta.bounds = mergeBounds(sharedMeta.bounds, bounds);
+                    sharedMeta.groupIds.push(group.id);
+                } else {
+                    mappingSharedSourceMeta.set(sourceKey, {
+                        sourceKey,
+                        bounds,
+                        groupIds: [group.id],
+                    });
+                }
+
+                mappingGroupRenderCache.set(group.id, {
+                    maskImages,
+                    bounds,
+                    sourceKey,
+                    groupCanvas,
+                    groupCtx: groupCanvas.getContext('2d'),
+                    maskCanvas,
+                    staticLayerCanvas: null,
+                    staticLayerCtx: null,
+                    staticLayerKey: '',
+                });
+            });
+
+            mappingGroupRenderCache.forEach((renderCache) => {
+                const sharedMeta = mappingSharedSourceMeta.get(renderCache.sourceKey);
+                if (sharedMeta?.bounds) {
+                    renderCache.bounds = sharedMeta.bounds;
+                }
+            });
+            markMappingDirty();
         }
 
         async function fetchAnimationList(animationListId) {
@@ -1741,7 +2030,7 @@
             clearMappingAdvanceTimer(groupId);
         }
 
-        function createAnimationMediaState(group, animationId, bounds) {
+        function createAnimationMediaState(group, animationId, bounds, sourceKey = null) {
             if (!mappingAnimationEngine || !animationId) {
                 return null;
             }
@@ -1771,8 +2060,10 @@
                 return null;
             }
             animation.start();
+            markMappingDirty();
             return {
                 groupId: group.id,
+                sourceKey,
                 type: 'animation',
                 element: animation.canvas,
                 animation,
@@ -1798,7 +2089,7 @@
                 }
                 const ids = animationList.animation_ids || [];
                 const nextIndex = (latestState.currentIndex + 1) % ids.length;
-                const nextBaseState = createAnimationMediaState(group, ids[nextIndex], bounds);
+                const nextBaseState = createAnimationMediaState(group, ids[nextIndex], bounds, latestState.sourceKey || null);
                 if (!nextBaseState) {
                     scheduleAnimationListAdvance(group, bounds, animationList);
                     return;
@@ -1808,12 +2099,21 @@
                 const nextState = {
                     ...nextBaseState,
                     type: 'animation_list',
+                    sourceKey: latestState.sourceKey || null,
                     listId: animationList.id,
                     currentIndex: nextIndex,
                     animationIds: ids,
                 };
-                mappingMediaCache.set(group.id, nextBaseState.element);
-                mappingMediaState.set(group.id, nextState);
+                if (nextState.sourceKey) {
+                    mappingSharedAnimationStates.set(nextState.sourceKey, {
+                        ownerGroupId: group.id,
+                        state: nextState,
+                    });
+                    applySharedSourceState(nextState.sourceKey, nextState);
+                } else {
+                    mappingMediaCache.set(group.id, nextBaseState.element);
+                    mappingMediaState.set(group.id, nextState);
+                }
                 scheduleAnimationListAdvance(group, bounds, animationList);
             }, delayMs);
             mappingMediaAdvanceTimers.set(group.id, timerId);
@@ -1841,20 +2141,30 @@
                     }
 
                     const canvas = document.getElementById('mapping-canvas');
-                    const maskImages = getGroupMaskImages(group);
+                    const renderCache = mappingGroupRenderCache.get(group.id);
+                    const sourceKey = renderCache?.sourceKey || getGroupSharedSourceKey(group);
+                    const maskImages = renderCache?.maskImages || getGroupMaskImages(group);
                     if (!canvas || !maskImages.length) {
                         resolve();
                         return;
                     }
 
-                    const bounds = computeMaskBounds(maskImages, canvas.width, canvas.height);
-                    fetchAnimationList(group.animation_list_id).then((animationList) => {
+                    const sharedState = mappingSharedAnimationStates.get(sourceKey);
+                    if (sharedState?.state) {
+                        applySharedSourceState(sourceKey, sharedState.state);
+                        resolve();
+                        return;
+                    }
+
+                    const bounds = renderCache?.bounds || computeMaskBounds(maskImages, canvas.width, canvas.height);
+                    fetchAnimationList(group.animation_list_id).then(async (animationList) => {
                         const animationIds = animationList?.animation_ids || [];
                         if (!animationIds.length) {
                             resolve();
                             return;
                         }
-                        const baseState = createAnimationMediaState(group, animationIds[0], bounds);
+                        await Promise.all(animationIds.map((animationId) => ensureAnimationScriptLoaded(animationId)));
+                        const baseState = createAnimationMediaState(group, animationIds[0], bounds, sourceKey);
                         if (!baseState) {
                             resolve();
                             return;
@@ -1862,14 +2172,19 @@
                         const state = {
                             ...baseState,
                             type: 'animation_list',
+                            sourceKey,
                             listId: animationList.id,
                             currentIndex: 0,
                             animationIds,
                         };
-                        mappingMediaCache.set(group.id, baseState.element);
-                        mappingMediaState.set(group.id, state);
-                        scheduleAnimationListAdvance(group, bounds, animationList);
-                        resolve();
+                    mappingSharedAnimationStates.set(sourceKey, {
+                        ownerGroupId: group.id,
+                        state,
+                    });
+                    applySharedSourceState(sourceKey, state);
+                    markMappingDirty();
+                    scheduleAnimationListAdvance(group, bounds, animationList);
+                    resolve();
                     }).catch((error) => {
                         console.error(error);
                         resolve();
@@ -1884,21 +2199,39 @@
                     }
 
                     const canvas = document.getElementById('mapping-canvas');
-                    const maskImages = getGroupMaskImages(group);
+                    const renderCache = mappingGroupRenderCache.get(group.id);
+                    const sourceKey = renderCache?.sourceKey || getGroupSharedSourceKey(group);
+                    const maskImages = renderCache?.maskImages || getGroupMaskImages(group);
                     if (!canvas || !maskImages.length) {
                         resolve();
                         return;
                     }
 
-                    const bounds = computeMaskBounds(maskImages, canvas.width, canvas.height);
-                    const state = createAnimationMediaState(group, group.animation_id, bounds);
+                    const sharedState = mappingSharedAnimationStates.get(sourceKey);
+                    if (sharedState?.state) {
+                        applySharedSourceState(sourceKey, sharedState.state);
+                        resolve();
+                        return;
+                    }
+
+                    const bounds = renderCache?.bounds || computeMaskBounds(maskImages, canvas.width, canvas.height);
+                    ensureAnimationScriptLoaded(group.animation_id).then(() => {
+                    const state = createAnimationMediaState(group, group.animation_id, bounds, sourceKey);
                     if (!state) {
                         resolve();
                         return;
                     }
-                    mappingMediaCache.set(group.id, state.element);
-                    mappingMediaState.set(group.id, state);
+                    mappingSharedAnimationStates.set(sourceKey, {
+                        ownerGroupId: group.id,
+                        state,
+                    });
+                    applySharedSourceState(sourceKey, state);
+                    markMappingDirty();
                     resolve();
+                }).catch((error) => {
+                        console.error(error);
+                        resolve();
+                    });
                 });
             }
 
@@ -1926,6 +2259,7 @@
                     };
                     mappingMediaCache.set(group.id, image);
                     mappingMediaState.set(group.id, state);
+                    markMappingDirty();
                     scheduleImageAdvance(group, state);
                     resolve();
                     };
@@ -1947,6 +2281,7 @@
                     holdUntil: 0,
                     pendingAdvance: false,
                     lastFrameCanvas: null,
+                    lastFrameCtx: null,
                 };
                 let resolved = false;
 
@@ -2041,6 +2376,7 @@
                     mappingMediaCache.set(group.id, video);
                     updateMinimumHold();
                     mappingMediaState.set(group.id, state);
+                    markMappingDirty();
                     video.play().catch(() => {});
                     if (!resolved) {
                         resolved = true;
@@ -2056,40 +2392,100 @@
             if (mappingAnimationFrame) {
                 cancelAnimationFrame(mappingAnimationFrame);
             }
-            const loop = () => {
-                renderMappingScene();
+            mappingLastRenderTimestamp = 0;
+            const loop = (timestamp) => {
+                if (!mappingLastRenderTimestamp || (timestamp - mappingLastRenderTimestamp) >= MAPPING_TARGET_FRAME_MS) {
+                    mappingLastRenderTimestamp = timestamp;
+                    if (mappingDirty || mappingSceneNeedsContinuousRender()) {
+                        renderMappingScene();
+                        mappingDirty = false;
+                    }
+                }
                 mappingAnimationFrame = requestAnimationFrame(loop);
             };
             mappingAnimationFrame = requestAnimationFrame(loop);
         }
 
+        function mappingSceneNeedsContinuousRender() {
+            return mappingRenderableGroups.some((group) => {
+                const mediaState = mappingMediaState.get(group.id);
+                if (!mediaState) {
+                    return false;
+                }
+                if (mediaState.type === 'video' || mediaState.type === 'animation' || mediaState.type === 'animation_list') {
+                    return true;
+                }
+                return mediaState.type === 'image' && Boolean(mediaState.previousElement || mediaState.transitionStart);
+            });
+        }
+
         function renderMappingScene() {
             if (!mappingScene) return;
             const canvas = document.getElementById('mapping-canvas');
-            const ctx = canvas.getContext('2d');
+            const ctx = mappingCanvasContext || canvas.getContext('2d');
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.fillStyle = 'black';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            const groups = [...(mappingScene.groups || [])]
-                .filter(group => group.visible !== false && group.mask_ids && group.mask_ids.length)
-                .sort((a, b) => (a.z_index || 0) - (b.z_index || 0));
-
-            groups.forEach(group => drawMappingGroup(ctx, group, canvas.width, canvas.height));
+            mappingRenderableGroups.forEach(group => drawMappingGroup(ctx, group, canvas.width, canvas.height));
         }
 
         function drawMappingGroup(ctx, group, canvasWidth, canvasHeight) {
-            const maskImages = (group.mask_ids || []).map(maskId => mappingMaskCache.get(maskId)).filter(Boolean);
+            const renderCache = mappingGroupRenderCache.get(group.id);
+            const maskImages = renderCache?.maskImages || (group.mask_ids || []).map(maskId => mappingMaskCache.get(maskId)).filter(Boolean);
             if (!maskImages.length) return;
 
-            const bounds = computeMaskBounds(maskImages, canvasWidth, canvasHeight);
-            const groupCanvas = document.createElement('canvas');
-            groupCanvas.width = canvasWidth;
-            groupCanvas.height = canvasHeight;
-            const groupCtx = groupCanvas.getContext('2d');
+            const bounds = renderCache?.bounds || computeMaskBounds(maskImages, canvasWidth, canvasHeight);
+            const groupCanvas = renderCache?.groupCanvas || document.createElement('canvas');
+            if (!renderCache) {
+                groupCanvas.width = canvasWidth;
+                groupCanvas.height = canvasHeight;
+            }
+            const groupCtx = renderCache?.groupCtx || groupCanvas.getContext('2d');
 
             const media = mappingMediaCache.get(group.id);
             const mediaState = mappingMediaState.get(group.id);
+            const isStableImageGroup = Boolean(
+                renderCache
+                && mediaState?.type === 'image'
+                && mediaState?.element
+                && !mediaState?.previousElement
+                && !mediaState?.transitionStart
+            );
+
+            if (isStableImageGroup) {
+                const staticLayerKey = JSON.stringify({
+                    source: mediaState.sources?.[mediaState.currentIndex] || '',
+                    transform: group.transform || {},
+                    colors: [group.color_a || '', group.color_b || ''],
+                    size: [canvasWidth, canvasHeight],
+                });
+
+                if (!renderCache.staticLayerCanvas) {
+                    renderCache.staticLayerCanvas = document.createElement('canvas');
+                    renderCache.staticLayerCanvas.width = canvasWidth;
+                    renderCache.staticLayerCanvas.height = canvasHeight;
+                    renderCache.staticLayerCtx = renderCache.staticLayerCanvas.getContext('2d');
+                }
+
+                if (renderCache.staticLayerKey !== staticLayerKey) {
+                    const staticCtx = renderCache.staticLayerCtx;
+                    staticCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+                    drawMediaCover(staticCtx, mediaState.element, bounds, group.transform || {});
+                    applyLuminanceMasks(staticCtx, maskImages, canvasWidth, canvasHeight, renderCache.maskCanvas || null);
+                    renderCache.staticLayerKey = staticLayerKey;
+                    markMappingDirty();
+                }
+
+                ctx.drawImage(renderCache.staticLayerCanvas, 0, 0);
+                return;
+            }
+
+            if (renderCache) {
+                renderCache.staticLayerKey = '';
+            }
+            groupCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+
             if (media && (media.tagName !== 'VIDEO' || media.readyState >= 2)) {
                 if (mediaState?.type === 'image') {
                     drawImageMediaWithTransition(groupCtx, mediaState, bounds, group.transform || {});
@@ -2103,8 +2499,10 @@
                         mediaState.lastFrameCanvas = document.createElement('canvas');
                         mediaState.lastFrameCanvas.width = canvasWidth;
                         mediaState.lastFrameCanvas.height = canvasHeight;
+                        mediaState.lastFrameCtx = mediaState.lastFrameCanvas.getContext('2d');
                     }
-                    const lastFrameCtx = mediaState.lastFrameCanvas.getContext('2d');
+                    const lastFrameCtx = mediaState.lastFrameCtx || mediaState.lastFrameCanvas.getContext('2d');
+                    mediaState.lastFrameCtx = lastFrameCtx;
                     lastFrameCtx.clearRect(0, 0, canvasWidth, canvasHeight);
                     lastFrameCtx.drawImage(groupCanvas, 0, 0);
                 }
@@ -2114,7 +2512,7 @@
                 drawFallbackFill(groupCtx, group, bounds);
             }
 
-            applyLuminanceMasks(groupCtx, maskImages, canvasWidth, canvasHeight);
+            applyLuminanceMasks(groupCtx, maskImages, canvasWidth, canvasHeight, renderCache?.maskCanvas || null);
             ctx.drawImage(groupCanvas, 0, 0);
         }
 
@@ -2171,36 +2569,8 @@
             ctx.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
         }
 
-        function applyLuminanceMasks(ctx, maskImages, width, height) {
-            const maskCanvas = document.createElement('canvas');
-            maskCanvas.width = width;
-            maskCanvas.height = height;
-            const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
-            const combinedImageData = maskCtx.createImageData(width, height);
-            const combinedPixels = combinedImageData.data;
-
-            maskImages.forEach((image) => {
-                maskCtx.clearRect(0, 0, width, height);
-                maskCtx.drawImage(image, 0, 0, width, height);
-                const { data } = maskCtx.getImageData(0, 0, width, height);
-
-                for (let i = 0; i < data.length; i += 4) {
-                    const alpha = data[i + 3];
-                    if (alpha <= 5) {
-                        continue;
-                    }
-
-                    const lum = (data[i] + data[i + 1] + data[i + 2]) / 3;
-                    if (lum > combinedPixels[i + 3]) {
-                        combinedPixels[i] = 255;
-                        combinedPixels[i + 1] = 255;
-                        combinedPixels[i + 2] = 255;
-                        combinedPixels[i + 3] = lum > 127 ? 255 : 0;
-                    }
-                }
-            });
-
-            maskCtx.putImageData(combinedImageData, 0, 0);
+        function applyLuminanceMasks(ctx, maskImages, width, height, precomputedMaskCanvas = null) {
+            const maskCanvas = precomputedMaskCanvas || buildCombinedMaskCanvas(maskImages, width, height);
             ctx.globalCompositeOperation = 'destination-in';
             ctx.drawImage(maskCanvas, 0, 0);
             ctx.globalCompositeOperation = 'source-over';
@@ -2238,6 +2608,7 @@
                 mediaState.previousElement = null;
                 mediaState.transitionStart = 0;
                 mappingMediaState.set(mediaState.groupId, mediaState);
+                markMappingDirty();
             }
         }
         
@@ -2247,6 +2618,10 @@
             appleHealthWidgetInstances = new Map();
             doTheBayWidgetInstances.forEach((instance) => instance.destroy());
             doTheBayWidgetInstances = new Map();
+            widgetElementsByType = new Map();
+            lastLiveWidgetPayloadKey = '';
+            lastRenderedTimeString = '';
+            lastRenderedDateString = '';
             container.innerHTML = '';
             
             widgets.forEach(widget => {
@@ -2255,11 +2630,9 @@
                 const widgetEl = document.createElement('div');
                 widgetEl.className = `widget ${widget.type}-widget`;
                 widgetEl.id = widget.id;
-                widgetEl.style.left = widget.position.x + 'px';
-                widgetEl.style.top = widget.position.y + 'px';
-                widgetEl.style.width = widget.size.width + 'px';
-                widgetEl.style.height = widget.size.height + 'px';
-                widgetEl.style.transform = `rotate(${widget.rotation || 0}deg)`;
+                widgetEl.style.left = '0px';
+                widgetEl.style.top = '0px';
+                applyWidgetLayout(widgetEl, widget);
                 
                 // Add content based on type
                 if (widget.type === 'weather') {
@@ -2391,6 +2764,7 @@
                 widgetEl.addEventListener('click', () => selectWidget(widget.id));
                 
                 container.appendChild(widgetEl);
+                registerWidgetElement(widget.type, widgetEl);
 
                 if (widget.type === 'apple_health') {
                     const root = widgetEl.querySelector('.apple-health-content');
@@ -2538,15 +2912,11 @@
             if (isDragging && currentWidget) {
                 const x = e.clientX - dragOffset.x;
                 const y = e.clientY - dragOffset.y;
-                
-                currentWidget.style.left = x + 'px';
-                currentWidget.style.top = y + 'px';
-                
-                // Update widget position in config
                 const widget = widgets.find(w => w.id === currentWidget.id);
                 if (widget) {
                     widget.position.x = x;
                     widget.position.y = y;
+                    scheduleWidgetLayout(widget.id);
                 }
             } else if (isResizing && currentWidget) {
                 const deltaX = e.clientX - resizeStart.x;
@@ -2554,16 +2924,21 @@
                 
                 const newWidth = Math.max(200, resizeStart.width + deltaX);
                 const newHeight = Math.max(100, resizeStart.height + deltaY);
-                
-                currentWidget.style.width = newWidth + 'px';
-                currentWidget.style.height = newHeight + 'px';
-                
-                // Update widget size in config
                 const widget = widgets.find(w => w.id === currentWidget.id);
                 if (widget) {
                     widget.size.width = newWidth;
                     widget.size.height = newHeight;
-                    applyResponsiveWidgetSizing(currentWidget, widget);
+                    scheduleWidgetLayout(widget.id);
+                    if (widgetLayoutFrame == null) {
+                        applyResponsiveWidgetSizing(currentWidget, widget);
+                    } else {
+                        requestAnimationFrame(() => {
+                            const latestWidget = widgets.find(w => w.id === currentWidget?.id);
+                            if (latestWidget && currentWidget) {
+                                applyResponsiveWidgetSizing(currentWidget, latestWidget);
+                            }
+                        });
+                    }
                 }
             } else if (isRotating && currentWidget) {
                 const rect = currentWidget.getBoundingClientRect();
@@ -2580,13 +2955,10 @@
                 // Normalize angle to 0-360
                 newRotation = ((newRotation % 360) + 360) % 360;
                 
-                // Apply rotation
-                currentWidget.style.transform = `rotate(${newRotation}deg)`;
-                
-                // Update widget data
                 const widget = widgets.find(w => w.id === currentWidget.id);
                 if (widget) {
                     widget.rotation = newRotation;
+                    scheduleWidgetLayout(widget.id);
                 }
             }
         });
@@ -2940,22 +3312,22 @@
                     switch(e.key) {
                         case 'ArrowLeft':
                             widget.position.x -= step;
-                            widgetEl.style.left = widget.position.x + 'px';
+                            scheduleWidgetLayout(widget.id);
                             e.preventDefault();
                             break;
                         case 'ArrowRight':
                             widget.position.x += step;
-                            widgetEl.style.left = widget.position.x + 'px';
+                            scheduleWidgetLayout(widget.id);
                             e.preventDefault();
                             break;
                         case 'ArrowUp':
                             widget.position.y -= step;
-                            widgetEl.style.top = widget.position.y + 'px';
+                            scheduleWidgetLayout(widget.id);
                             e.preventDefault();
                             break;
                         case 'ArrowDown':
                             widget.position.y += step;
-                            widgetEl.style.top = widget.position.y + 'px';
+                            scheduleWidgetLayout(widget.id);
                             e.preventDefault();
                             break;
                     }
@@ -2968,21 +3340,19 @@
             // Clear existing intervals
             Object.values(dataUpdateIntervals).forEach(interval => clearInterval(interval));
             dataUpdateIntervals = {};
+            const visibleWidgetTypes = new Set(
+                widgets.filter((widget) => widget.visible !== false).map((widget) => widget.type)
+            );
             
-            // Update time immediately and every second
-            updateTime();
-            dataUpdateIntervals.time = setInterval(updateTime, 1000);
+            if (visibleWidgetTypes.has('time')) {
+                updateTime();
+                dataUpdateIntervals.time = setInterval(updateTime, 1000);
+            }
             
-            // Update weather immediately and every 5 minutes
-            updateWeather();
-            dataUpdateIntervals.weather = setInterval(updateWeather, 300000);
-            
-            // Update transit immediately and every minute
-            updateTransit();
-            dataUpdateIntervals.transit = setInterval(updateTransit, 60000);
-
-            updateLiveWidgets();
-            dataUpdateIntervals.liveWidgets = setInterval(updateLiveWidgets, 15000);
+            if ([...visibleWidgetTypes].some((type) => ['spotify', 'gmail', 'calendar', 'climate', 'steam', 'weather', 'transit'].includes(type))) {
+                updateLiveWidgets();
+                dataUpdateIntervals.liveWidgets = setInterval(updateLiveWidgets, 15000);
+            }
         }
 
         async function updateLiveWidgets() {
@@ -2990,19 +3360,27 @@
                 return;
             }
 
-            const hasLiveWidgets = widgets.some((widget) => ['spotify', 'gmail', 'calendar', 'climate', 'steam'].includes(widget.type) && widget.visible !== false);
-            if (!hasLiveWidgets) {
+            const hasLiveWidgets = widgets.some((widget) => ['spotify', 'gmail', 'calendar', 'climate', 'steam', 'weather', 'transit'].includes(widget.type) && widget.visible !== false);
+            if (!hasLiveWidgets || liveWidgetFetchInFlight) {
                 return;
             }
 
             try {
+                liveWidgetFetchInFlight = true;
                 const response = await fetch(`/api/overlay/widget-data?config_id=${encodeURIComponent(config.id)}`);
                 if (!response.ok) {
                     throw new Error(`Widget data request failed: ${response.status}`);
                 }
                 const payload = await response.json();
                 const liveData = payload.data || {};
+                const payloadKey = JSON.stringify(liveData);
+                if (payloadKey === lastLiveWidgetPayloadKey) {
+                    return;
+                }
+                lastLiveWidgetPayloadKey = payloadKey;
 
+                updateWeatherWidgets(liveData.weather || {});
+                updateTransitWidgets(liveData.transit || {});
                 updateSpotifyWidgets(liveData.spotify || {});
                 updateCalendarWidgets(liveData.calendar || {});
                 updateGmailWidgets(liveData.gmail || {});
@@ -3010,11 +3388,13 @@
                 updateSteamWidgets(liveData.steam || {});
             } catch (error) {
                 console.error('Failed to update live overlay widgets:', error);
+            } finally {
+                liveWidgetFetchInFlight = false;
             }
         }
 
         function updateSpotifyWidgets(data) {
-            document.querySelectorAll('.spotify-widget').forEach((widget) => {
+            getWidgetElements('spotify').forEach((widget) => {
                 const title = widget.querySelector('.spotify-title');
                 const artist = widget.querySelector('.spotify-artist');
                 const art = widget.querySelector('.spotify-art');
@@ -3041,7 +3421,7 @@
         }
 
         function updateGmailWidgets(data) {
-            document.querySelectorAll('.gmail-widget').forEach((widget) => {
+            getWidgetElements('gmail').forEach((widget) => {
                 const subtitle = widget.querySelector('.gmail-sender');
                 const list = widget.querySelector('.gmail-list');
                 if (!subtitle || !list) return;
@@ -3066,7 +3446,7 @@
         }
 
         function updateCalendarWidgets(data) {
-            document.querySelectorAll('.calendar-widget').forEach((widget) => {
+            getWidgetElements('calendar').forEach((widget) => {
                 const subtitle = widget.querySelector('.gmail-sender');
                 const list = widget.querySelector('.gmail-list');
                 if (!subtitle || !list) return;
@@ -3095,7 +3475,7 @@
         }
 
         function updateClimateWidgets(data) {
-            document.querySelectorAll('.climate-widget').forEach((widget) => {
+            getWidgetElements('climate').forEach((widget) => {
                 const temperature = widget.querySelector('.climate-temperature');
                 const humidity = widget.querySelector('.climate-humidity');
                 if (!temperature || !humidity) return;
@@ -3112,7 +3492,7 @@
         }
 
         function updateSteamWidgets(data) {
-            document.querySelectorAll('.steam-widget').forEach((widget) => {
+            getWidgetElements('steam').forEach((widget) => {
                 const game = widget.querySelector('.steam-game');
                 const status = widget.querySelector('.steam-status');
                 const avatar = widget.querySelector('.steam-avatar');
@@ -3136,7 +3516,10 @@
         }
         
         function updateTime() {
-            const timeWidgets = document.querySelectorAll('.time-widget');
+            const timeWidgets = getWidgetElements('time');
+            if (!timeWidgets.length) {
+                return;
+            }
             const now = new Date();
             
             // Convert to PST
@@ -3156,199 +3539,192 @@
                 day: 'numeric'
             });
             
+            const nextTimeString = timeString + ' PST';
+            if (nextTimeString === lastRenderedTimeString && dateString === lastRenderedDateString) {
+                return;
+            }
+            lastRenderedTimeString = nextTimeString;
+            lastRenderedDateString = dateString;
+
             timeWidgets.forEach(widget => {
                 const timeEl = widget.querySelector('.time-content');
                 const dateEl = widget.querySelector('.date-content');
-                if (timeEl) timeEl.textContent = timeString + ' PST';
+                if (timeEl) timeEl.textContent = nextTimeString;
                 if (dateEl) dateEl.textContent = dateString;
             });
         }
         
-        async function updateWeather() {
-            if (!config?.api_configs?.weather_api_key) {
-                console.warn('No weather API key configured');
+        function updateWeatherWidgets(data) {
+            const weatherWidgets = getWidgetElements('weather');
+            if (!weatherWidgets.length) {
                 return;
             }
-            
-            const weatherWidgets = document.querySelectorAll('.weather-widget');
-            
-            try {
-                // Get location
-                const locationResponse = await fetch('https://ipinfo.io/json');
-                const locationData = await locationResponse.json();
-                const city = locationData.city || 'San Francisco';
-                
-                // Get weather
-                const weatherResponse = await fetch(
-                    `https://api.openweathermap.org/data/2.5/weather?q=${city}&appid=${config.api_configs.weather_api_key}&units=imperial`
-                );
-                const weatherData = await weatherResponse.json();
-                
-                // Map weather conditions to emojis
-                const weatherIcons = {
-                    'Clear': '☀️',
-                    'Clouds': '☁️',
-                    'Rain': '🌧️',
-                    'Drizzle': '🌦️',
-                    'Thunderstorm': '⛈️',
-                    'Snow': '❄️',
-                    'Mist': '🌫️',
-                    'Fog': '🌫️'
-                };
-                
-                const icon = weatherIcons[weatherData.weather[0].main] || '🌡️';
-                const temp = Math.round(weatherData.main.temp);
-                const description = weatherData.weather[0].description;
-                const location = weatherData.name;
-                latestMappingWeather = {
-                    temperature: weatherData.main.temp,
-                    humidity: weatherData.main.humidity,
-                    windSpeed: weatherData.wind?.speed || 0,
-                    windDirection: weatherData.wind?.deg || 0,
-                    conditions: weatherData.weather?.[0]?.main || '',
-                    location,
-                };
-                if (mappingAnimationEngine) {
-                    mappingAnimationEngine.updateData({ weather: latestMappingWeather });
-                }
-                
-                weatherWidgets.forEach(widget => {
-                    widget.querySelector('.weather-icon').textContent = icon;
-                    widget.querySelector('.temperature').textContent = `${temp}°F`;
-                    widget.querySelector('.weather-description').textContent = description;
-                    widget.querySelector('.weather-location').textContent = location;
+
+            const weatherIcons = {
+                'Clear': '☀️',
+                'Clouds': '☁️',
+                'Rain': '🌧️',
+                'Drizzle': '🌦️',
+                'Thunderstorm': '⛈️',
+                'Snow': '❄️',
+                'Mist': '🌫️',
+                'Fog': '🌫️'
+            };
+
+            if (data.status !== 'active') {
+                weatherWidgets.forEach((widget) => {
+                    const descriptionEl = widget.querySelector('.weather-description');
+                    if (descriptionEl) {
+                        descriptionEl.textContent = data.status === 'unconfigured'
+                            ? 'Configure weather API key'
+                            : (data.error || 'Weather unavailable');
+                    }
                 });
-            } catch (error) {
-                console.error('Weather update error:', error);
-                weatherWidgets.forEach(widget => {
-                    widget.querySelector('.weather-description').textContent = 'Weather unavailable';
-                });
+                return;
             }
+
+            latestMappingWeather = {
+                temperature: data.temperature,
+                humidity: data.humidity,
+                windSpeed: data.windSpeed || 0,
+                windDirection: data.windDirection || 0,
+                conditions: data.conditions || '',
+                location: data.location || '',
+            };
+            if (mappingAnimationEngine) {
+                mappingAnimationEngine.updateData({ weather: latestMappingWeather });
+            }
+
+            const icon = weatherIcons[data.conditions] || '🌡️';
+            const temp = Math.round(Number(data.temperature) || 0);
+            weatherWidgets.forEach((widget) => {
+                const iconEl = widget.querySelector('.weather-icon');
+                const tempEl = widget.querySelector('.temperature');
+                const descriptionEl = widget.querySelector('.weather-description');
+                const locationEl = widget.querySelector('.weather-location');
+                if (iconEl) iconEl.textContent = icon;
+                if (tempEl) tempEl.textContent = `${temp}°F`;
+                if (descriptionEl) descriptionEl.textContent = data.description || 'Weather unavailable';
+                if (locationEl) locationEl.textContent = data.location || '--';
+            });
         }
-        
-        async function updateTransit() {
-            if (!config?.api_configs?.transit_stop_id) {
-                console.warn('No transit stop ID configured');
+
+        function updateTransitWidgets(data) {
+            const transitWidgets = getWidgetElements('transit');
+            if (!transitWidgets.length) {
                 return;
             }
-            
-            const transitWidgets = document.querySelectorAll('.transit-widget');
-            
-            try {
-                const response = await fetch(
-                    `https://webservices.umoiq.com/api/pub/v1/agencies/sfmta-cis/stopcodes/${config.api_configs.transit_stop_id}/predictions?key=0be8ebd0284ce712a63f29dcaf7798c4`
-                );
-                const data = await response.json();
-                
-                let latestRoutes = [];
-                transitWidgets.forEach(widget => {
-                    const widgetConfig = widgets.find(w => w.id === widget.id);
-                    const routeFilter = widgetConfig?.config?.routeFilter?.toLowerCase();
-                    
-                    // Collect all predictions by route type
-                    const routePredictions = new Map();
-                    
-                    data.forEach(routeData => {
-                        if (routeData.values && routeData.values.length > 0) {
-                            const routeKey = routeData.route.title;
-                            const times = [];
-                            
-                            routeData.values.forEach(value => {
-                                if (value.minutes !== undefined && value.minutes !== null) {
-                                    times.push(value.minutes);
-                                }
-                            });
-                            
-                            if (times.length > 0) {
-                                // Sort times for this route
-                                times.sort((a, b) => a - b);
-                                routePredictions.set(routeKey, {
-                                    route: routeData.route,
-                                    times: times
-                                });
-                            }
-                        }
-                    });
-                    
-                    // Apply route filter if specified
-                    let filteredRoutes = routePredictions;
-                    if (routeFilter) {
-                        // Filter to matching routes
-                        const filtered = new Map();
-                        for (const [key, value] of routePredictions) {
-                            if (key.toLowerCase().includes(routeFilter)) {
-                                filtered.set(key, value);
-                            }
-                        }
-                        
-                        // If no exact matches and it's late night, include Night Owl
-                        if (filtered.size === 0) {
-                            const hour = new Date().getHours();
-                            if (hour >= 23 || hour <= 5) {
-                                for (const [key, value] of routePredictions) {
-                                    if (value.route.id.includes('NOWL') || value.route.id.includes('OWL')) {
-                                        filtered.set(key, value);
-                                    }
-                                }
-                            }
-                        }
-                        
-                        filteredRoutes = filtered.size > 0 ? filtered : routePredictions;
-                    }
-                    latestRoutes = Array.from(filteredRoutes.keys());
-                    
+
+            if (data.status === 'unconfigured') {
+                transitWidgets.forEach((widget) => {
                     const content = widget.querySelector('.transit-content');
-                    const widgetEl = document.getElementById(widget.id);
-                    
-                    if (filteredRoutes.size === 0) {
-                        const hour = new Date().getHours();
-                        const message = (hour >= 1 && hour <= 5) 
-                            ? 'No service until morning' 
-                            : 'No predictions available';
-                        content.innerHTML = `<div class="no-service">${message}</div>`;
-                        return;
+                    if (content) {
+                        content.innerHTML = '<div class="no-service">Configure transit stop ID</div>';
                     }
-                    
-                    // Check if this is a split-flap display
-                    if (widgetConfig?.displayStyle === 'splitFlap' || content.classList.contains('split-flap-display')) {
-                        // Convert to format for split-flap display (show first arrival for each route)
-                        const formattedPredictions = Array.from(filteredRoutes.values()).slice(0, 3).map(routeData => ({
-                            route: routeData.route,
-                            values: [{ minutes: routeData.times[0] }]
-                        }));
-                        updateSplitFlapDisplay(content, formattedPredictions);
-                    } else {
-                        // Show consolidated display with all times per route
-                        const html = Array.from(filteredRoutes.entries()).slice(0, 3).map(([routeName, routeData]) => {
-                            const isNightOwl = routeData.route.id.includes('NOWL') || routeData.route.id.includes('OWL');
-                            const displayName = isNightOwl ? `${routeName} 🌙` : routeName;
-                            
-                            // Show up to 3 arrival times per route
-                            const timesDisplay = routeData.times.slice(0, 3).map(minutes => `${minutes}`).join(', ');
-                            
-                            return `
+                });
+                return;
+            }
+
+            if (data.status === 'unavailable') {
+                transitWidgets.forEach((widget) => {
+                    const content = widget.querySelector('.transit-content');
+                    if (content) {
+                        content.innerHTML = 'Transit data unavailable';
+                    }
+                });
+                return;
+            }
+
+            const routePredictions = new Map();
+            (Array.isArray(data.routes) ? data.routes : []).forEach((routeData) => {
+                const title = routeData.title || routeData.id || 'Route';
+                const times = Array.isArray(routeData.times) ? routeData.times : [];
+                if (!times.length) {
+                    return;
+                }
+                routePredictions.set(title, {
+                    route: {
+                        title,
+                        id: routeData.id || '',
+                    },
+                    times,
+                });
+            });
+
+            let latestRoutes = [];
+            transitWidgets.forEach(widget => {
+                const widgetConfig = widgets.find(w => w.id === widget.id);
+                const routeFilter = widgetConfig?.config?.routeFilter?.toLowerCase();
+
+                let filteredRoutes = routePredictions;
+                if (routeFilter) {
+                    const filtered = new Map();
+                    for (const [key, value] of routePredictions) {
+                        if (key.toLowerCase().includes(routeFilter)) {
+                            filtered.set(key, value);
+                        }
+                    }
+
+                    if (filtered.size === 0) {
+                        const hour = new Date().getHours();
+                        if (hour >= 23 || hour <= 5) {
+                            for (const [key, value] of routePredictions) {
+                                if ((value.route.id || '').includes('NOWL') || (value.route.id || '').includes('OWL')) {
+                                    filtered.set(key, value);
+                                }
+                            }
+                        }
+                    }
+
+                    filteredRoutes = filtered.size > 0 ? filtered : routePredictions;
+                }
+                latestRoutes = Array.from(filteredRoutes.keys());
+
+                const content = widget.querySelector('.transit-content');
+                if (!content) {
+                    return;
+                }
+
+                if (filteredRoutes.size === 0) {
+                    const hour = new Date().getHours();
+                    const message = (hour >= 1 && hour <= 5)
+                        ? 'No service until morning'
+                        : 'No predictions available';
+                    content.innerHTML = `<div class="no-service">${message}</div>`;
+                    return;
+                }
+
+                if (widgetConfig?.displayStyle === 'splitFlap' || content.classList.contains('split-flap-display')) {
+                    const formattedPredictions = Array.from(filteredRoutes.values()).slice(0, 3).map(routeData => ({
+                        route: routeData.route,
+                        values: [{ minutes: routeData.times[0] }]
+                    }));
+                    updateSplitFlapDisplay(content, formattedPredictions);
+                } else {
+                    const html = Array.from(filteredRoutes.entries()).slice(0, 3).map(([routeName, routeData]) => {
+                        const routeId = routeData.route.id || '';
+                        const isNightOwl = routeId.includes('NOWL') || routeId.includes('OWL');
+                        const displayName = isNightOwl ? `${routeName} 🌙` : routeName;
+                        const timesDisplay = routeData.times.slice(0, 3).map(minutes => `${minutes}`).join(', ');
+
+                        return `
                                 <div class="prediction">
                                     <span class="prediction-route">${displayName}</span>
                                     <span class="prediction-time">${timesDisplay} min</span>
                                 </div>
                             `;
-                        }).join('');
-                        
-                        content.innerHTML = html;
-                    }
-                });
-                latestMappingTransit = {
-                    activeRoutes: latestRoutes,
-                    count: latestRoutes.length,
-                };
-                if (mappingAnimationEngine) {
-                    mappingAnimationEngine.updateData({ transit: latestMappingTransit });
+                    }).join('');
+
+                    content.innerHTML = html;
                 }
-            } catch (error) {
-                console.error('Transit update error:', error);
-                transitWidgets.forEach(widget => {
-                    widget.querySelector('.transit-content').innerHTML = 'Transit data unavailable';
-                });
+            });
+
+            latestMappingTransit = {
+                activeRoutes: latestRoutes,
+                count: latestRoutes.length,
+            };
+            if (mappingAnimationEngine) {
+                mappingAnimationEngine.updateData({ transit: latestMappingTransit });
             }
         }
         
