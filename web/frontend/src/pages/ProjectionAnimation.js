@@ -25,6 +25,8 @@ import {
 } from '@mui/icons-material';
 import { projectionApi } from '../services/api';
 
+const PREVIEW_BUNDLE_VERSION = '20260327-anim-1';
+
 function ProjectionAnimation() {
   const [animations, setAnimations] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -193,7 +195,7 @@ function ProjectionAnimation() {
                       >
                         <iframe
                           title={`${animation.name} preview`}
-                          src={`/backend-static/projection_animation_preview.html?animation=${encodeURIComponent(animation.id)}`}
+                          src={`/backend-static/projection_animation_preview.html?animation=${encodeURIComponent(animation.id)}&v=${PREVIEW_BUNDLE_VERSION}`}
                           style={{ width: '100%', height: '100%', border: 0, display: 'block' }}
                         />
                       </Box>

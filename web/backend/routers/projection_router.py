@@ -131,6 +131,13 @@ ANIMATION_LIBRARY = [
         "thumbnail": "🌿",
     },
     {
+        "id": "train_up_in_the_cloud_sea",
+        "name": "Train Up In The Cloud Sea",
+        "description": "A drifting pixel-train crossing a bridge through layered sunset cloud seas",
+        "dataInputs": [],
+        "thumbnail": "🚂",
+    },
+    {
         "id": "spectrum_bars",
         "name": "Spectrum Bars",
         "description": "Animated spectrum visualization",

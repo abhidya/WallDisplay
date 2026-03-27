@@ -30,56 +30,77 @@
 </head>
 <body>
     <div id="preview-host"></div>
-
-    <script src="/backend-static/js/projection/animation_engine.js"></script>
-    <script src="/backend-static/js/projection/animations/neural_noise.js"></script>
-    <script src="/backend-static/js/projection/animations/moving_clouds.js"></script>
-    <script src="/backend-static/js/projection/animations/koi_fish.js"></script>
-    <script src="/backend-static/js/projection/animations/swimming_fish.js"></script>
-    <script src="/backend-static/js/projection/animations/blob_fish.js"></script>
-    <script src="/backend-static/js/projection/animations/fish_pond.js"></script>
-    <script src="/backend-static/js/projection/animations/koi_pond_8bit.js"></script>
-    <script src="/backend-static/js/projection/animations/pokedex.js"></script>
-    <script src="/backend-static/js/projection/animations/moon_view.js"></script>
-    <script src="/backend-static/js/projection/animations/meduses.js"></script>
-    <script src="/backend-static/js/projection/animations/kelp_forest.js"></script>
-    <script src="/backend-static/js/projection/animations/spectrum_bars.js"></script>
-    <script src="/backend-static/js/projection/animations/webgl_flowers.js"></script>
-    <script src="/backend-static/js/projection/animations/rainstorm.js"></script>
-    <script src="/backend-static/js/projection/animations/pride_spectrum.js"></script>
     <script>
         const params = new URLSearchParams(window.location.search);
+        const assetVersion = params.get('v') || '20260327-anim-1';
+        const scriptPaths = [
+            '/backend-static/js/vendor/gifler.min.js',
+            '/backend-static/js/projection/animation_engine.js',
+            '/backend-static/js/projection/animations/neural_noise.js',
+            '/backend-static/js/projection/animations/moving_clouds.js',
+            '/backend-static/js/projection/animations/koi_fish.js',
+            '/backend-static/js/projection/animations/swimming_fish.js',
+            '/backend-static/js/projection/animations/blob_fish.js',
+            '/backend-static/js/projection/animations/fish_pond.js',
+            '/backend-static/js/projection/animations/koi_pond_8bit.js',
+            '/backend-static/js/projection/animations/pokedex.js',
+            '/backend-static/js/projection/animations/moon_view.js',
+            '/backend-static/js/projection/animations/meduses.js',
+            '/backend-static/js/projection/animations/kelp_forest.js',
+            '/backend-static/js/projection/animations/train_up_in_the_cloud_sea.js',
+            '/backend-static/js/projection/animations/spectrum_bars.js',
+            '/backend-static/js/projection/animations/webgl_flowers.js',
+            '/backend-static/js/projection/animations/rainstorm.js',
+            '/backend-static/js/projection/animations/pride_spectrum.js',
+        ];
         const animationId = params.get('animation') || 'neural_noise';
         const host = document.getElementById('preview-host');
-        const engine = new AnimationEngine();
-        const zone = {
-            id: `preview_${animationId}`,
-            bounds: {
-                x: 0,
-                y: 0,
-                width: Math.max(1, window.innerWidth),
-                height: Math.max(1, window.innerHeight),
-            },
-            area: Math.max(1, window.innerWidth * window.innerHeight),
-        };
 
-        const animation = engine.createAnimation(animationId, zone, host);
-        if (animation) {
-            animation.start();
-            engine.updateData({
-                weather: {
-                    temperature: 68,
-                    humidity: 55,
-                    windSpeed: 8,
-                    windDirection: 180,
-                    conditions: 'Clear',
-                },
-                transit: {
-                    activeRoutes: ['N', 'J', 'KT'],
-                    count: 3,
-                },
+        function loadScript(src) {
+            return new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = `${src}?v=${encodeURIComponent(assetVersion)}`;
+                script.onload = resolve;
+                script.onerror = () => reject(new Error(`Failed to load ${src}`));
+                document.body.appendChild(script);
             });
         }
+
+        Promise.all(scriptPaths.map(loadScript))
+            .then(() => {
+                const engine = new AnimationEngine();
+                const zone = {
+                    id: `preview_${animationId}`,
+                    bounds: {
+                        x: 0,
+                        y: 0,
+                        width: Math.max(1, window.innerWidth),
+                        height: Math.max(1, window.innerHeight),
+                    },
+                    area: Math.max(1, window.innerWidth * window.innerHeight),
+                };
+
+                const animation = engine.createAnimation(animationId, zone, host);
+                if (animation) {
+                    animation.start();
+                    engine.updateData({
+                        weather: {
+                            temperature: 68,
+                            humidity: 55,
+                            windSpeed: 8,
+                            windDirection: 180,
+                            conditions: 'Clear',
+                        },
+                        transit: {
+                            activeRoutes: ['N', 'J', 'KT'],
+                            count: 3,
+                        },
+                    });
+                }
+            })
+            .catch((error) => {
+                console.error('Projection animation preview failed to load', error);
+            });
     </script>
 </body>
 </html>

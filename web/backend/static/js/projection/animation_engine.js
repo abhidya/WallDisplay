@@ -48,6 +48,9 @@ class AnimationEngine {
         if (typeof KelpForestAnimation !== 'undefined') {
             this.animationClasses.set('kelp_forest', KelpForestAnimation);
         }
+        if (typeof TrainUpInTheCloudSeaAnimation !== 'undefined') {
+            this.animationClasses.set('train_up_in_the_cloud_sea', TrainUpInTheCloudSeaAnimation);
+        }
         if (typeof SpectrumBarsAnimation !== 'undefined') {
             this.animationClasses.set('spectrum_bars', SpectrumBarsAnimation);
         }

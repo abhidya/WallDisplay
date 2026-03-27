@@ -1,18 +1,24 @@
-// Koi Pond 8-bit Animation - source-faithful local GIF host
+// Koi Pond 8-bit Animation - source-faithful local GIF playback
 class KoiPond8BitAnimation extends BaseAnimation {
     setup() {
-        this.gif = new Image();
-        this.gifLoaded = false;
         this.backgroundMode = 'black';
-        this.gif.onload = () => {
-            this.gifLoaded = true;
-        };
-        this.gif.src = '/backend-static/assets/animations/koi_pond_8bit_source.gif';
+        this.gifUrl = '/backend-static/assets/animations/koi_pond_8bit_source.gif';
+        this.gifReady = false;
+        this.frameCanvas = document.createElement('canvas');
+        this.frameCanvas.width = this.canvas.width;
+        this.frameCanvas.height = this.canvas.height;
+
+        if (typeof window !== 'undefined' && typeof window.gifler === 'function') {
+            window.gifler(this.gifUrl).animate(this.frameCanvas);
+            this.gifReady = true;
+        } else {
+            console.warn('gifler is unavailable; koi_pond_8bit will not animate');
+        }
     }
 
     drawCoverImage(image) {
         const canvasRatio = this.canvas.width / this.canvas.height;
-        const imageRatio = image.naturalWidth / image.naturalHeight;
+        const imageRatio = image.width / image.height;
 
         let drawWidth = this.canvas.width;
         let drawHeight = this.canvas.height;
@@ -40,12 +46,11 @@ class KoiPond8BitAnimation extends BaseAnimation {
             this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
         }
 
-        if (!this.gifLoaded) {
+        if (!this.gifReady) {
             return;
         }
 
-        // Re-drawing the animated gif element each frame preserves the original motion.
-        this.drawCoverImage(this.gif);
+        this.drawCoverImage(this.frameCanvas);
     }
 }
 
