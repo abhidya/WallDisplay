@@ -37,7 +37,9 @@ class MappingGroup(BaseModel):
     mask_ids: List[str] = Field(default_factory=list)
     media_binding_type: str = "video"
     video_id: Optional[int] = None
+    photo_id: Optional[int] = None
     media_list_id: Optional[int] = None
+    photo_list_id: Optional[int] = None
     media_channel_id: Optional[int] = None
     media_directory_id: Optional[int] = None
     media_directory_ids: List[int] = Field(default_factory=list)

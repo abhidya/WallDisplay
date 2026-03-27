@@ -172,6 +172,39 @@ def ensure_sqlite_schema_compatibility():
             )
             """
         )
+        connection.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS photos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name VARCHAR NOT NULL,
+                path VARCHAR NOT NULL UNIQUE,
+                file_name VARCHAR,
+                file_size INTEGER,
+                format VARCHAR,
+                resolution VARCHAR,
+                category VARCHAR NOT NULL DEFAULT 'background',
+                source_type VARCHAR NOT NULL DEFAULT 'upload',
+                source_directory_id INTEGER,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS photo_lists (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name VARCHAR NOT NULL UNIQUE,
+                category VARCHAR NOT NULL DEFAULT 'background',
+                photo_ids JSON NOT NULL DEFAULT '[]',
+                playback_mode VARCHAR NOT NULL DEFAULT 'sequence',
+                shuffle VARCHAR NOT NULL DEFAULT 'false',
+                loop VARCHAR NOT NULL DEFAULT 'true',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
 
 def get_db():
     """
@@ -200,6 +233,8 @@ def init_db():
     from models.media_directory import MediaDirectory
     from models.media_list import MediaList
     from models.media_channel import MediaChannel
+    from models.photo import PhotoModel
+    from models.photo_list import PhotoList
     
     # When running under pytest, skip the actual Base.metadata.create_all(bind=engine) call.
     # The test fixtures will handle creating tables on the temporary test database.

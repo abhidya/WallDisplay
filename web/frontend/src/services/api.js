@@ -174,6 +174,23 @@ const videoApi = {
     api.post('/videos/scan-directory', null, { params: { directory, category, source_directory_id: sourceDirectoryId } }),
 };
 
+const photoApi = {
+  getPhotos: (params = {}) => api.get('/photos/', { params }),
+  getPhoto: (id) => api.get(`/photos/${id}`),
+  createPhoto: (data) => api.post('/photos/', data),
+  updatePhoto: (id, data) => api.put(`/photos/${id}`, data),
+  deletePhoto: (id) => api.delete(`/photos/${id}`),
+  uploadPhoto: (formData, config = {}) => api.post('/photos/upload', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+    timeout: 300000,
+    ...config,
+  }),
+  scanDirectory: (directory, category = 'background', sourceDirectoryId = null) =>
+    api.post('/photos/scan-directory', null, { params: { directory, category, source_directory_id: sourceDirectoryId } }),
+};
+
 const mappingsApi = {
   listScenes: () => api.get('/mappings/scenes'),
   getScene: (id) => api.get(`/mappings/scenes/${id}`),
@@ -186,6 +203,7 @@ const mappingsApi = {
       'Content-Type': 'multipart/form-data',
     },
   }),
+  deleteMask: (sceneId, maskId) => api.delete(`/mappings/scenes/${sceneId}/masks/${maskId}`),
 };
 
 const mediaLibraryApi = {
@@ -203,6 +221,13 @@ const mediaLibraryApi = {
   updateMediaChannel: (id, data) => api.put(`/media-library/channels/${id}`, data),
   advanceMediaChannel: (id) => api.post(`/media-library/channels/${id}/advance`),
   deleteMediaChannel: (id) => api.delete(`/media-library/channels/${id}`),
+};
+
+const photoListApi = {
+  listPhotoLists: () => api.get('/photo-lists/'),
+  createPhotoList: (data) => api.post('/photo-lists/', data),
+  updatePhotoList: (id, data) => api.put(`/photo-lists/${id}`, data),
+  deletePhotoList: (id) => api.delete(`/photo-lists/${id}`),
 };
 
 // Renderer API
@@ -294,8 +319,10 @@ export {
   api, 
   deviceApi, 
   videoApi, 
+  photoApi,
   mappingsApi,
   mediaLibraryApi,
+  photoListApi,
   rendererApi, 
   depthApi, 
   streamingApi, 

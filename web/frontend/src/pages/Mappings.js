@@ -37,7 +37,7 @@ import {
   VisibilityOff as VisibilityOffIcon,
 } from '@mui/icons-material';
 
-import { mappingsApi, mediaLibraryApi, videoApi } from '../services/api';
+import { mappingsApi, mediaLibraryApi, photoApi, photoListApi, videoApi } from '../services/api';
 
 const SIDEBAR_WIDTH = 320;
 const INSPECTOR_WIDTH = 360;
@@ -54,7 +54,9 @@ const emptyGroup = () => ({
   mask_ids: [],
   media_binding_type: 'video',
   video_id: '',
+  photo_id: '',
   media_list_id: '',
+  photo_list_id: '',
   media_channel_id: '',
   media_directory_id: '',
   media_directory_ids: [],
@@ -84,7 +86,9 @@ function Mappings() {
   const [selectedSceneId, setSelectedSceneId] = useState('');
   const [sceneDraft, setSceneDraft] = useState(null);
   const [videos, setVideos] = useState([]);
+  const [photos, setPhotos] = useState([]);
   const [mediaLists, setMediaLists] = useState([]);
+  const [photoLists, setPhotoLists] = useState([]);
   const [mediaChannels, setMediaChannels] = useState([]);
   const [mediaDirectories, setMediaDirectories] = useState([]);
   const [maskImages, setMaskImages] = useState({});
@@ -108,14 +112,18 @@ function Mappings() {
     Promise.all([
       mappingsApi.listScenes(),
       videoApi.getVideos(),
+      photoApi.getPhotos(),
       mediaLibraryApi.listDirectories(),
       mediaLibraryApi.listMediaLists(),
+      photoListApi.listPhotoLists(),
       mediaLibraryApi.listMediaChannels(),
-    ]).then(([sceneRes, videoRes, mediaDirectoryRes, mediaListRes, mediaChannelRes]) => {
+    ]).then(([sceneRes, videoRes, photoRes, mediaDirectoryRes, mediaListRes, photoListRes, mediaChannelRes]) => {
       setScenes(sceneRes.data || []);
       setVideos(videoRes.data.videos || []);
+      setPhotos(photoRes.data.photos || []);
       setMediaDirectories(mediaDirectoryRes.data || []);
       setMediaLists(mediaListRes.data || []);
+      setPhotoLists(photoListRes.data || []);
       setMediaChannels(mediaChannelRes.data || []);
       if (sceneRes.data?.length) {
         loadScene(sceneRes.data[0]);
@@ -214,7 +222,9 @@ function Mappings() {
         groups: (sceneDraft.groups || []).map((group) => ({
           ...group,
           video_id: group.video_id ? Number(group.video_id) : null,
+          photo_id: group.photo_id ? Number(group.photo_id) : null,
           media_list_id: group.media_list_id ? Number(group.media_list_id) : null,
+          photo_list_id: group.photo_list_id ? Number(group.photo_list_id) : null,
           media_channel_id: group.media_channel_id ? Number(group.media_channel_id) : null,
           media_directory_id: group.media_directory_id ? Number(group.media_directory_id) : null,
           media_directory_ids: normalizeNumericIdList(group.media_directory_ids || []),
@@ -237,6 +247,26 @@ function Mappings() {
     } catch (err) {
       console.error(err);
       setError('Failed to save scene');
+    }
+  };
+
+  const deleteScene = async () => {
+    if (!selectedScene) {
+      return;
+    }
+    try {
+      await mappingsApi.deleteScene(selectedScene.id);
+      const remainingScenes = scenes.filter((scene) => scene.id !== selectedScene.id);
+      setScenes(remainingScenes);
+      if (remainingScenes.length) {
+        loadScene(remainingScenes[0]);
+      } else {
+        createSceneDraft();
+      }
+      setMessage(`Deleted scene "${selectedScene.name}"`);
+    } catch (err) {
+      console.error(err);
+      setError('Failed to delete scene');
     }
   };
 
@@ -339,6 +369,22 @@ function Mappings() {
     }
   };
 
+  const deleteMask = async (maskId) => {
+    if (!selectedScene) {
+      return;
+    }
+    try {
+      const response = await mappingsApi.deleteMask(selectedScene.id, maskId);
+      const updatedScene = response.data;
+      setScenes((current) => current.map((scene) => (scene.id === updatedScene.id ? updatedScene : scene)));
+      loadScene(updatedScene);
+      setMessage('Mask deleted');
+    } catch (err) {
+      console.error(err);
+      setError('Failed to delete mask');
+    }
+  };
+
   const toggleMaskForGroup = (groupId, maskId) => {
     setSceneDraft((current) => {
       if (!current?.groups) {
@@ -414,6 +460,9 @@ function Mappings() {
           <Stack direction="row" spacing={1}>
             <Button variant="contained" color="secondary" startIcon={<AddIcon />} onClick={createSceneDraft}>
               New Scene
+            </Button>
+            <Button variant="outlined" color="error" startIcon={<DeleteIcon />} onClick={deleteScene} disabled={!selectedScene}>
+              Delete Scene
             </Button>
             <Button variant="outlined" startIcon={leftOpen ? <ChevronLeftIcon /> : <ChevronRightIcon />} onClick={() => setLeftOpen((v) => !v)}>
               Library
@@ -580,7 +629,15 @@ function Mappings() {
                           {(sceneDraft.masks || []).map((mask) => {
                             const active = selectedGroup?.mask_ids?.includes(mask.id);
                             return (
-                              <ListItem key={mask.id} disablePadding>
+                              <ListItem
+                                key={mask.id}
+                                disablePadding
+                                secondaryAction={(
+                                  <IconButton edge="end" onClick={() => deleteMask(mask.id)} color="inherit">
+                                    <DeleteIcon />
+                                  </IconButton>
+                                )}
+                              >
                                 <ListItemButton onClick={() => selectedGroup && toggleMaskForGroup(selectedGroup.id, mask.id)}>
                                   <ListItemText primary={mask.file_name} secondary={`${mask.width}x${mask.height}`} />
                                   <Chip size="small" label={active ? 'On' : 'Off'} color={active ? 'primary' : 'default'} />
@@ -742,8 +799,10 @@ function Mappings() {
                             onChange={(event) => updateGroup(selectedGroup.id, { media_binding_type: event.target.value })}
                           >
                             <MenuItem value="video">Video</MenuItem>
+                            <MenuItem value="photo">Photo</MenuItem>
                             <MenuItem value="media_directory">Saved Media Folder</MenuItem>
                             <MenuItem value="media_list">Media List</MenuItem>
+                            <MenuItem value="photo_list">Photo List</MenuItem>
                             <MenuItem value="media_channel">Media Channel</MenuItem>
                             <MenuItem value="direct_url">Direct URL</MenuItem>
                           </Select>
@@ -760,6 +819,22 @@ function Mappings() {
                               <MenuItem value=""><em>None</em></MenuItem>
                               {videos.map((video) => (
                                 <MenuItem key={video.id} value={video.id}>{video.name} ({video.category})</MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        )}
+
+                        {selectedGroup.media_binding_type === 'photo' && (
+                          <FormControl fullWidth sx={darkSelectSx}>
+                            <InputLabel>Photo</InputLabel>
+                            <Select
+                              value={selectedGroup.photo_id || ''}
+                              label="Photo"
+                              onChange={(event) => updateGroup(selectedGroup.id, { photo_id: event.target.value })}
+                            >
+                              <MenuItem value=""><em>None</em></MenuItem>
+                              {photos.map((photo) => (
+                                <MenuItem key={photo.id} value={photo.id}>{photo.name} ({photo.category})</MenuItem>
                               ))}
                             </Select>
                           </FormControl>
@@ -815,6 +890,22 @@ function Mappings() {
                             >
                               <MenuItem value=""><em>None</em></MenuItem>
                               {mediaLists.map((list) => (
+                                <MenuItem key={list.id} value={list.id}>{list.name}</MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        )}
+
+                        {selectedGroup.media_binding_type === 'photo_list' && (
+                          <FormControl fullWidth sx={darkSelectSx}>
+                            <InputLabel>Photo List</InputLabel>
+                            <Select
+                              value={selectedGroup.photo_list_id || ''}
+                              label="Photo List"
+                              onChange={(event) => updateGroup(selectedGroup.id, { photo_list_id: event.target.value })}
+                            >
+                              <MenuItem value=""><em>None</em></MenuItem>
+                              {photoLists.map((list) => (
                                 <MenuItem key={list.id} value={list.id}>{list.name}</MenuItem>
                               ))}
                             </Select>

@@ -8,6 +8,8 @@ from models.mapping_scene import MappingScene
 from models.media_channel import MediaChannel
 from models.media_directory import MediaDirectory
 from models.media_list import MediaList
+from models.photo import PhotoModel
+from models.photo_list import PhotoList
 from models.video import VideoModel
 from schemas.overlay import (
     OverlayConfigCreate,
@@ -319,11 +321,28 @@ class OverlayService:
                 if url
             ]
 
+        if group.get("media_binding_type") == "photo_list" and group.get("photo_list_id"):
+            photo_list = self.db.query(PhotoList).filter(PhotoList.id == group["photo_list_id"]).first()
+            if not photo_list or not photo_list.photo_ids:
+                return []
+            return [
+                url for url in
+                (self._resolve_photo_playback_url(photo_id) for photo_id in photo_list.photo_ids)
+                if url
+            ]
+
         video_id = group.get("video_id")
+        photo_id = group.get("photo_id")
         if group.get("media_binding_type") == "media_channel" and group.get("media_channel_id"):
             channel = self.db.query(MediaChannel).filter(MediaChannel.id == group["media_channel_id"]).first()
             if channel:
                 video_id = channel.current_video_id
+
+        if group.get("media_binding_type") == "photo":
+            if not photo_id:
+                return []
+            playback_url = self._resolve_photo_playback_url(photo_id)
+            return [playback_url] if playback_url else []
 
         if not video_id:
             return []
@@ -346,6 +365,12 @@ class OverlayService:
         if not video:
             return None
         return f"/api/videos/{video_id}/file"
+
+    def _resolve_photo_playback_url(self, photo_id: int) -> Optional[str]:
+        photo = self.db.query(PhotoModel).filter(PhotoModel.id == photo_id).first()
+        if not photo:
+            return None
+        return f"/api/photos/{photo_id}/file"
 
     def _resolve_video_stream_url(self, video_id: int, consumer_hint: Optional[str] = None) -> Optional[str]:
         video = self.db.query(VideoModel).filter(VideoModel.id == video_id).first()

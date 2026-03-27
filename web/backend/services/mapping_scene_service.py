@@ -145,6 +145,42 @@ class MappingSceneService:
         self.db.refresh(scene)
         return self._to_response(scene)
 
+    def delete_mask(self, scene_id: int, mask_id: str) -> MappingSceneResponse:
+        scene = self.db.query(MappingScene).filter(MappingScene.id == scene_id).first()
+        if not scene:
+            raise ValueError("Scene not found")
+
+        masks = list(scene.masks or [])
+        target_mask = next((mask for mask in masks if mask.get("id") == mask_id), None)
+        if not target_mask:
+            raise ValueError("Mask not found")
+
+        remaining_masks = [mask for mask in masks if mask.get("id") != mask_id]
+        for index, mask in enumerate(remaining_masks):
+            mask["sort_order"] = index
+
+        groups = []
+        for group in scene.groups or []:
+            next_group = dict(group)
+            next_group["mask_ids"] = [group_mask_id for group_mask_id in (group.get("mask_ids") or []) if group_mask_id != mask_id]
+            groups.append(next_group)
+
+        scene.masks = remaining_masks
+        scene.groups = groups
+        self.db.commit()
+        self.db.refresh(scene)
+
+        stored_path = target_mask.get("stored_path")
+        if stored_path:
+            absolute_path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                stored_path,
+            )
+            if os.path.exists(absolute_path):
+                os.remove(absolute_path)
+
+        return self._to_response(scene)
+
     def _scene_dir(self, scene_id: int) -> str:
         return os.path.join(self.upload_root, str(scene_id))
 

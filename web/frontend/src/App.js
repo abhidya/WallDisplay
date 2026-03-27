@@ -13,6 +13,7 @@ import DeviceDetail from './pages/DeviceDetail';
 import PlayVideo from './pages/PlayVideo';
 import PlayVideoOnDevice from './pages/PlayVideoOnDevice';
 import Videos from './pages/Videos';
+import Photos from './pages/Photos';
 import Settings from './pages/Settings';
 import NotFound from './pages/NotFound';
 import Renderer from './pages/Renderer';
@@ -51,6 +52,7 @@ function App() {
           <Route path="/devices/:id/play" element={<PlayVideo />} />
           <Route path="/devices/discover" element={<Devices />} />
           <Route path="/videos" element={<Videos />} />
+          <Route path="/photos" element={<Photos />} />
           <Route path="/videos/:id" element={<Videos />} />
           <Route path="/videos/:id/play" element={<PlayVideoOnDevice />} />
           <Route path="/videos/add" element={<Videos />} />

@@ -86,6 +86,18 @@ def create_polygon_mask(scene_id: int, payload: PolygonMaskCreateRequest, db: Se
         raise HTTPException(status_code=status_code, detail=detail) from exc
 
 
+@router.delete("/scenes/{scene_id}/masks/{mask_id}", response_model=MappingSceneResponse)
+def delete_mapping_mask(scene_id: int, mask_id: str, db: Session = Depends(get_db)):
+    try:
+        scene = MappingSceneService(db).delete_mask(scene_id, mask_id)
+        _notify_mapping_scene_dependents(db, scene_id, "mapping_mask_deleted")
+        return scene
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 404 if detail in {"Scene not found", "Mask not found"} else 400
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+
+
 @router.get("/scenes/{scene_id}/masks/{mask_id}/file")
 def get_mapping_mask_file(scene_id: int, mask_id: str, db: Session = Depends(get_db)):
     scene = db.query(MappingScene).filter(MappingScene.id == scene_id).first()

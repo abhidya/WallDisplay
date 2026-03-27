@@ -13,6 +13,8 @@ from typing import List, Dict, Any, Optional
 
 from database.database import init_db, get_db
 from routers import device_router, video_router, streaming_router, renderer_router, overlay_router, projection_router, log_router, mapping_router, media_library_router, structured_lighting_router
+from routers.photo_router import router as photo_router
+from routers.photo_list_router import router as photo_list_router
 from api.discovery_router import router as discovery_router
 from core.twisted_streaming import get_instance as get_twisted_streaming
 from core.streaming_service import get_streaming_service
@@ -103,6 +105,8 @@ app.add_middleware(
 # Include routers with /api prefix
 app.include_router(device_router, prefix="/api")
 app.include_router(video_router, prefix="/api")
+app.include_router(photo_router, prefix="/api")
+app.include_router(photo_list_router)
 app.include_router(streaming_router, prefix="/api")
 app.include_router(renderer_router, prefix="/api")  # Add the renderer router
 app.include_router(overlay_router)  # Overlay router already has /api prefix
