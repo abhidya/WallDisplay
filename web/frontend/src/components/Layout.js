@@ -39,15 +39,16 @@ import {
 
 const drawerWidth = 240;
 const collapsedDrawerWidth = 64;
+const UI_PREFS_KEY = 'nanoDlnaUiPrefs';
 
 const menuItems = [
   { text: 'Dashboard', icon: <DashboardIcon />, path: '/' },
   { text: 'Devices', icon: <DevicesIcon />, path: '/devices' },
   { text: 'Videos', icon: <VideoLibraryIcon />, path: '/videos' },
   { text: 'Photos', icon: <PhotoLibraryIcon />, path: '/photos' },
-  { text: 'Renderer', icon: <RendererIcon />, path: '/renderer' },
-  { text: 'Depth Processing', icon: <DepthIcon />, path: '/depth' },
-  { text: 'Projection Mapping', icon: <ProjectionIcon />, path: '/projection' },
+  { text: 'Renderer', icon: <RendererIcon />, path: '/renderer', experimental: true },
+  { text: 'Depth Processing', icon: <DepthIcon />, path: '/depth', experimental: true },
+  { text: 'Projection Mapping', icon: <ProjectionIcon />, path: '/projection', experimental: true },
   { text: 'Mappings', icon: <MappingIcon />, path: '/mappings' },
   { text: 'Structured Lighting', icon: <StructuredLightingIcon />, path: '/structured-lighting' },
   { text: 'Scene Control', icon: <SceneControlIcon />, path: '/scene-control' },
@@ -57,6 +58,20 @@ const menuItems = [
   { text: 'Settings', icon: <SettingsIcon />, path: '/settings' },
 ];
 
+function getUiPrefs() {
+  try {
+    const raw = localStorage.getItem(UI_PREFS_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return {
+      showExperimentalTabs: Boolean(parsed.showExperimentalTabs),
+    };
+  } catch (error) {
+    return {
+      showExperimentalTabs: false,
+    };
+  }
+}
+
 function Layout({ children }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [drawerCollapsed, setDrawerCollapsed] = useState(() => {
@@ -64,13 +79,27 @@ function Layout({ children }) {
     const saved = localStorage.getItem('drawerCollapsed');
     return saved === 'true';
   });
+  const [showExperimentalTabs, setShowExperimentalTabs] = useState(() => getUiPrefs().showExperimentalTabs);
   const navigate = useNavigate();
   const location = useLocation();
+  const visibleMenuItems = menuItems.filter((item) => showExperimentalTabs || !item.experimental);
 
   // Save collapsed state to localStorage when it changes
   useEffect(() => {
     localStorage.setItem('drawerCollapsed', drawerCollapsed.toString());
   }, [drawerCollapsed]);
+
+  useEffect(() => {
+    const syncPrefs = () => {
+      setShowExperimentalTabs(getUiPrefs().showExperimentalTabs);
+    };
+    window.addEventListener('storage', syncPrefs);
+    window.addEventListener('nanoDlnaUiPrefsChanged', syncPrefs);
+    return () => {
+      window.removeEventListener('storage', syncPrefs);
+      window.removeEventListener('nanoDlnaUiPrefsChanged', syncPrefs);
+    };
+  }, []);
 
   const handleDrawerToggle = () => {
     setMobileOpen(!mobileOpen);
@@ -99,7 +128,7 @@ function Layout({ children }) {
       </Toolbar>
       <Divider />
       <List>
-        {menuItems.map((item) => (
+        {visibleMenuItems.map((item) => (
           <ListItem key={item.text} disablePadding>
             <Tooltip title={drawerCollapsed ? item.text : ''} placement="right">
               <ListItemButton

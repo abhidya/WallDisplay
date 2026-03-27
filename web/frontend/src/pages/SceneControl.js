@@ -25,7 +25,7 @@ import {
   Typography,
 } from '@mui/material';
 
-import { mappingsApi, mediaLibraryApi, photoApi, photoListApi, videoApi } from '../services/api';
+import { mappingsApi, mediaLibraryApi, photoApi, photoListApi, projectionApi, videoApi } from '../services/api';
 
 function normalizeNumericIdList(values) {
   return (Array.isArray(values) ? values : [])
@@ -36,6 +36,8 @@ function normalizeNumericIdList(values) {
 function createRowEdit(group = {}) {
   return {
     media_binding_type: group.media_binding_type || 'video',
+    animation_id: group.animation_id || '',
+    animation_list_id: group.animation_list_id || '',
     video_id: group.video_id || '',
     photo_id: group.photo_id || '',
     media_list_id: group.media_list_id || '',
@@ -221,6 +223,8 @@ function SceneControl() {
   const [photoLists, setPhotoLists] = useState([]);
   const [mediaChannels, setMediaChannels] = useState([]);
   const [mediaDirectories, setMediaDirectories] = useState([]);
+  const [projectionAnimations, setProjectionAnimations] = useState([]);
+  const [animationLists, setAnimationLists] = useState([]);
   const [groupAssignments, setGroupAssignments] = useState({});
   const [rowEdits, setRowEdits] = useState({});
   const [dragState, setDragState] = useState(null);
@@ -239,7 +243,9 @@ function SceneControl() {
       mediaLibraryApi.listMediaLists(),
       photoListApi.listPhotoLists(),
       mediaLibraryApi.listMediaChannels(),
-    ]).then(([sceneRes, videoRes, photoRes, mediaDirectoryRes, mediaListRes, photoListRes, mediaChannelRes]) => {
+      projectionApi.listAnimations(),
+      projectionApi.listAnimationLists(),
+    ]).then(([sceneRes, videoRes, photoRes, mediaDirectoryRes, mediaListRes, photoListRes, mediaChannelRes, animationRes, animationListRes]) => {
       if (!active) {
         return;
       }
@@ -252,6 +258,8 @@ function SceneControl() {
       setMediaLists(mediaListRes.data || []);
       setPhotoLists(photoListRes.data || []);
       setMediaChannels(mediaChannelRes.data || []);
+      setProjectionAnimations(animationRes.data?.animations || []);
+      setAnimationLists(animationListRes.data?.animation_lists || []);
       setLoading(false);
     }).catch((err) => {
       console.error(err);
@@ -350,6 +358,8 @@ function SceneControl() {
             groupsById[target.id] = {
               ...groupsById[target.id],
               media_binding_type: edit.media_binding_type,
+              animation_id: edit.animation_id || null,
+              animation_list_id: edit.animation_list_id || null,
               video_id: edit.video_id ? Number(edit.video_id) : null,
               photo_id: edit.photo_id ? Number(edit.photo_id) : null,
               media_list_id: edit.media_list_id ? Number(edit.media_list_id) : null,
@@ -567,6 +577,8 @@ function SceneControl() {
                                 onChange={(event) => updateRowEdit(row.index, { media_binding_type: event.target.value })}
                               >
                                 <MenuItem value="video">Video</MenuItem>
+                                <MenuItem value="animation">Animation</MenuItem>
+                                <MenuItem value="animation_list">Animation List</MenuItem>
                                 <MenuItem value="photo">Photo</MenuItem>
                                 <MenuItem value="media_directory">Saved Media Folder</MenuItem>
                                 <MenuItem value="media_list">Media List</MenuItem>
@@ -614,6 +626,38 @@ function SceneControl() {
                           </Grid>
                         </Grid>
 
+                        {edit.media_binding_type === 'animation' && (
+                          <FormControl fullWidth size="small">
+                            <InputLabel>Animation</InputLabel>
+                            <Select
+                              label="Animation"
+                              value={edit.animation_id}
+                              onChange={(event) => updateRowEdit(row.index, { animation_id: event.target.value })}
+                            >
+                              {projectionAnimations.map((animation) => (
+                                <MenuItem key={animation.id} value={animation.id}>
+                                  {animation.thumbnail} {animation.name}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        )}
+                        {edit.media_binding_type === 'animation_list' && (
+                          <FormControl fullWidth size="small">
+                            <InputLabel>Animation List</InputLabel>
+                            <Select
+                              label="Animation List"
+                              value={edit.animation_list_id}
+                              onChange={(event) => updateRowEdit(row.index, { animation_list_id: event.target.value })}
+                            >
+                              {animationLists.map((animationList) => (
+                                <MenuItem key={animationList.id} value={animationList.id}>
+                                  {animationList.name} ({(animationList.animation_ids || []).length})
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        )}
                         {edit.media_binding_type === 'video' && (
                           <TextField
                             select

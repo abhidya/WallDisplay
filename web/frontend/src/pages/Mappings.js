@@ -40,7 +40,7 @@ import {
   VisibilityOff as VisibilityOffIcon,
 } from '@mui/icons-material';
 
-import { mappingsApi, mediaLibraryApi, photoApi, photoListApi, videoApi } from '../services/api';
+import { mappingsApi, mediaLibraryApi, photoApi, photoListApi, projectionApi, videoApi } from '../services/api';
 
 const SIDEBAR_WIDTH = 320;
 const INSPECTOR_WIDTH = 360;
@@ -56,6 +56,8 @@ const emptyGroup = () => ({
   name: 'New Group',
   mask_ids: [],
   media_binding_type: 'video',
+  animation_id: '',
+  animation_list_id: '',
   video_id: '',
   photo_id: '',
   media_list_id: '',
@@ -94,6 +96,17 @@ function normalizeNumericIdList(values) {
     .filter((value) => Number.isInteger(value) && value > 0);
 }
 
+function addHexAlpha(color, alphaHex) {
+  if (typeof color !== 'string') {
+    return color;
+  }
+  const normalized = color.trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(normalized)) {
+    return `${normalized}${alphaHex}`;
+  }
+  return normalized;
+}
+
 function Mappings() {
   const [searchParams, setSearchParams] = useSearchParams();
   const stageRef = useRef(null);
@@ -108,6 +121,8 @@ function Mappings() {
   const [photoLists, setPhotoLists] = useState([]);
   const [mediaChannels, setMediaChannels] = useState([]);
   const [mediaDirectories, setMediaDirectories] = useState([]);
+  const [projectionAnimations, setProjectionAnimations] = useState([]);
+  const [animationLists, setAnimationLists] = useState([]);
   const [maskImages, setMaskImages] = useState({});
   const [selectedGroupId, setSelectedGroupId] = useState('');
   const [uiHidden, setUiHidden] = useState(false);
@@ -146,7 +161,9 @@ function Mappings() {
       mediaLibraryApi.listMediaLists(),
       photoListApi.listPhotoLists(),
       mediaLibraryApi.listMediaChannels(),
-    ]).then(([sceneRes, videoRes, photoRes, mediaDirectoryRes, mediaListRes, photoListRes, mediaChannelRes]) => {
+      projectionApi.listAnimations(),
+      projectionApi.listAnimationLists(),
+    ]).then(([sceneRes, videoRes, photoRes, mediaDirectoryRes, mediaListRes, photoListRes, mediaChannelRes, animationRes, animationListRes]) => {
       const loadedScenes = sceneRes.data || [];
       setScenes(loadedScenes);
       setVideos(videoRes.data.videos || []);
@@ -155,6 +172,8 @@ function Mappings() {
       setMediaLists(mediaListRes.data || []);
       setPhotoLists(photoListRes.data || []);
       setMediaChannels(mediaChannelRes.data || []);
+      setProjectionAnimations(animationRes.data?.animations || []);
+      setAnimationLists(animationListRes.data?.animation_lists || []);
       pickInitialScene(loadedScenes);
     }).catch((err) => {
       console.error(err);
@@ -256,6 +275,7 @@ function Mappings() {
           photo_id: group.photo_id ? Number(group.photo_id) : null,
           media_list_id: group.media_list_id ? Number(group.media_list_id) : null,
           photo_list_id: group.photo_list_id ? Number(group.photo_list_id) : null,
+          animation_list_id: group.animation_list_id || null,
           media_channel_id: group.media_channel_id ? Number(group.media_channel_id) : null,
           media_directory_id: group.media_directory_id ? Number(group.media_directory_id) : null,
           media_directory_ids: normalizeNumericIdList(group.media_directory_ids || []),
@@ -320,6 +340,27 @@ function Mappings() {
     } catch (err) {
       console.error(err);
       setError('Failed to upload masks');
+    }
+  };
+
+  const importSceneBundle = async (event) => {
+    if (!event.target.files?.length) return;
+    const formData = new FormData();
+    formData.append('bundle', event.target.files[0]);
+
+    try {
+      const response = await mappingsApi.importScene(formData);
+      const importedScene = response.data;
+      const scenesResponse = await mappingsApi.listScenes();
+      setScenes(scenesResponse.data);
+      loadScene(importedScene);
+      setMessage(`Imported scene "${importedScene.name}"`);
+      setError('');
+    } catch (err) {
+      console.error(err);
+      setError(err.response?.data?.detail || 'Failed to import scene bundle');
+    } finally {
+      event.target.value = '';
     }
   };
 
@@ -575,6 +616,18 @@ function Mappings() {
           <Stack direction="row" spacing={1}>
             <Button variant="contained" color="secondary" startIcon={<AddIcon />} onClick={createSceneDraft}>
               New Scene
+            </Button>
+            <Button component="label" variant="outlined" startIcon={<UploadIcon />}>
+              Import Scene
+              <input hidden accept=".zip" type="file" onChange={importSceneBundle} />
+            </Button>
+            <Button
+              component="a"
+              href={selectedScene ? mappingsApi.getExportUrl(selectedScene.id) : undefined}
+              variant="outlined"
+              disabled={!selectedScene}
+            >
+              Export Scene
             </Button>
             <Button variant="outlined" color="error" startIcon={<DeleteIcon />} onClick={deleteScene} disabled={!selectedScene}>
               Delete Scene
@@ -860,8 +913,32 @@ function Mappings() {
                           </IconButton>
                         )}
                       >
-                        <ListItemButton selected={selectedGroupId === group.id} onClick={() => setSelectedGroupId(group.id)}>
-                          <ListItemText primary={group.name} secondary={`${group.mask_ids.length} masks • z ${group.z_index || 0}`} />
+                        <ListItemButton
+                          selected={selectedGroupId === group.id}
+                          onClick={() => setSelectedGroupId(group.id)}
+                          sx={{
+                            borderRadius: 1.5,
+                            mb: 0.75,
+                            border: `1px solid ${selectedGroupId === group.id ? addHexAlpha(group.color_a || '#b56a2d', 'aa') : PANEL_BORDER}`,
+                            background: `linear-gradient(135deg, ${addHexAlpha(group.color_a || '#b56a2d', '33')}, ${addHexAlpha(group.color_b || '#6a7f58', '66')})`,
+                            color: PANEL_TEXT,
+                            '&.Mui-selected': {
+                              background: `linear-gradient(135deg, ${addHexAlpha(group.color_a || '#b56a2d', '55')}, ${addHexAlpha(group.color_b || '#6a7f58', '88')})`,
+                            },
+                            '&.Mui-selected:hover': {
+                              background: `linear-gradient(135deg, ${addHexAlpha(group.color_a || '#b56a2d', '66')}, ${addHexAlpha(group.color_b || '#6a7f58', '99')})`,
+                            },
+                            '&:hover': {
+                              background: `linear-gradient(135deg, ${addHexAlpha(group.color_a || '#b56a2d', '44')}, ${addHexAlpha(group.color_b || '#6a7f58', '77')})`,
+                            },
+                          }}
+                        >
+                          <ListItemText
+                            primary={group.name}
+                            secondary={`${group.mask_ids.length} masks • z ${group.z_index || 0}`}
+                            primaryTypographyProps={{ fontWeight: selectedGroupId === group.id ? 700 : 600 }}
+                            secondaryTypographyProps={{ color: 'rgba(38, 31, 22, 0.78)' }}
+                          />
                         </ListItemButton>
                       </ListItem>
                     ))}
@@ -919,6 +996,8 @@ function Mappings() {
                             onChange={(event) => updateGroup(selectedGroup.id, { media_binding_type: event.target.value })}
                           >
                             <MenuItem value="video">Video</MenuItem>
+                            <MenuItem value="animation">Animation</MenuItem>
+                            <MenuItem value="animation_list">Animation List</MenuItem>
                             <MenuItem value="photo">Photo</MenuItem>
                             <MenuItem value="media_directory">Saved Media Folder</MenuItem>
                             <MenuItem value="media_list">Media List</MenuItem>
@@ -928,6 +1007,39 @@ function Mappings() {
                           </Select>
                         </FormControl>
 
+                        {selectedGroup.media_binding_type === 'animation' && (
+                          <FormControl fullWidth size="small">
+                            <InputLabel>Animation</InputLabel>
+                            <Select
+                              label="Animation"
+                              value={selectedGroup.animation_id || ''}
+                              onChange={(event) => updateGroup(selectedGroup.id, { animation_id: event.target.value })}
+                            >
+                              {projectionAnimations.map((animation) => (
+                                <MenuItem key={animation.id} value={animation.id}>
+                                  {animation.thumbnail} {animation.name}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        )}
+
+                        {selectedGroup.media_binding_type === 'animation_list' && (
+                          <FormControl fullWidth size="small">
+                            <InputLabel>Animation List</InputLabel>
+                            <Select
+                              label="Animation List"
+                              value={selectedGroup.animation_list_id || ''}
+                              onChange={(event) => updateGroup(selectedGroup.id, { animation_list_id: event.target.value })}
+                            >
+                              {animationLists.map((animationList) => (
+                                <MenuItem key={animationList.id} value={animationList.id}>
+                                  {animationList.name} ({(animationList.animation_ids || []).length})
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        )}
                         {selectedGroup.media_binding_type === 'video' && (
                           <FormControl fullWidth sx={darkSelectSx}>
                             <InputLabel>Video</InputLabel>

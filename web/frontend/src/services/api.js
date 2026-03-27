@@ -154,6 +154,7 @@ const structuredLightingApi = {
   startSession: (sessionId) => api.post(`/structured-lighting/sessions/${sessionId}/start`),
   publishMappingScene: (sessionId, payload = {}) => api.post(`/structured-lighting/sessions/${sessionId}/publish-mapping-scene`, payload),
   getStepImageUrl: (sessionId, stepIndex) => `/api/structured-lighting/sessions/${sessionId}/steps/${stepIndex}/image`,
+  getCaptureImageUrl: (sessionId, stepIndex) => `/api/structured-lighting/sessions/${sessionId}/captures/${stepIndex}/image`,
   getArtifactPreviewUrl: (sessionId, previewId) => `/api/structured-lighting/sessions/${sessionId}/artifacts/previews/${previewId}`,
   getTuningSearchPreviewUrl: (sessionId, candidateId, previewName) => `/api/structured-lighting/sessions/${sessionId}/tuning-search/${candidateId}/previews/${previewName}`,
   getExportUrl: (sessionId) => `/api/structured-lighting/sessions/${sessionId}/export`,
@@ -202,6 +203,12 @@ const mappingsApi = {
   createScene: (data) => api.post('/mappings/scenes', data),
   updateScene: (id, data) => api.put(`/mappings/scenes/${id}`, data),
   deleteScene: (id) => api.delete(`/mappings/scenes/${id}`),
+  importScene: (formData) => api.post('/mappings/scenes/import', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  }),
+  getExportUrl: (id) => `/api/mappings/scenes/${id}/export`,
   createPolygonMask: (id, data) => api.post(`/mappings/scenes/${id}/masks/polygon`, data),
   uploadMasks: (id, formData) => api.post(`/mappings/scenes/${id}/masks/upload`, formData, {
     headers: {
@@ -233,6 +240,15 @@ const photoListApi = {
   createPhotoList: (data) => api.post('/photo-lists/', data),
   updatePhotoList: (id, data) => api.put(`/photo-lists/${id}`, data),
   deletePhotoList: (id) => api.delete(`/photo-lists/${id}`),
+};
+
+const projectionApi = {
+  listAnimations: () => api.get('/projection/animations'),
+  listAnimationLists: () => api.get('/projection/animation-lists'),
+  getAnimationList: (id) => api.get(`/projection/animation-lists/${id}`),
+  createAnimationList: (data) => api.post('/projection/animation-lists', data),
+  updateAnimationList: (id, data) => api.put(`/projection/animation-lists/${id}`, data),
+  deleteAnimationList: (id) => api.delete(`/projection/animation-lists/${id}`),
 };
 
 // Renderer API
@@ -328,6 +344,7 @@ export {
   mappingsApi,
   mediaLibraryApi,
   photoListApi,
+  projectionApi,
   rendererApi, 
   depthApi, 
   streamingApi, 

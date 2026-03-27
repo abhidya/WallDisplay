@@ -40,6 +40,10 @@ import {
     WbSunny as WeatherIcon,
     Schedule as TimeIcon,
     DirectionsBus as TransitIcon,
+    MusicNote as MusicIcon,
+    Email as EmailIcon,
+    DeviceThermostat as ClimateIcon,
+    SportsEsports as SteamIcon,
     Visibility as VisibilityIcon,
     VisibilityOff as VisibilityOffIcon,
     NightsStay as NightsStayIcon,
@@ -72,6 +76,49 @@ function OverlayProjection() {
     const [castSessions, setCastSessions] = useState([]);
     const [castLoading, setCastLoading] = useState(false);
     const [castDebugOpen, setCastDebugOpen] = useState(true);
+
+    const widgetTemplates = {
+        weather: {
+            type: 'weather',
+            size: { width: 400, height: 200 },
+            config: { city: 'San Francisco', units: 'imperial' },
+        },
+        time: {
+            type: 'time',
+            size: { width: 300, height: 100 },
+            config: { format: '12h', showSeconds: true, timezone: 'PST' },
+        },
+        transit: {
+            type: 'transit',
+            size: { width: 400, height: 200 },
+            config: { stopName: 'Carl St & Stanyan St', routeFilter: 'N Judah' },
+        },
+        lights: {
+            type: 'lights',
+            size: { width: 120, height: 60 },
+            config: {},
+        },
+        spotify: {
+            type: 'spotify',
+            size: { width: 420, height: 140 },
+            config: { theme: 'minimal' },
+        },
+        gmail: {
+            type: 'gmail',
+            size: { width: 420, height: 220 },
+            config: { maxItems: 4 },
+        },
+        climate: {
+            type: 'climate',
+            size: { width: 300, height: 180 },
+            config: { units: 'celsius' },
+        },
+        steam: {
+            type: 'steam',
+            size: { width: 360, height: 140 },
+            config: { showAvatar: true },
+        },
+    };
     
     useEffect(() => {
         fetchVideos();
@@ -244,12 +291,62 @@ function OverlayProjection() {
                     config: {},
                     visible: true,
                     rotation: 0
+                },
+                {
+                    id: 'spotify-1',
+                    type: 'spotify',
+                    position: { x: 520, y: 50 },
+                    size: { width: 420, height: 140 },
+                    config: { theme: 'minimal' },
+                    visible: true,
+                    rotation: 0
+                },
+                {
+                    id: 'gmail-1',
+                    type: 'gmail',
+                    position: { x: 980, y: 50 },
+                    size: { width: 420, height: 220 },
+                    config: { maxItems: 4 },
+                    visible: true,
+                    rotation: 0
+                },
+                {
+                    id: 'climate-1',
+                    type: 'climate',
+                    position: { x: 1470, y: 180 },
+                    size: { width: 300, height: 180 },
+                    config: { units: 'celsius' },
+                    visible: true,
+                    rotation: 0
+                },
+                {
+                    id: 'steam-1',
+                    type: 'steam',
+                    position: { x: 520, y: 830 },
+                    size: { width: 360, height: 140 },
+                    config: { showAvatar: true },
+                    visible: true,
+                    rotation: 0
                 }
             ],
             api_configs: {
                 weather_api_key: localStorage.getItem('weather_api_key') || '',
                 transit_stop_id: localStorage.getItem('transit_stop_id') || '13915',
-                timezone: 'America/Los_Angeles'
+                timezone: 'America/Los_Angeles',
+                spotify_client_id: localStorage.getItem('spotify_client_id') || '',
+                spotify_client_secret: localStorage.getItem('spotify_client_secret') || '',
+                spotify_refresh_token: localStorage.getItem('spotify_refresh_token') || '',
+                spotify_access_token: localStorage.getItem('spotify_access_token') || '',
+                gmail_client_id: localStorage.getItem('gmail_client_id') || '',
+                gmail_client_secret: localStorage.getItem('gmail_client_secret') || '',
+                gmail_refresh_token: localStorage.getItem('gmail_refresh_token') || '',
+                gmail_access_token: localStorage.getItem('gmail_access_token') || '',
+                steam_api_key: localStorage.getItem('steam_api_key') || '',
+                steam_id: localStorage.getItem('steam_id') || '',
+                tuya_access_id: localStorage.getItem('tuya_access_id') || '',
+                tuya_access_secret: localStorage.getItem('tuya_access_secret') || '',
+                tuya_device_id: localStorage.getItem('tuya_device_id') || '',
+                tuya_api_base_url: localStorage.getItem('tuya_api_base_url') || 'https://openapi.tuyaus.com',
             }
         };
         
@@ -466,6 +563,58 @@ function OverlayProjection() {
         // Save to localStorage for persistence
         localStorage.setItem(key, value);
     };
+
+    const addWidget = (type) => {
+        if (!selectedConfig || !widgetTemplates[type]) {
+            return;
+        }
+        const template = widgetTemplates[type];
+        const count = selectedConfig.widgets.filter((widget) => widget.type === type).length + 1;
+        const updatedConfig = {
+            ...selectedConfig,
+            widgets: [
+                ...selectedConfig.widgets,
+                {
+                    id: `${type}-${count}`,
+                    type: template.type,
+                    position: { x: 120 + (count * 20), y: 120 + (count * 20) },
+                    size: template.size,
+                    config: template.config,
+                    visible: true,
+                    rotation: 0,
+                }
+            ]
+        };
+        updateConfig(updatedConfig);
+    };
+
+    const addRequestedWidgets = () => {
+        if (!selectedConfig) {
+            return;
+        }
+        const requestedTypes = ['spotify', 'gmail', 'climate', 'steam'];
+        const existingTypes = new Set(selectedConfig.widgets.map((widget) => widget.type));
+        let nextConfig = { ...selectedConfig, widgets: [...selectedConfig.widgets] };
+
+        requestedTypes.forEach((type) => {
+            if (existingTypes.has(type) || !widgetTemplates[type]) {
+                return;
+            }
+            const template = widgetTemplates[type];
+            const count = nextConfig.widgets.filter((widget) => widget.type === type).length + 1;
+            nextConfig.widgets.push({
+                id: `${type}-${count}`,
+                type: template.type,
+                position: { x: 120 + (count * 20), y: 120 + (count * 20) },
+                size: template.size,
+                config: template.config,
+                visible: true,
+                rotation: 0,
+            });
+        });
+
+        updateConfig(nextConfig);
+    };
     
     const getWidgetIcon = (type) => {
         switch(type) {
@@ -473,6 +622,10 @@ function OverlayProjection() {
             case 'time': return <TimeIcon />;
             case 'transit': return <TransitIcon />;
             case 'lights': return <NightsStayIcon />;
+            case 'spotify': return <MusicIcon />;
+            case 'gmail': return <EmailIcon />;
+            case 'climate': return <ClimateIcon />;
+            case 'steam': return <SteamIcon />;
             default: return <SettingsIcon />;
         }
     };
@@ -653,15 +806,27 @@ function OverlayProjection() {
                         <CardHeader 
                             title="Widget Configuration"
                             action={
-                                <Button
-                                    startIcon={<SettingsIcon />}
-                                    onClick={() => setApiConfigDialog(true)}
-                                >
-                                    API Settings
-                                </Button>
+                                <Stack direction="row" spacing={1}>
+                                    <Button
+                                        startIcon={<SettingsIcon />}
+                                        onClick={() => setApiConfigDialog(true)}
+                                    >
+                                        API Settings
+                                    </Button>
+                                </Stack>
                             }
                         />
                         <CardContent>
+                            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 2 }}>
+                                <Button size="small" variant="contained" onClick={addRequestedWidgets}>
+                                    Add Requested Widgets
+                                </Button>
+                                {['spotify', 'gmail', 'climate', 'steam'].map((type) => (
+                                    <Button key={type} size="small" variant="outlined" onClick={() => addWidget(type)} startIcon={getWidgetIcon(type)}>
+                                        Add {type}
+                                    </Button>
+                                ))}
+                            </Stack>
                             <List>
                                 {selectedConfig.widgets.map(widget => (
                                     <ListItem key={widget.id}>
@@ -1057,6 +1222,94 @@ function OverlayProjection() {
                             fullWidth
                             value={selectedConfig?.api_configs?.timezone || 'America/Los_Angeles'}
                             onChange={(e) => updateApiConfig('timezone', e.target.value)}
+                        />
+                        <Divider />
+                        <TextField
+                            label="Spotify Client ID"
+                            fullWidth
+                            value={selectedConfig?.api_configs?.spotify_client_id || ''}
+                            onChange={(e) => updateApiConfig('spotify_client_id', e.target.value)}
+                        />
+                        <TextField
+                            label="Spotify Client Secret"
+                            fullWidth
+                            value={selectedConfig?.api_configs?.spotify_client_secret || ''}
+                            onChange={(e) => updateApiConfig('spotify_client_secret', e.target.value)}
+                        />
+                        <TextField
+                            label="Spotify Refresh Token"
+                            fullWidth
+                            value={selectedConfig?.api_configs?.spotify_refresh_token || ''}
+                            onChange={(e) => updateApiConfig('spotify_refresh_token', e.target.value)}
+                        />
+                        <TextField
+                            label="Spotify Access Token Override"
+                            fullWidth
+                            value={selectedConfig?.api_configs?.spotify_access_token || ''}
+                            onChange={(e) => updateApiConfig('spotify_access_token', e.target.value)}
+                        />
+                        <Divider />
+                        <TextField
+                            label="Gmail Client ID"
+                            fullWidth
+                            value={selectedConfig?.api_configs?.gmail_client_id || ''}
+                            onChange={(e) => updateApiConfig('gmail_client_id', e.target.value)}
+                        />
+                        <TextField
+                            label="Gmail Client Secret"
+                            fullWidth
+                            value={selectedConfig?.api_configs?.gmail_client_secret || ''}
+                            onChange={(e) => updateApiConfig('gmail_client_secret', e.target.value)}
+                        />
+                        <TextField
+                            label="Gmail Refresh Token"
+                            fullWidth
+                            value={selectedConfig?.api_configs?.gmail_refresh_token || ''}
+                            onChange={(e) => updateApiConfig('gmail_refresh_token', e.target.value)}
+                        />
+                        <TextField
+                            label="Gmail Access Token Override"
+                            fullWidth
+                            value={selectedConfig?.api_configs?.gmail_access_token || ''}
+                            onChange={(e) => updateApiConfig('gmail_access_token', e.target.value)}
+                        />
+                        <Divider />
+                        <TextField
+                            label="Steam API Key"
+                            fullWidth
+                            value={selectedConfig?.api_configs?.steam_api_key || ''}
+                            onChange={(e) => updateApiConfig('steam_api_key', e.target.value)}
+                        />
+                        <TextField
+                            label="Steam ID"
+                            fullWidth
+                            value={selectedConfig?.api_configs?.steam_id || ''}
+                            onChange={(e) => updateApiConfig('steam_id', e.target.value)}
+                        />
+                        <Divider />
+                        <TextField
+                            label="Tuya Access ID"
+                            fullWidth
+                            value={selectedConfig?.api_configs?.tuya_access_id || ''}
+                            onChange={(e) => updateApiConfig('tuya_access_id', e.target.value)}
+                        />
+                        <TextField
+                            label="Tuya Access Secret"
+                            fullWidth
+                            value={selectedConfig?.api_configs?.tuya_access_secret || ''}
+                            onChange={(e) => updateApiConfig('tuya_access_secret', e.target.value)}
+                        />
+                        <TextField
+                            label="Tuya Device ID"
+                            fullWidth
+                            value={selectedConfig?.api_configs?.tuya_device_id || ''}
+                            onChange={(e) => updateApiConfig('tuya_device_id', e.target.value)}
+                        />
+                        <TextField
+                            label="Tuya API Base URL"
+                            fullWidth
+                            value={selectedConfig?.api_configs?.tuya_api_base_url || 'https://openapi.tuyaus.com'}
+                            onChange={(e) => updateApiConfig('tuya_api_base_url', e.target.value)}
                         />
                     </Box>
                 </DialogContent>

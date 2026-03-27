@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Grid,
   Paper,
@@ -34,6 +34,22 @@ import {
 } from '@mui/icons-material';
 import axios from 'axios';
 
+const UI_PREFS_KEY = 'nanoDlnaUiPrefs';
+
+function loadUiPrefs() {
+  try {
+    const raw = localStorage.getItem(UI_PREFS_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return {
+      showExperimentalTabs: Boolean(parsed.showExperimentalTabs),
+    };
+  } catch (error) {
+    return {
+      showExperimentalTabs: false,
+    };
+  }
+}
+
 function Settings() {
   const [configFile, setConfigFile] = useState('');
   const [openLoadDialog, setOpenLoadDialog] = useState(false);
@@ -50,8 +66,17 @@ function Settings() {
     enableLogging: true,
     logLevel: 'info',
     serverPort: 8000,
-    enableSubtitles: true
+    enableSubtitles: true,
+    showExperimentalTabs: false,
   });
+
+  useEffect(() => {
+    const uiPrefs = loadUiPrefs();
+    setSettings((current) => ({
+      ...current,
+      showExperimentalTabs: uiPrefs.showExperimentalTabs,
+    }));
+  }, []);
 
   const handleLoadConfig = async () => {
     try {
@@ -111,7 +136,13 @@ function Settings() {
   };
 
   const handleSaveSettings = () => {
-    // In a real application, this would save the settings to the server
+    localStorage.setItem(
+      UI_PREFS_KEY,
+      JSON.stringify({
+        showExperimentalTabs: settings.showExperimentalTabs,
+      }),
+    );
+    window.dispatchEvent(new Event('nanoDlnaUiPrefsChanged'));
     setSnackbar({
       open: true,
       message: 'Settings saved successfully',
@@ -187,6 +218,18 @@ function Settings() {
                   />
                 }
                 label="Enable subtitles"
+              />
+            </ListItem>
+            <ListItem>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={settings.showExperimentalTabs}
+                    onChange={(e) => handleSettingChange('showExperimentalTabs', e.target.checked)}
+                    color="primary"
+                  />
+                }
+                label="Show experimental tools (Renderer, Depth Processing, Projection Mapping, Projection Animation)"
               />
             </ListItem>
             <ListItem>

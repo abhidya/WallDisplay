@@ -43,6 +43,15 @@ function getProjectorOptionLabel(projector) {
   return projector?.name || projector?.friendly_name || getProjectorOptionId(projector);
 }
 
+function parseGridValues(value, parser) {
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => parser(item))
+    .filter((item) => Number.isFinite(item));
+}
+
 function StructuredLighting() {
   const navigate = useNavigate();
   const [capabilities, setCapabilities] = useState(null);
@@ -81,6 +90,21 @@ function StructuredLighting() {
     projector_screen_y: 0,
     projector_width: 1280,
     projector_height: 720,
+  });
+  const [decodeControls, setDecodeControls] = useState({
+    brightness_gain: 1.0,
+    white_threshold: 5,
+    black_threshold: 40,
+  });
+  const [searchGrid, setSearchGrid] = useState({
+    edge_modes: {
+      morph_gradient: true,
+      canny: true,
+      laplacian: true,
+    },
+    brightness_gain: '0.85, 1.0, 1.15',
+    white_threshold: '5, 12',
+    black_threshold: '30, 40, 55',
   });
   const runtimeRefreshInFlightRef = useRef(false);
 
@@ -210,6 +234,19 @@ function StructuredLighting() {
       active = false;
     };
   }, [selectedSessionId, syncSessionSnapshot]);
+
+  useEffect(() => {
+    const tuningParams = runtime?.session?.decode?.metrics?.tuning_params;
+    if (!tuningParams) {
+      return;
+    }
+    setDecodeControls((current) => ({
+      ...current,
+      brightness_gain: tuningParams.brightness_gain ?? current.brightness_gain,
+      white_threshold: tuningParams.white_threshold ?? current.white_threshold,
+      black_threshold: tuningParams.black_threshold ?? current.black_threshold,
+    }));
+  }, [runtime?.session?.decode?.metrics?.tuning_params]);
 
   const selectedSession = sessions.find((session) => session.session_id === selectedSessionId) || null;
   const selectedSessionStatus = runtime?.session?.status || selectedSession?.status || '';
@@ -406,7 +443,10 @@ function StructuredLighting() {
             }
           : current
       ));
-      await structuredLightingApi.decodeSession(sessionId, { sample_step: 1, tuning_params: tuningParams || undefined });
+      const effectiveTuningParams = tuningParams || {
+        ...decodeControls,
+      };
+      await structuredLightingApi.decodeSession(sessionId, { sample_step: 1, tuning_params: effectiveTuningParams });
       const [runtimeResponse, capturesResponse, sessionsResponse, reviewResponse, tuningSearchResponse] = await Promise.all([
         structuredLightingApi.getRuntime(sessionId),
         structuredLightingApi.listCaptures(sessionId),
@@ -423,7 +463,7 @@ function StructuredLighting() {
       setReviewedBy(reviewResponse.data?.review?.reviewed_by || '');
       await refreshStatus();
       setError('');
-      setMessage(tuningParams ? 'Decoded using selected tuning candidate.' : '');
+      setMessage(tuningParams ? 'Decoded using selected tuning candidate.' : 'Decoded using the current brightness and threshold settings.');
     } catch (err) {
       console.error('Failed to decode structured lighting session', err);
       setError('Failed to decode structured lighting session.');
@@ -500,7 +540,21 @@ function StructuredLighting() {
   const handleRunTuningSearch = async (sessionId) => {
     try {
       setActionLoading(true);
-      const response = await structuredLightingApi.runTuningSearch(sessionId, { sample_step: 1 });
+      const edgeModes = Object.entries(searchGrid.edge_modes)
+        .filter(([, enabled]) => enabled)
+        .map(([edgeMode]) => edgeMode);
+      const response = await structuredLightingApi.runTuningSearch(sessionId, {
+        sample_step: 1,
+        tuning_params: {
+          ...decodeControls,
+        },
+        parameter_grid: {
+          edge_mode: edgeModes.length ? edgeModes : ['morph_gradient'],
+          brightness_gain: parseGridValues(searchGrid.brightness_gain, Number),
+          white_threshold: parseGridValues(searchGrid.white_threshold, Number),
+          black_threshold: parseGridValues(searchGrid.black_threshold, Number),
+        },
+      });
       setTuningSearch(response.data);
       setError('');
       setMessage('Generated tuning candidates for operator review.');
@@ -549,6 +603,15 @@ function StructuredLighting() {
   const workerProcessState = status?.worker?.process_state || 'stopped';
   const workerCanConfirm = workerState === 'awaiting_operator' && Boolean(status?.worker?.worker_id);
   const workerCanStartSession = workerState === 'idle';
+  const currentStepIndex = runtime?.current_step?.index ?? null;
+  const capturedFrames = captures?.captures || [];
+  const currentStepCapture = currentStepIndex == null
+    ? null
+    : capturedFrames.find((capture) => capture.step_index === currentStepIndex)
+      || capturedFrames.find((capture) => capture.step_index === currentStepIndex - 1)
+      || null;
+  const latestCapture = capturedFrames.length ? capturedFrames[capturedFrames.length - 1] : null;
+  const previewCapture = currentStepCapture || latestCapture;
 
   useEffect(() => {
     if (!visibleSessions.length) {
@@ -1098,7 +1161,7 @@ function StructuredLighting() {
                             handleStartSession(session.session_id);
                           }}
                         >
-                          Start
+                          {session.captured_frames ? 'Restart' : 'Start'}
                         </Button>
                         <Button
                           size="small"
@@ -1198,19 +1261,81 @@ function StructuredLighting() {
                 {runtime?.current_step ? (
                   <Box>
                     <Typography variant="subtitle2" gutterBottom>Current Pattern Preview</Typography>
-                    <Box
-                      component="img"
-                      src={structuredLightingApi.getStepImageUrl(runtime.session.session_id, runtime.current_step.index)}
-                      alt={runtime.current_step.label}
-                      sx={{
-                        width: '100%',
-                        maxWidth: 320,
-                        display: 'block',
-                        border: '1px solid rgba(0,0,0,0.16)',
-                        borderRadius: 1,
-                        bgcolor: '#000',
-                      }}
-                    />
+                    <Grid container spacing={2}>
+                      <Grid item xs={12} md={6}>
+                        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                          Projected pattern
+                        </Typography>
+                        <Box
+                          component="img"
+                          src={structuredLightingApi.getStepImageUrl(runtime.session.session_id, runtime.current_step.index)}
+                          alt={runtime.current_step.label}
+                          sx={{
+                            width: '100%',
+                            maxWidth: 320,
+                            display: 'block',
+                            border: '1px solid rgba(0,0,0,0.16)',
+                            borderRadius: 1,
+                            bgcolor: '#000',
+                          }}
+                        />
+                      </Grid>
+                      <Grid item xs={12} md={6}>
+                        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
+                          <Typography variant="body2" color="text.secondary">
+                            {previewCapture ? 'Captured frame' : 'Captured frame pending'}
+                          </Typography>
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            disabled={!workerCanStartSession || !runtime?.session?.session_id}
+                            onClick={() => handleStartSession(runtime.session.session_id)}
+                          >
+                            Restart Session
+                          </Button>
+                        </Stack>
+                        {previewCapture ? (
+                          <Box>
+                            <Box
+                              component="img"
+                              src={previewCapture.url || structuredLightingApi.getCaptureImageUrl(runtime.session.session_id, previewCapture.step_index)}
+                              alt={`Capture ${previewCapture.step_index + 1}`}
+                              sx={{
+                                width: '100%',
+                                maxWidth: 320,
+                                display: 'block',
+                                border: '1px solid rgba(0,0,0,0.16)',
+                                borderRadius: 1,
+                                bgcolor: '#000',
+                                objectFit: 'contain',
+                              }}
+                            />
+                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+                              Step {previewCapture.step_index + 1}: {previewCapture.filename}
+                            </Typography>
+                          </Box>
+                        ) : (
+                          <Paper
+                            variant="outlined"
+                            sx={{
+                              width: '100%',
+                              maxWidth: 320,
+                              minHeight: 180,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              px: 2,
+                              textAlign: 'center',
+                              color: 'text.secondary',
+                            }}
+                          >
+                            <Typography variant="body2">
+                              No captured frame is available for this step yet. Restart the session if the sequence needs to be recaptured.
+                            </Typography>
+                          </Paper>
+                        )}
+                      </Grid>
+                    </Grid>
                   </Box>
                 ) : null}
                 {captures ? (
@@ -1314,12 +1439,118 @@ function StructuredLighting() {
                       </Button>
                       {runtime?.session?.decode?.metrics?.tuning_params ? (
                         <Chip
-                          label={`active tuning: threshold ${runtime.session.decode.metrics.tuning_params.segmentation_threshold}, blur ${runtime.session.decode.metrics.tuning_params.segmentation_blur}, contrast ${runtime.session.decode.metrics.tuning_params.contrast_threshold}, layer area ${runtime.session.decode.metrics.tuning_params.layer_min_area}`}
+                          label={`active tuning: ${runtime.session.decode.metrics.tuning_params.edge_mode}, brightness ${runtime.session.decode.metrics.tuning_params.brightness_gain}, white ${runtime.session.decode.metrics.tuning_params.white_threshold}, black ${runtime.session.decode.metrics.tuning_params.black_threshold}`}
                           size="small"
                           variant="outlined"
                         />
                       ) : null}
                     </Stack>
+                    <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
+                      <Stack spacing={2}>
+                        <Typography variant="subtitle2">Decode Controls</Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Adjust brightness and GrayCode thresholds before running decode or parameter search.
+                        </Typography>
+                        <Grid container spacing={2}>
+                          <Grid item xs={12} md={4}>
+                            <TextField
+                              label="Brightness Gain"
+                              type="number"
+                              value={decodeControls.brightness_gain}
+                              onChange={(event) => setDecodeControls((current) => ({
+                                ...current,
+                                brightness_gain: Number(event.target.value),
+                              }))}
+                              fullWidth
+                              inputProps={{ step: 0.05, min: 0.1, max: 3 }}
+                            />
+                          </Grid>
+                          <Grid item xs={12} md={4}>
+                            <TextField
+                              label="White Threshold"
+                              type="number"
+                              value={decodeControls.white_threshold}
+                              onChange={(event) => setDecodeControls((current) => ({
+                                ...current,
+                                white_threshold: Number(event.target.value),
+                              }))}
+                              fullWidth
+                              inputProps={{ min: 0, max: 255 }}
+                            />
+                          </Grid>
+                          <Grid item xs={12} md={4}>
+                            <TextField
+                              label="Black Threshold"
+                              type="number"
+                              value={decodeControls.black_threshold}
+                              onChange={(event) => setDecodeControls((current) => ({
+                                ...current,
+                                black_threshold: Number(event.target.value),
+                              }))}
+                              fullWidth
+                              inputProps={{ min: 0, max: 255 }}
+                            />
+                          </Grid>
+                        </Grid>
+                        <Typography variant="subtitle2">Parameter Search Grid</Typography>
+                        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                          {['morph_gradient', 'canny', 'laplacian'].map((edgeMode) => (
+                            <Button
+                              key={edgeMode}
+                              size="small"
+                              variant={searchGrid.edge_modes[edgeMode] ? 'contained' : 'outlined'}
+                              onClick={() => setSearchGrid((current) => ({
+                                ...current,
+                                edge_modes: {
+                                  ...current.edge_modes,
+                                  [edgeMode]: !current.edge_modes[edgeMode],
+                                },
+                              }))}
+                            >
+                              {edgeMode}
+                            </Button>
+                          ))}
+                        </Stack>
+                        <Grid container spacing={2}>
+                          <Grid item xs={12} md={4}>
+                            <TextField
+                              label="Brightness Grid"
+                              value={searchGrid.brightness_gain}
+                              onChange={(event) => setSearchGrid((current) => ({
+                                ...current,
+                                brightness_gain: event.target.value,
+                              }))}
+                              helperText="Comma-separated, e.g. 0.85, 1.0, 1.15"
+                              fullWidth
+                            />
+                          </Grid>
+                          <Grid item xs={12} md={4}>
+                            <TextField
+                              label="White Threshold Grid"
+                              value={searchGrid.white_threshold}
+                              onChange={(event) => setSearchGrid((current) => ({
+                                ...current,
+                                white_threshold: event.target.value,
+                              }))}
+                              helperText="Comma-separated, e.g. 5, 12"
+                              fullWidth
+                            />
+                          </Grid>
+                          <Grid item xs={12} md={4}>
+                            <TextField
+                              label="Black Threshold Grid"
+                              value={searchGrid.black_threshold}
+                              onChange={(event) => setSearchGrid((current) => ({
+                                ...current,
+                                black_threshold: event.target.value,
+                              }))}
+                              helperText="Comma-separated, e.g. 30, 40, 55"
+                              fullWidth
+                            />
+                          </Grid>
+                        </Grid>
+                      </Stack>
+                    </Paper>
                     {tuningSearch?.candidates?.length ? (
                       <Stack spacing={2}>
                         <Typography variant="subtitle2">
@@ -1350,6 +1581,10 @@ function StructuredLighting() {
                                     </Button>
                                   </Stack>
                                   <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 1.5 }}>
+                                    <Chip label={`edge ${candidate.params.edge_mode}`} size="small" variant="outlined" />
+                                    <Chip label={`brightness ${candidate.params.brightness_gain}`} size="small" variant="outlined" />
+                                    <Chip label={`white ${candidate.params.white_threshold}`} size="small" variant="outlined" />
+                                    <Chip label={`black ${candidate.params.black_threshold}`} size="small" variant="outlined" />
                                     <Chip label={`seg threshold ${candidate.params.segmentation_threshold}`} size="small" variant="outlined" />
                                     <Chip label={`seg blur ${candidate.params.segmentation_blur}`} size="small" variant="outlined" />
                                     <Chip label={`contrast ${candidate.params.contrast_threshold}`} size="small" variant="outlined" />

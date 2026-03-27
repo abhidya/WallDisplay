@@ -29,6 +29,20 @@ class ApiConfigs(BaseModel):
     weather_api_key: Optional[str] = ""
     transit_stop_id: Optional[str] = ""
     timezone: Optional[str] = "America/Los_Angeles"
+    spotify_client_id: Optional[str] = ""
+    spotify_client_secret: Optional[str] = ""
+    spotify_refresh_token: Optional[str] = ""
+    spotify_access_token: Optional[str] = ""
+    gmail_client_id: Optional[str] = ""
+    gmail_client_secret: Optional[str] = ""
+    gmail_refresh_token: Optional[str] = ""
+    gmail_access_token: Optional[str] = ""
+    steam_api_key: Optional[str] = ""
+    steam_id: Optional[str] = ""
+    tuya_access_id: Optional[str] = ""
+    tuya_access_secret: Optional[str] = ""
+    tuya_device_id: Optional[str] = ""
+    tuya_api_base_url: Optional[str] = "https://openapi.tuyaus.com"
 
 class OverlayConfigBase(BaseModel):
     name: str

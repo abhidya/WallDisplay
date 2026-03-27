@@ -1,5 +1,13 @@
+import hashlib
+import hmac
+import os
+import threading
+import time
+from urllib.parse import urlencode
+
+import requests
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 import json
 from datetime import datetime
 
@@ -19,6 +27,9 @@ from schemas.overlay import (
     OverlayWindowInitResponse,
 )
 from core.streaming_service import get_streaming_service
+
+_LIVE_WIDGET_CACHE: Dict[str, Dict[str, Any]] = {}
+_LIVE_WIDGET_CACHE_LOCK = threading.RLock()
 
 class OverlayService:
     def __init__(self, db: Session):
@@ -231,6 +242,50 @@ class OverlayService:
             "revision": "|".join(revision_parts),
         }
 
+    def get_live_widget_data(self, config_id: int) -> Dict[str, Any]:
+        config = self.db.query(OverlayConfig).filter(OverlayConfig.id == config_id).first()
+        if not config:
+            raise ValueError("Configuration not found")
+
+        widget_types = {
+            (widget or {}).get("type", "").lower()
+            for widget in (config.widgets or [])
+            if (widget or {}).get("visible", True)
+        }
+        api_configs = config.api_configs or {}
+        data: Dict[str, Any] = {}
+
+        if "spotify" in widget_types:
+            data["spotify"] = self._cached_live_widget_value(
+                f"spotify:{config_id}",
+                ttl_seconds=8,
+                loader=lambda: self._fetch_spotify_now_playing(api_configs),
+            )
+        if "gmail" in widget_types:
+            data["gmail"] = self._cached_live_widget_value(
+                f"gmail:{config_id}",
+                ttl_seconds=20,
+                loader=lambda: self._fetch_gmail_summary(api_configs),
+            )
+        if "steam" in widget_types:
+            data["steam"] = self._cached_live_widget_value(
+                f"steam:{config_id}",
+                ttl_seconds=30,
+                loader=lambda: self._fetch_steam_status(api_configs),
+            )
+        if "climate" in widget_types:
+            data["climate"] = self._cached_live_widget_value(
+                f"climate:{config_id}",
+                ttl_seconds=20,
+                loader=lambda: self._fetch_tuya_climate(api_configs),
+            )
+
+        return {
+            "config_id": config_id,
+            "updated_at": datetime.utcnow().isoformat(),
+            "data": data,
+        }
+
     def _to_response(self, config: OverlayConfig) -> OverlayConfigResponse:
         """Convert database model to response schema"""
         return OverlayConfigResponse(
@@ -256,6 +311,235 @@ class OverlayService:
         video = self.db.query(VideoModel).filter(VideoModel.id == video_id).first()
         if not video:
             raise ValueError(f"Video with id {video_id} not found")
+
+    def _cached_live_widget_value(self, cache_key: str, ttl_seconds: int, loader):
+        now = time.time()
+        with _LIVE_WIDGET_CACHE_LOCK:
+            cached = _LIVE_WIDGET_CACHE.get(cache_key)
+            if cached and cached.get("expires_at", 0) > now:
+                return cached["value"]
+
+        try:
+            value = loader()
+        except Exception as exc:
+            value = {
+                "status": "unavailable",
+                "error": str(exc),
+            }
+
+        with _LIVE_WIDGET_CACHE_LOCK:
+            _LIVE_WIDGET_CACHE[cache_key] = {
+                "expires_at": now + ttl_seconds,
+                "value": value,
+            }
+        return value
+
+    def _resolve_api_config(self, api_configs: Dict[str, Any], key: str, env_key: str = "") -> str:
+        value = (api_configs or {}).get(key)
+        if value not in (None, ""):
+            return str(value)
+        if env_key:
+            return os.getenv(env_key, "")
+        return ""
+
+    def _refresh_oauth_access_token(self, token_url: str, client_id: str, client_secret: str, refresh_token: str) -> str:
+        response = requests.post(
+            token_url,
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+                "client_id": client_id,
+                "client_secret": client_secret,
+            },
+            timeout=10,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        return payload.get("access_token", "")
+
+    def _fetch_spotify_now_playing(self, api_configs: Dict[str, Any]) -> Dict[str, Any]:
+        client_id = self._resolve_api_config(api_configs, "spotify_client_id", "SPOTIFY_CLIENT_ID")
+        client_secret = self._resolve_api_config(api_configs, "spotify_client_secret", "SPOTIFY_CLIENT_SECRET")
+        refresh_token = self._resolve_api_config(api_configs, "spotify_refresh_token", "SPOTIFY_REFRESH_TOKEN")
+        access_token = self._resolve_api_config(api_configs, "spotify_access_token", "SPOTIFY_ACCESS_TOKEN")
+        if not access_token and refresh_token and client_id and client_secret:
+            access_token = self._refresh_oauth_access_token(
+                "https://accounts.spotify.com/api/token",
+                client_id,
+                client_secret,
+                refresh_token,
+            )
+        if not access_token:
+            return {"status": "unconfigured"}
+
+        response = requests.get(
+            "https://api.spotify.com/v1/me/player/currently-playing",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=10,
+        )
+        if response.status_code == 204:
+            return {"status": "idle"}
+        response.raise_for_status()
+        payload = response.json()
+        item = payload.get("item") or {}
+        artists = item.get("artists") or []
+        album_images = ((item.get("album") or {}).get("images") or [])
+        duration_ms = item.get("duration_ms") or 0
+        progress_ms = payload.get("progress_ms") or 0
+        return {
+            "status": "active",
+            "title": item.get("name") or "Unknown Track",
+            "artist": ", ".join(filter(None, [artist.get("name") for artist in artists])) or "Unknown Artist",
+            "album_art": album_images[0].get("url") if album_images else "",
+            "progress": (progress_ms / duration_ms) if duration_ms else 0,
+            "is_playing": bool(payload.get("is_playing")),
+        }
+
+    def _fetch_gmail_summary(self, api_configs: Dict[str, Any]) -> Dict[str, Any]:
+        client_id = self._resolve_api_config(api_configs, "gmail_client_id", "GMAIL_CLIENT_ID")
+        client_secret = self._resolve_api_config(api_configs, "gmail_client_secret", "GMAIL_CLIENT_SECRET")
+        refresh_token = self._resolve_api_config(api_configs, "gmail_refresh_token", "GMAIL_REFRESH_TOKEN")
+        access_token = self._resolve_api_config(api_configs, "gmail_access_token", "GMAIL_ACCESS_TOKEN")
+        if not access_token and refresh_token and client_id and client_secret:
+            access_token = self._refresh_oauth_access_token(
+                "https://oauth2.googleapis.com/token",
+                client_id,
+                client_secret,
+                refresh_token,
+            )
+        if not access_token:
+            return {"status": "unconfigured", "items": []}
+
+        list_response = requests.get(
+            "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={"labelIds": "INBOX", "maxResults": 5, "q": "is:unread"},
+            timeout=10,
+        )
+        list_response.raise_for_status()
+        messages = (list_response.json().get("messages") or [])[:5]
+        items = []
+        for message in messages:
+            message_response = requests.get(
+                f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{message['id']}",
+                headers={"Authorization": f"Bearer {access_token}"},
+                params={"format": "metadata", "metadataHeaders": ["From", "Subject"]},
+                timeout=10,
+            )
+            message_response.raise_for_status()
+            payload = message_response.json()
+            headers = {
+                header.get("name"): header.get("value")
+                for header in ((payload.get("payload") or {}).get("headers") or [])
+            }
+            items.append(
+                {
+                    "sender": headers.get("From", "Unknown Sender"),
+                    "title": headers.get("Subject", payload.get("snippet", "Unread message")),
+                }
+            )
+        return {
+            "status": "active" if items else "idle",
+            "items": items,
+            "count": len(items),
+        }
+
+    def _fetch_steam_status(self, api_configs: Dict[str, Any]) -> Dict[str, Any]:
+        api_key = self._resolve_api_config(api_configs, "steam_api_key", "STEAM_API_KEY")
+        steam_id = self._resolve_api_config(api_configs, "steam_id", "STEAM_ID")
+        if not api_key or not steam_id:
+            return {"status": "unconfigured"}
+
+        response = requests.get(
+            "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/",
+            params={"key": api_key, "steamids": steam_id},
+            timeout=10,
+        )
+        response.raise_for_status()
+        players = (((response.json() or {}).get("response") or {}).get("players") or [])
+        if not players:
+            return {"status": "idle"}
+        player = players[0]
+        return {
+            "status": "active",
+            "persona_name": player.get("personaname", "Steam"),
+            "online_state": player.get("personastate", 0),
+            "game": player.get("gameextrainfo", ""),
+            "avatar": player.get("avatarfull", ""),
+        }
+
+    def _fetch_tuya_climate(self, api_configs: Dict[str, Any]) -> Dict[str, Any]:
+        access_id = self._resolve_api_config(api_configs, "tuya_access_id", "TUYA_ACCESS_ID")
+        access_secret = self._resolve_api_config(api_configs, "tuya_access_secret", "TUYA_ACCESS_SECRET")
+        device_id = self._resolve_api_config(api_configs, "tuya_device_id", "TUYA_DEVICE_ID")
+        base_url = self._resolve_api_config(api_configs, "tuya_api_base_url", "TUYA_API_BASE_URL") or "https://openapi.tuyaus.com"
+        if not access_id or not access_secret or not device_id:
+            return {"status": "unconfigured"}
+
+        token = self._get_tuya_token(base_url, access_id, access_secret)
+        path = f"/v1.0/devices/{device_id}/status"
+        url = f"{base_url.rstrip('/')}{path}"
+        timestamp = str(int(time.time() * 1000))
+        sign_payload = f"{access_id}{token}{timestamp}GET\n{hashlib.sha256(b'').hexdigest()}\n\n{path}"
+        signature = hmac.new(
+            access_secret.encode("utf-8"),
+            sign_payload.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest().upper()
+        response = requests.get(
+            url,
+            headers={
+                "client_id": access_id,
+                "access_token": token,
+                "t": timestamp,
+                "sign_method": "HMAC-SHA256",
+                "sign": signature,
+            },
+            timeout=10,
+        )
+        response.raise_for_status()
+        result = (response.json() or {}).get("result") or []
+        values = {item.get("code"): item.get("value") for item in result}
+        temperature = values.get("temp_current") or values.get("va_temperature")
+        humidity = values.get("humidity_value") or values.get("va_humidity")
+        return {
+            "status": "active",
+            "temperature": (float(temperature) / 10.0) if temperature is not None else None,
+            "humidity": (float(humidity) / 10.0) if humidity is not None else None,
+        }
+
+    def _get_tuya_token(self, base_url: str, access_id: str, access_secret: str) -> str:
+        cache_key = f"tuya-token:{base_url}:{access_id}"
+        cached = self._cached_live_widget_value(cache_key, ttl_seconds=3500, loader=lambda: {"_token_loader": True})
+        if isinstance(cached, dict) and cached.get("token"):
+            return cached["token"]
+
+        path = "/v1.0/token?grant_type=1"
+        timestamp = str(int(time.time() * 1000))
+        sign_payload = f"{access_id}{timestamp}GET\n{hashlib.sha256(b'').hexdigest()}\n\n{path}"
+        signature = hmac.new(
+            access_secret.encode("utf-8"),
+            sign_payload.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest().upper()
+        response = requests.get(
+            f"{base_url.rstrip('/')}{path}",
+            headers={
+                "client_id": access_id,
+                "t": timestamp,
+                "sign_method": "HMAC-SHA256",
+                "sign": signature,
+            },
+            timeout=10,
+        )
+        response.raise_for_status()
+        token = ((response.json() or {}).get("result") or {}).get("access_token", "")
+        with _LIVE_WIDGET_CACHE_LOCK:
+            _LIVE_WIDGET_CACHE[cache_key] = {
+                "expires_at": time.time() + 3500,
+                "value": {"token": token},
+            }
+        return token
 
     def _resolve_mapping_scene(self, scene_id: int) -> dict:
         scene = self.db.query(MappingScene).filter(MappingScene.id == scene_id).first()

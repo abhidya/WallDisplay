@@ -35,6 +35,16 @@
             width: 100%;
             height: 100%;
         }
+
+        #mapping-animation-host {
+            position: absolute;
+            width: 0;
+            height: 0;
+            overflow: hidden;
+            left: -10000px;
+            top: -10000px;
+            pointer-events: none;
+        }
         
         #bg-video {
             width: 100%;
@@ -241,6 +251,111 @@
         .time-widget {
             background: linear-gradient(135deg, rgba(38, 50, 56, 0.9), rgba(55, 71, 79, 0.9));
             text-align: center;
+        }
+
+        .spotify-widget,
+        .gmail-widget,
+        .climate-widget,
+        .steam-widget {
+            background: linear-gradient(135deg, rgba(18, 18, 18, 0.9), rgba(42, 42, 42, 0.92));
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .spotify-widget .spotify-content,
+        .gmail-widget .gmail-content,
+        .climate-widget .climate-content,
+        .steam-widget .steam-content {
+            width: 100%;
+            height: 100%;
+        }
+
+        .spotify-widget .spotify-row,
+        .steam-widget .steam-row {
+            display: flex;
+            gap: 14px;
+            align-items: center;
+        }
+
+        .spotify-art,
+        .steam-avatar {
+            width: 88px;
+            height: 88px;
+            border-radius: 12px;
+            object-fit: cover;
+            background: rgba(255, 255, 255, 0.06);
+            flex-shrink: 0;
+        }
+
+        .spotify-meta,
+        .steam-meta {
+            min-width: 0;
+            flex: 1;
+        }
+
+        .spotify-title,
+        .steam-game,
+        .gmail-title {
+            font-size: 22px;
+            font-weight: 600;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .spotify-artist,
+        .steam-status,
+        .gmail-sender,
+        .climate-label {
+            font-size: 14px;
+            color: rgba(255,255,255,0.72);
+        }
+
+        .spotify-progress-track {
+            margin-top: 12px;
+            height: 8px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 999px;
+            overflow: hidden;
+        }
+
+        .spotify-progress-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #1db954, #66ffb2);
+        }
+
+        .gmail-list {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .gmail-item {
+            padding: 10px 12px;
+            border-radius: 10px;
+            background: rgba(255,255,255,0.05);
+        }
+
+        .climate-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 14px;
+            margin-top: 10px;
+        }
+
+        .climate-metric {
+            padding: 12px;
+            border-radius: 12px;
+            background: rgba(255,255,255,0.06);
+        }
+
+        .climate-value {
+            font-size: 34px;
+            font-weight: 300;
+            line-height: 1;
+            margin-top: 6px;
         }
         
         .time-content {
@@ -525,6 +640,7 @@
         <div id="mapping-container" style="display:none;">
             <canvas id="mapping-canvas" width="1280" height="720"></canvas>
         </div>
+        <div id="mapping-animation-host"></div>
     </div>
     
     <div id="widgets-container"></div>
@@ -611,6 +727,18 @@
         </div>
     </div>
     
+    <script src="/backend-static/js/projection/animation_engine.js"></script>
+    <script src="/backend-static/js/projection/animations/neural_noise.js"></script>
+    <script src="/backend-static/js/projection/animations/moving_clouds.js"></script>
+    <script src="/backend-static/js/projection/animations/koi_fish.js"></script>
+    <script src="/backend-static/js/projection/animations/swimming_fish.js"></script>
+    <script src="/backend-static/js/projection/animations/blob_fish.js"></script>
+    <script src="/backend-static/js/projection/animations/fish_pond.js"></script>
+    <script src="/backend-static/js/projection/animations/koi_pond_8bit.js"></script>
+    <script src="/backend-static/js/projection/animations/spectrum_bars.js"></script>
+    <script src="/backend-static/js/projection/animations/webgl_flowers.js"></script>
+    <script src="/backend-static/js/projection/animations/rainstorm.js"></script>
+    <script src="/backend-static/js/projection/animations/pride_spectrum.js"></script>
     <script>
         let config = null;
         let backgroundType = 'video';
@@ -622,8 +750,13 @@
         let mappingMediaState = new Map();
         let mappingMediaAdvanceTimers = new Map();
         let mappingAnimationFrame = null;
+        let mappingAnimationEngine = null;
+        let animationListCache = new Map();
+        let latestMappingWeather = null;
+        let latestMappingTransit = null;
         const MIN_MAPPING_CLIP_SECONDS = 60;
         const MAPPING_IMAGE_ADVANCE_MS = 10000;
+        const MAPPING_IMAGE_CROSSFADE_MS = 1400;
         let isDragging = false;
         let isResizing = false;
         let isRotating = false;
@@ -820,6 +953,15 @@
                 cancelAnimationFrame(mappingAnimationFrame);
                 mappingAnimationFrame = null;
             }
+            if (mappingAnimationEngine) {
+                mappingAnimationEngine.destroy();
+                mappingAnimationEngine = null;
+            }
+            const animationHost = document.getElementById('mapping-animation-host');
+            if (animationHost) {
+                animationHost.innerHTML = '';
+            }
+            animationListCache = new Map();
             mappingMaskCache = new Map();
             mappingMediaCache = new Map();
             mappingMediaState = new Map();
@@ -865,8 +1007,11 @@
                     if (!latestState || latestState.type !== 'image' || latestState.advanceToken !== advanceToken) {
                         return;
                     }
+                    latestState.previousElement = latestState.element || null;
                     latestState.element = nextImage;
                     latestState.currentIndex = nextIndex;
+                    latestState.transitionStart = performance.now();
+                    latestState.transitionDuration = MAPPING_IMAGE_CROSSFADE_MS;
                     mappingMediaCache.set(group.id, nextImage);
                     mappingMediaState.set(group.id, latestState);
                     scheduleImageAdvance(group, latestState);
@@ -887,9 +1032,125 @@
             canvas.width = scene.canvas_width || 1280;
             canvas.height = scene.canvas_height || 720;
             resetMappingPlaybackState();
+            mappingAnimationEngine = new AnimationEngine();
             await Promise.all((scene.masks || []).map(loadMappingMask));
             await Promise.all((scene.groups || []).map(loadGroupMedia));
+            if (mappingAnimationEngine && (latestMappingWeather || latestMappingTransit)) {
+                mappingAnimationEngine.updateData({
+                    weather: latestMappingWeather,
+                    transit: latestMappingTransit,
+                });
+            }
             startMappingRenderLoop();
+        }
+
+        function getGroupMaskImages(group) {
+            return (group.mask_ids || []).map(maskId => mappingMaskCache.get(maskId)).filter(Boolean);
+        }
+
+        async function fetchAnimationList(animationListId) {
+            if (!animationListId) {
+                return null;
+            }
+            if (animationListCache.has(animationListId)) {
+                return animationListCache.get(animationListId);
+            }
+            const response = await fetch(`/api/projection/animation-lists/${encodeURIComponent(animationListId)}`);
+            if (!response.ok) {
+                throw new Error(`Failed to load animation list ${animationListId}`);
+            }
+            const payload = await response.json();
+            animationListCache.set(animationListId, payload);
+            return payload;
+        }
+
+        function clearAnimationGroupState(groupId) {
+            const existingState = mappingMediaState.get(groupId);
+            if (existingState?.animation?.stop) {
+                existingState.animation.stop();
+            }
+            if (existingState?.container?.remove) {
+                existingState.container.remove();
+            }
+            clearMappingAdvanceTimer(groupId);
+        }
+
+        function createAnimationMediaState(group, animationId, bounds) {
+            if (!mappingAnimationEngine || !animationId) {
+                return null;
+            }
+
+            const host = document.getElementById('mapping-animation-host');
+            const container = document.createElement('div');
+            container.style.position = 'absolute';
+            container.style.left = '-10000px';
+            container.style.top = '-10000px';
+            container.style.width = `${Math.max(1, bounds.width)}px`;
+            container.style.height = `${Math.max(1, bounds.height)}px`;
+            host.appendChild(container);
+
+            const zone = {
+                id: group.id,
+                bounds: {
+                    x: 0,
+                    y: 0,
+                    width: Math.max(1, bounds.width),
+                    height: Math.max(1, bounds.height),
+                },
+                area: Math.max(1, bounds.width * bounds.height),
+            };
+            const animation = mappingAnimationEngine.createAnimation(animationId, zone, container);
+            if (!animation) {
+                container.remove();
+                return null;
+            }
+            animation.start();
+            return {
+                groupId: group.id,
+                type: 'animation',
+                element: animation.canvas,
+                animation,
+                container,
+                animationId,
+            };
+        }
+
+        function scheduleAnimationListAdvance(group, bounds, animationList) {
+            const currentState = mappingMediaState.get(group.id);
+            if (!currentState || currentState.type !== 'animation_list') {
+                return;
+            }
+            if ((animationList.animation_ids || []).length <= 1 || group.auto_advance === false) {
+                return;
+            }
+
+            const delayMs = Math.max(3000, Number(animationList.auto_advance_seconds || 12) * 1000);
+            const timerId = window.setTimeout(() => {
+                const latestState = mappingMediaState.get(group.id);
+                if (!latestState || latestState.type !== 'animation_list') {
+                    return;
+                }
+                const ids = animationList.animation_ids || [];
+                const nextIndex = (latestState.currentIndex + 1) % ids.length;
+                const nextBaseState = createAnimationMediaState(group, ids[nextIndex], bounds);
+                if (!nextBaseState) {
+                    scheduleAnimationListAdvance(group, bounds, animationList);
+                    return;
+                }
+
+                clearAnimationGroupState(group.id);
+                const nextState = {
+                    ...nextBaseState,
+                    type: 'animation_list',
+                    listId: animationList.id,
+                    currentIndex: nextIndex,
+                    animationIds: ids,
+                };
+                mappingMediaCache.set(group.id, nextBaseState.element);
+                mappingMediaState.set(group.id, nextState);
+                scheduleAnimationListAdvance(group, bounds, animationList);
+            }, delayMs);
+            mappingMediaAdvanceTimers.set(group.id, timerId);
         }
 
         function loadMappingMask(mask) {
@@ -905,6 +1166,76 @@
         }
 
         function loadGroupMedia(group) {
+            const bindingType = (group.media_binding_type || '').toLowerCase();
+            if (bindingType === 'animation_list' && group.animation_list_id) {
+                return new Promise((resolve) => {
+                    if (!mappingAnimationEngine) {
+                        resolve();
+                        return;
+                    }
+
+                    const canvas = document.getElementById('mapping-canvas');
+                    const maskImages = getGroupMaskImages(group);
+                    if (!canvas || !maskImages.length) {
+                        resolve();
+                        return;
+                    }
+
+                    const bounds = computeMaskBounds(maskImages, canvas.width, canvas.height);
+                    fetchAnimationList(group.animation_list_id).then((animationList) => {
+                        const animationIds = animationList?.animation_ids || [];
+                        if (!animationIds.length) {
+                            resolve();
+                            return;
+                        }
+                        const baseState = createAnimationMediaState(group, animationIds[0], bounds);
+                        if (!baseState) {
+                            resolve();
+                            return;
+                        }
+                        const state = {
+                            ...baseState,
+                            type: 'animation_list',
+                            listId: animationList.id,
+                            currentIndex: 0,
+                            animationIds,
+                        };
+                        mappingMediaCache.set(group.id, baseState.element);
+                        mappingMediaState.set(group.id, state);
+                        scheduleAnimationListAdvance(group, bounds, animationList);
+                        resolve();
+                    }).catch((error) => {
+                        console.error(error);
+                        resolve();
+                    });
+                });
+            }
+            if (bindingType === 'animation' && group.animation_id) {
+                return new Promise((resolve) => {
+                    if (!mappingAnimationEngine) {
+                        resolve();
+                        return;
+                    }
+
+                    const canvas = document.getElementById('mapping-canvas');
+                    const maskImages = getGroupMaskImages(group);
+                    if (!canvas || !maskImages.length) {
+                        resolve();
+                        return;
+                    }
+
+                    const bounds = computeMaskBounds(maskImages, canvas.width, canvas.height);
+                    const state = createAnimationMediaState(group, group.animation_id, bounds);
+                    if (!state) {
+                        resolve();
+                        return;
+                    }
+                    mappingMediaCache.set(group.id, state.element);
+                    mappingMediaState.set(group.id, state);
+                    resolve();
+                });
+            }
+
             const mediaSources = Array.isArray(group.media_urls) && group.media_urls.length
                 ? group.media_urls
                 : (group.media_url ? [group.media_url] : []);
@@ -912,22 +1243,25 @@
             return new Promise((resolve) => {
                 const currentIndex = 0;
                 const currentUrl = mediaSources[currentIndex];
-                const bindingType = (group.media_binding_type || '').toLowerCase();
                 const isImageBinding = bindingType === 'photo' || bindingType === 'photo_list';
                 const isImage = isImageBinding || /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$)/i.test(currentUrl);
                 if (isImage) {
                     const image = new Image();
                     image.onload = () => {
-                        const state = {
-                            element: image,
-                            sources: mediaSources,
-                            currentIndex,
-                            type: 'image',
-                        };
-                        mappingMediaCache.set(group.id, image);
-                        mappingMediaState.set(group.id, state);
-                        scheduleImageAdvance(group, state);
-                        resolve();
+                    const state = {
+                        groupId: group.id,
+                        element: image,
+                        previousElement: null,
+                        sources: mediaSources,
+                        currentIndex,
+                        type: 'image',
+                        transitionStart: 0,
+                        transitionDuration: MAPPING_IMAGE_CROSSFADE_MS,
+                    };
+                    mappingMediaCache.set(group.id, image);
+                    mappingMediaState.set(group.id, state);
+                    scheduleImageAdvance(group, state);
+                    resolve();
                     };
                     image.onerror = resolve;
                     image.src = currentUrl;
@@ -1091,7 +1425,13 @@
             const media = mappingMediaCache.get(group.id);
             const mediaState = mappingMediaState.get(group.id);
             if (media && (media.tagName !== 'VIDEO' || media.readyState >= 2)) {
-                drawMediaCover(groupCtx, media, bounds, group.transform || {});
+                if (mediaState?.type === 'image') {
+                    drawImageMediaWithTransition(groupCtx, mediaState, bounds, group.transform || {});
+                } else if (mediaState?.type === 'animation') {
+                    drawMediaCover(groupCtx, media, bounds, group.transform || {});
+                } else {
+                    drawMediaCover(groupCtx, media, bounds, group.transform || {});
+                }
                 if (media.tagName === 'VIDEO' && mediaState) {
                     if (!mediaState.lastFrameCanvas) {
                         mediaState.lastFrameCanvas = document.createElement('canvas');
@@ -1147,8 +1487,8 @@
         }
 
         function drawMediaCover(ctx, media, bounds, transform) {
-            const sourceWidth = media.videoWidth || media.naturalWidth || bounds.width;
-            const sourceHeight = media.videoHeight || media.naturalHeight || bounds.height;
+            const sourceWidth = media.videoWidth || media.naturalWidth || media.width || bounds.width;
+            const sourceHeight = media.videoHeight || media.naturalHeight || media.height || bounds.height;
             const scale = Math.max(bounds.width / sourceWidth, bounds.height / sourceHeight) * (transform.scale || 1);
             const width = sourceWidth * scale;
             const height = sourceHeight * scale;
@@ -1198,6 +1538,41 @@
             ctx.globalCompositeOperation = 'destination-in';
             ctx.drawImage(maskCanvas, 0, 0);
             ctx.globalCompositeOperation = 'source-over';
+        }
+
+        function drawImageMediaWithTransition(ctx, mediaState, bounds, transform) {
+            const currentImage = mediaState.element;
+            const previousImage = mediaState.previousElement;
+            const transitionStart = Number(mediaState.transitionStart || 0);
+            const transitionDuration = Math.max(1, Number(mediaState.transitionDuration || MAPPING_IMAGE_CROSSFADE_MS));
+
+            if (!currentImage) {
+                return;
+            }
+
+            if (!previousImage || !transitionStart) {
+                drawMediaCover(ctx, currentImage, bounds, transform);
+                return;
+            }
+
+            const elapsed = performance.now() - transitionStart;
+            const progress = Math.max(0, Math.min(1, elapsed / transitionDuration));
+
+            ctx.save();
+            ctx.globalAlpha = 1 - progress;
+            drawMediaCover(ctx, previousImage, bounds, transform);
+            ctx.restore();
+
+            ctx.save();
+            ctx.globalAlpha = progress;
+            drawMediaCover(ctx, currentImage, bounds, transform);
+            ctx.restore();
+
+            if (progress >= 1) {
+                mediaState.previousElement = null;
+                mediaState.transitionStart = 0;
+                mappingMediaState.set(mediaState.groupId, mediaState);
+            }
         }
         
         function createWidgets() {
@@ -1249,6 +1624,57 @@
                             <div class="transit-content">Loading predictions...</div>
                         `;
                     }
+                } else if (widget.type === 'spotify') {
+                    widgetEl.innerHTML = `
+                        <div class="spotify-content">
+                            <div class="spotify-row">
+                                <img class="spotify-art" alt="Album art" />
+                                <div class="spotify-meta">
+                                    <div class="spotify-title">Nothing playing</div>
+                                    <div class="spotify-artist">Spotify not configured</div>
+                                    <div class="spotify-progress-track">
+                                        <div class="spotify-progress-fill"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                } else if (widget.type === 'gmail') {
+                    widgetEl.innerHTML = `
+                        <div class="gmail-content">
+                            <div class="gmail-title">Inbox</div>
+                            <div class="gmail-sender">No unread messages yet</div>
+                            <ul class="gmail-list"></ul>
+                        </div>
+                    `;
+                } else if (widget.type === 'climate') {
+                    widgetEl.innerHTML = `
+                        <div class="climate-content">
+                            <div class="gmail-title">Room Climate</div>
+                            <div class="climate-grid">
+                                <div class="climate-metric">
+                                    <div class="climate-label">Temperature</div>
+                                    <div class="climate-value climate-temperature">--</div>
+                                </div>
+                                <div class="climate-metric">
+                                    <div class="climate-label">Humidity</div>
+                                    <div class="climate-value climate-humidity">--</div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                } else if (widget.type === 'steam') {
+                    widgetEl.innerHTML = `
+                        <div class="steam-content">
+                            <div class="steam-row">
+                                <img class="steam-avatar" alt="Steam avatar" />
+                                <div class="steam-meta">
+                                    <div class="steam-game">Steam idle</div>
+                                    <div class="steam-status">No active session</div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
                 } else if (widget.type === 'lights') {
                     widgetEl.innerHTML = `
                         <div style="text-align: center; display: flex; flex-direction: column; align-items: center;">
@@ -1857,6 +2283,125 @@
             // Update transit immediately and every minute
             updateTransit();
             dataUpdateIntervals.transit = setInterval(updateTransit, 60000);
+
+            updateLiveWidgets();
+            dataUpdateIntervals.liveWidgets = setInterval(updateLiveWidgets, 15000);
+        }
+
+        async function updateLiveWidgets() {
+            if (!config?.id) {
+                return;
+            }
+
+            const hasLiveWidgets = widgets.some((widget) => ['spotify', 'gmail', 'climate', 'steam'].includes(widget.type) && widget.visible !== false);
+            if (!hasLiveWidgets) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/overlay/widget-data?config_id=${encodeURIComponent(config.id)}`);
+                if (!response.ok) {
+                    throw new Error(`Widget data request failed: ${response.status}`);
+                }
+                const payload = await response.json();
+                const liveData = payload.data || {};
+
+                updateSpotifyWidgets(liveData.spotify || {});
+                updateGmailWidgets(liveData.gmail || {});
+                updateClimateWidgets(liveData.climate || {});
+                updateSteamWidgets(liveData.steam || {});
+            } catch (error) {
+                console.error('Failed to update live overlay widgets:', error);
+            }
+        }
+
+        function updateSpotifyWidgets(data) {
+            document.querySelectorAll('.spotify-widget').forEach((widget) => {
+                const title = widget.querySelector('.spotify-title');
+                const artist = widget.querySelector('.spotify-artist');
+                const art = widget.querySelector('.spotify-art');
+                const progress = widget.querySelector('.spotify-progress-fill');
+                if (!title || !artist || !art || !progress) return;
+
+                if (data.status !== 'active') {
+                    title.textContent = data.status === 'idle' ? 'Nothing playing' : 'Spotify unavailable';
+                    artist.textContent = data.status === 'unconfigured' ? 'Configure Spotify API credentials' : 'No active playback';
+                    art.removeAttribute('src');
+                    progress.style.width = '0%';
+                    return;
+                }
+
+                title.textContent = data.title || 'Unknown Track';
+                artist.textContent = data.artist || 'Unknown Artist';
+                if (data.album_art) {
+                    art.src = data.album_art;
+                }
+                progress.style.width = `${Math.max(0, Math.min(100, Number(data.progress || 0) * 100))}%`;
+            });
+        }
+
+        function updateGmailWidgets(data) {
+            document.querySelectorAll('.gmail-widget').forEach((widget) => {
+                const subtitle = widget.querySelector('.gmail-sender');
+                const list = widget.querySelector('.gmail-list');
+                if (!subtitle || !list) return;
+
+                list.innerHTML = '';
+                if (data.status === 'unconfigured') {
+                    subtitle.textContent = 'Configure Gmail API credentials';
+                    return;
+                }
+                const items = Array.isArray(data.items) ? data.items : [];
+                subtitle.textContent = items.length ? `${items.length} unread messages` : 'No unread messages';
+                items.forEach((item) => {
+                    const li = document.createElement('li');
+                    li.className = 'gmail-item';
+                    li.innerHTML = `
+                        <div class="gmail-title">${item.title || 'Untitled message'}</div>
+                        <div class="gmail-sender">${item.sender || 'Unknown sender'}</div>
+                    `;
+                    list.appendChild(li);
+                });
+            });
+        }
+
+        function updateClimateWidgets(data) {
+            document.querySelectorAll('.climate-widget').forEach((widget) => {
+                const temperature = widget.querySelector('.climate-temperature');
+                const humidity = widget.querySelector('.climate-humidity');
+                if (!temperature || !humidity) return;
+
+                if (data.status !== 'active') {
+                    temperature.textContent = '--';
+                    humidity.textContent = '--';
+                    return;
+                }
+
+                temperature.textContent = data.temperature == null ? '--' : `${Number(data.temperature).toFixed(1)}°`;
+                humidity.textContent = data.humidity == null ? '--' : `${Math.round(Number(data.humidity))}%`;
+            });
+        }
+
+        function updateSteamWidgets(data) {
+            document.querySelectorAll('.steam-widget').forEach((widget) => {
+                const game = widget.querySelector('.steam-game');
+                const status = widget.querySelector('.steam-status');
+                const avatar = widget.querySelector('.steam-avatar');
+                if (!game || !status || !avatar) return;
+
+                if (data.status !== 'active') {
+                    game.textContent = data.status === 'unconfigured' ? 'Steam unavailable' : 'Steam idle';
+                    status.textContent = data.status === 'unconfigured' ? 'Configure Steam API credentials' : 'No active game';
+                    avatar.removeAttribute('src');
+                    return;
+                }
+
+                game.textContent = data.game || data.persona_name || 'Steam';
+                status.textContent = data.game ? `${data.persona_name || 'Player'} is playing now` : `${data.persona_name || 'Player'} is online`;
+                if (data.avatar) {
+                    avatar.src = data.avatar;
+                }
+            });
         }
         
         function updateTime() {
@@ -1895,7 +2440,6 @@
             }
             
             const weatherWidgets = document.querySelectorAll('.weather-widget');
-            if (weatherWidgets.length === 0) return;
             
             try {
                 // Get location
@@ -1925,6 +2469,17 @@
                 const temp = Math.round(weatherData.main.temp);
                 const description = weatherData.weather[0].description;
                 const location = weatherData.name;
+                latestMappingWeather = {
+                    temperature: weatherData.main.temp,
+                    humidity: weatherData.main.humidity,
+                    windSpeed: weatherData.wind?.speed || 0,
+                    windDirection: weatherData.wind?.deg || 0,
+                    conditions: weatherData.weather?.[0]?.main || '',
+                    location,
+                };
+                if (mappingAnimationEngine) {
+                    mappingAnimationEngine.updateData({ weather: latestMappingWeather });
+                }
                 
                 weatherWidgets.forEach(widget => {
                     widget.querySelector('.weather-icon').textContent = icon;
@@ -1947,7 +2502,6 @@
             }
             
             const transitWidgets = document.querySelectorAll('.transit-widget');
-            if (transitWidgets.length === 0) return;
             
             try {
                 const response = await fetch(
@@ -1955,6 +2509,7 @@
                 );
                 const data = await response.json();
                 
+                let latestRoutes = [];
                 transitWidgets.forEach(widget => {
                     const widgetConfig = widgets.find(w => w.id === widget.id);
                     const routeFilter = widgetConfig?.config?.routeFilter?.toLowerCase();
@@ -2009,6 +2564,7 @@
                         
                         filteredRoutes = filtered.size > 0 ? filtered : routePredictions;
                     }
+                    latestRoutes = Array.from(filteredRoutes.keys());
                     
                     const content = widget.querySelector('.transit-content');
                     const widgetEl = document.getElementById(widget.id);
@@ -2050,6 +2606,13 @@
                         content.innerHTML = html;
                     }
                 });
+                latestMappingTransit = {
+                    activeRoutes: latestRoutes,
+                    count: latestRoutes.length,
+                };
+                if (mappingAnimationEngine) {
+                    mappingAnimationEngine.updateData({ transit: latestMappingTransit });
+                }
             } catch (error) {
                 console.error('Transit update error:', error);
                 transitWidgets.forEach(widget => {

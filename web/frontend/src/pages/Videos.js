@@ -362,6 +362,25 @@ function Videos() {
     }
   };
 
+  const handleDeleteSavedDirectory = async (directory) => {
+    try {
+      await mediaLibraryApi.deleteDirectory(directory.id);
+      setMediaDirectories((current) => current.filter((item) => item.id !== directory.id));
+      setSnackbar({
+        open: true,
+        message: `Deleted media folder "${directory.name}"`,
+        severity: 'success'
+      });
+    } catch (err) {
+      console.error('Error deleting media directory:', err);
+      setSnackbar({
+        open: true,
+        message: err.response?.data?.detail || 'Failed to delete media folder',
+        severity: 'error'
+      });
+    }
+  };
+
   const handleUploadVideo = async () => {
     if (!uploadFile) return;
 
@@ -664,14 +683,23 @@ function Videos() {
           ) : (
             <List>
               {mediaDirectories.map((directory) => (
-                <ListItem key={directory.id}>
+                <ListItem
+                  key={directory.id}
+                  secondaryAction={(
+                    <Stack direction="row" spacing={1}>
+                      <Button variant="outlined" onClick={() => handleScanSavedDirectory(directory)} disabled={scanning}>
+                        Scan
+                      </Button>
+                      <IconButton edge="end" color="error" onClick={() => handleDeleteSavedDirectory(directory)}>
+                        <DeleteIcon />
+                      </IconButton>
+                    </Stack>
+                  )}
+                >
                   <ListItemAvatar>
                     <Avatar><FolderIcon /></Avatar>
                   </ListItemAvatar>
                   <ListItemText primary={directory.name} secondary={`${directory.path} • ${directory.category}`} />
-                  <Button variant="outlined" onClick={() => handleScanSavedDirectory(directory)} disabled={scanning}>
-                    Scan
-                  </Button>
                 </ListItem>
               ))}
             </List>

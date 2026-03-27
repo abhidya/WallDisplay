@@ -21,32 +21,32 @@ class AnimationEngine {
         if (typeof MovingCloudsAnimation !== 'undefined') {
             this.animationClasses.set('moving_clouds', MovingCloudsAnimation);
         }
+        if (typeof KoiFishAnimation !== 'undefined') {
+            this.animationClasses.set('koi_fish', KoiFishAnimation);
+        }
+        if (typeof SwimmingFishAnimation !== 'undefined') {
+            this.animationClasses.set('swimming_fish', SwimmingFishAnimation);
+        }
+        if (typeof BlobFishAnimation !== 'undefined') {
+            this.animationClasses.set('blob_fish', BlobFishAnimation);
+        }
+        if (typeof FishPondAnimation !== 'undefined') {
+            this.animationClasses.set('fish_pond', FishPondAnimation);
+        }
+        if (typeof KoiPond8BitAnimation !== 'undefined') {
+            this.animationClasses.set('koi_pond_8bit', KoiPond8BitAnimation);
+        }
         if (typeof SpectrumBarsAnimation !== 'undefined') {
             this.animationClasses.set('spectrum_bars', SpectrumBarsAnimation);
         }
         if (typeof WebGLFlowersAnimation !== 'undefined') {
             this.animationClasses.set('webgl_flowers', WebGLFlowersAnimation);
         }
-        if (typeof GradientBubblesAnimation !== 'undefined') {
-            this.animationClasses.set('gradient_bubbles', GradientBubblesAnimation);
-        }
-        if (typeof PipesFlowAnimation !== 'undefined') {
-            this.animationClasses.set('pipes_flow', PipesFlowAnimation);
-        }
-        if (typeof MilkPhysicsAnimation !== 'undefined') {
-            this.animationClasses.set('milk_physics', MilkPhysicsAnimation);
-        }
-        if (typeof SegmentClockAnimation !== 'undefined') {
-            this.animationClasses.set('segment_clock', SegmentClockAnimation);
-        }
         if (typeof RainstormAnimation !== 'undefined') {
             this.animationClasses.set('rainstorm', RainstormAnimation);
         }
         if (typeof PrideSpectrumAnimation !== 'undefined') {
             this.animationClasses.set('pride_spectrum', PrideSpectrumAnimation);
-        }
-        if (typeof SkilletSwitchAnimation !== 'undefined') {
-            this.animationClasses.set('skillet_switch', SkilletSwitchAnimation);
         }
     }
     

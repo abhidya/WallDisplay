@@ -5,6 +5,7 @@ from typing import List, Optional, Dict
 import os
 import uuid
 import json
+import re
 from datetime import datetime
 from PIL import Image
 import numpy as np
@@ -23,6 +24,122 @@ from schemas.projection import (
 )
 
 router = APIRouter(prefix="/api/projection", tags=["projection"])
+
+
+def _animation_lists_path() -> str:
+    backend_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    storage_dir = os.path.join(backend_root, "uploads", "projection")
+    os.makedirs(storage_dir, exist_ok=True)
+    return os.path.join(storage_dir, "animation_lists.json")
+
+
+def _read_animation_lists() -> List[Dict]:
+    path = _animation_lists_path()
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (json.JSONDecodeError, OSError):
+        return []
+    return payload if isinstance(payload, list) else []
+
+
+def _write_animation_lists(items: List[Dict]) -> None:
+    path = _animation_lists_path()
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(items, handle, indent=2, sort_keys=True)
+
+ANIMATION_LIBRARY = [
+    {
+        "id": "neural_noise",
+        "name": "Neural Noise",
+        "description": "Flowing neural network patterns",
+        "dataInputs": ["weather"],
+        "thumbnail": "🧠",
+        "source_codepen_id": "vYwgrWv",
+    },
+    {
+        "id": "moving_clouds",
+        "name": "Moving Clouds",
+        "description": "Drifting cloud layers",
+        "dataInputs": ["weather"],
+        "thumbnail": "☁️",
+        "source_codepen_id": "NWeqOVw",
+    },
+    {
+        "id": "koi_fish",
+        "name": "Koi Fish",
+        "description": "Two koi gliding through bright water ripples",
+        "dataInputs": ["weather"],
+        "thumbnail": "🐟",
+    },
+    {
+        "id": "swimming_fish",
+        "name": "Swimming Fish",
+        "description": "A school of simple fish drifting across a deep blue tank",
+        "dataInputs": ["transit"],
+        "thumbnail": "🐠",
+    },
+    {
+        "id": "blob_fish",
+        "name": "Blob Fish",
+        "description": "Soft blobby fish drifting through a moody aquarium glow",
+        "dataInputs": ["weather"],
+        "thumbnail": "🫧",
+    },
+    {
+        "id": "fish_pond",
+        "name": "Fish Pond",
+        "description": "A layered pond scene with plants, bubbles, and warm fish passes",
+        "dataInputs": ["transit"],
+        "thumbnail": "🐡",
+    },
+    {
+        "id": "koi_pond_8bit",
+        "name": "Koi Pond 8-bit",
+        "description": "A pixel-art koi pond background with looping fish and shimmering water",
+        "dataInputs": ["weather"],
+        "thumbnail": "🎏",
+    },
+    {
+        "id": "spectrum_bars",
+        "name": "Spectrum Bars",
+        "description": "Animated spectrum visualization",
+        "dataInputs": ["transit"],
+        "thumbnail": "📊",
+    },
+    {
+        "id": "webgl_flowers",
+        "name": "WebGL Flowers",
+        "description": "Blooming flower patterns",
+        "dataInputs": ["weather", "transit"],
+        "thumbnail": "🌸",
+        "source_codepen_id": "poOMpzx",
+    },
+    {
+        "id": "rainstorm",
+        "name": "Rainstorm",
+        "description": "Weather-driven rain effects",
+        "dataInputs": ["weather"],
+        "thumbnail": "🌧️",
+        "source_codepen_id": "bNGExzZ",
+    },
+    {
+        "id": "pride_spectrum",
+        "name": "Pride Spectrum",
+        "description": "Rainbow spectrum waves",
+        "dataInputs": ["weather", "transit"],
+        "thumbnail": "🌈",
+        "source_codepen_id": "MKEpqW",
+    },
+]
+
+CODEPEN_IMPORTS = {
+    item["source_codepen_id"]: item
+    for item in ANIMATION_LIBRARY
+    if item.get("source_codepen_id")
+}
 
 # In-memory storage for masks and temporary sessions
 projection_sessions = {}
@@ -148,88 +265,106 @@ async def get_mask_image(session_id: str):
 @router.get("/animations")
 async def get_animations():
     """Get list of available animations"""
-    # For now, return static list. Later this can come from database
-    animations = [
-        {
-            "id": "neural_noise",
-            "name": "Neural Noise",
-            "description": "Flowing neural network patterns",
-            "dataInputs": ["weather"],
-            "thumbnail": "🧠"
-        },
-        {
-            "id": "moving_clouds",
-            "name": "Moving Clouds", 
-            "description": "Drifting cloud layers",
-            "dataInputs": ["weather"],
-            "thumbnail": "☁️"
-        },
-        {
-            "id": "spectrum_bars",
-            "name": "Spectrum Bars",
-            "description": "Animated spectrum visualization",
-            "dataInputs": ["transit"],
-            "thumbnail": "📊"
-        },
-        {
-            "id": "webgl_flowers",
-            "name": "WebGL Flowers",
-            "description": "Blooming flower patterns",
-            "dataInputs": ["weather", "transit"],
-            "thumbnail": "🌸"
-        },
-        {
-            "id": "gradient_bubbles",
-            "name": "Gradient Bubbles",
-            "description": "Floating gradient orbs",
-            "dataInputs": ["weather"],
-            "thumbnail": "🫧"
-        },
-        {
-            "id": "milk_physics",
-            "name": "Milk Physics",
-            "description": "Liquid particle simulation",
-            "dataInputs": ["weather"],
-            "thumbnail": "🥛"
-        },
-        {
-            "id": "rainstorm",
-            "name": "Rainstorm",
-            "description": "Weather-driven rain effects",
-            "dataInputs": ["weather"],
-            "thumbnail": "🌧️"
-        },
-        {
-            "id": "segment_clock",
-            "name": "7-Segment Clock",
-            "description": "Digital time display",
-            "dataInputs": ["weather"],
-            "thumbnail": "🕐"
-        },
-        {
-            "id": "pride_spectrum",
-            "name": "Pride Spectrum",
-            "description": "Rainbow spectrum waves",
-            "dataInputs": ["weather", "transit"],
-            "thumbnail": "🌈"
-        },
-        {
-            "id": "pipes_flow",
-            "name": "Pipes Flow",
-            "description": "Organic flowing circles",
-            "dataInputs": ["weather", "transit"],
-            "thumbnail": "🔵"
-        },
-        {
-            "id": "skillet_switch",
-            "name": "Skillet Switch",
-            "description": "System state indicators",
-            "dataInputs": ["weather", "transit"],
-            "thumbnail": "🎚️"
-        }
+    return {"animations": ANIMATION_LIBRARY}
+
+
+@router.get("/animation-lists")
+async def get_animation_lists():
+    """Get saved animation lists"""
+    return {"animation_lists": _read_animation_lists()}
+
+
+@router.get("/animation-lists/{list_id}")
+async def get_animation_list(list_id: str):
+    """Get a saved animation list"""
+    items = _read_animation_lists()
+    animation_list = next((item for item in items if item.get("id") == list_id), None)
+    if not animation_list:
+        raise HTTPException(status_code=404, detail="Animation list not found")
+    return animation_list
+
+
+@router.post("/animation-lists")
+async def create_animation_list(data: Dict[str, object]):
+    """Create an animation list"""
+    name = str(data.get("name") or "").strip()
+    animation_ids = [
+        animation_id for animation_id in (data.get("animation_ids") or [])
+        if isinstance(animation_id, str) and animation_id
     ]
-    
-    return {"animations": animations}
+    if not name:
+        raise HTTPException(status_code=400, detail="Animation list name is required")
+    if not animation_ids:
+        raise HTTPException(status_code=400, detail="Animation list must include at least one animation")
+
+    valid_ids = {item["id"] for item in ANIMATION_LIBRARY}
+    invalid_ids = [animation_id for animation_id in animation_ids if animation_id not in valid_ids]
+    if invalid_ids:
+        raise HTTPException(status_code=400, detail=f"Unknown animation ids: {', '.join(invalid_ids)}")
+
+    items = _read_animation_lists()
+    now = datetime.utcnow().isoformat()
+    entry = {
+        "id": uuid.uuid4().hex,
+        "name": name,
+        "animation_ids": animation_ids,
+        "auto_advance_seconds": max(3, int(data.get("auto_advance_seconds") or 12)),
+        "created_at": now,
+        "updated_at": now,
+    }
+    items.append(entry)
+    _write_animation_lists(items)
+    return entry
+
+
+@router.put("/animation-lists/{list_id}")
+async def update_animation_list(list_id: str, data: Dict[str, object]):
+    """Update an animation list"""
+    items = _read_animation_lists()
+    index = next((idx for idx, item in enumerate(items) if item.get("id") == list_id), None)
+    if index is None:
+        raise HTTPException(status_code=404, detail="Animation list not found")
+
+    current = items[index]
+    name = str(data.get("name") or current.get("name") or "").strip()
+    animation_ids = data.get("animation_ids")
+    if animation_ids is None:
+        animation_ids = current.get("animation_ids") or []
+    animation_ids = [
+        animation_id for animation_id in animation_ids
+        if isinstance(animation_id, str) and animation_id
+    ]
+    if not name:
+        raise HTTPException(status_code=400, detail="Animation list name is required")
+    if not animation_ids:
+        raise HTTPException(status_code=400, detail="Animation list must include at least one animation")
+
+    valid_ids = {item["id"] for item in ANIMATION_LIBRARY}
+    invalid_ids = [animation_id for animation_id in animation_ids if animation_id not in valid_ids]
+    if invalid_ids:
+        raise HTTPException(status_code=400, detail=f"Unknown animation ids: {', '.join(invalid_ids)}")
+
+    updated = {
+        **current,
+        "name": name,
+        "animation_ids": animation_ids,
+        "auto_advance_seconds": max(3, int(data.get("auto_advance_seconds") or current.get("auto_advance_seconds") or 12)),
+        "updated_at": datetime.utcnow().isoformat(),
+    }
+    items[index] = updated
+    _write_animation_lists(items)
+    return updated
+
+
+@router.delete("/animation-lists/{list_id}")
+async def delete_animation_list(list_id: str):
+    """Delete an animation list"""
+    items = _read_animation_lists()
+    updated = [item for item in items if item.get("id") != list_id]
+    if len(updated) == len(items):
+        raise HTTPException(status_code=404, detail="Animation list not found")
+    _write_animation_lists(updated)
+    return {"deleted": True, "id": list_id}
 
 @router.post("/animations/import")
 async def import_codepen(
@@ -241,21 +376,24 @@ async def import_codepen(
     
     if not url or "codepen.io" not in url:
         raise HTTPException(status_code=400, detail="Invalid CodePen URL")
-    
-    # For now, return mock data. Real implementation would:
-    # 1. Fetch CodePen data via API
-    # 2. Transform code to remove mouse dependencies
-    # 3. Save to animations directory
-    
-    animation_id = f"codepen_{uuid.uuid4().hex[:8]}"
-    
+
+    match = re.search(r"codepen\.io/[^/]+/(?:pen|full|details)/([A-Za-z0-9]+)", url)
+    if not match:
+        raise HTTPException(status_code=400, detail="Could not parse CodePen pen id from URL")
+
+    pen_id = match.group(1)
+    animation = CODEPEN_IMPORTS.get(pen_id)
+    if not animation:
+        supported_ids = ", ".join(sorted(CODEPEN_IMPORTS.keys()))
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported CodePen import. Supported curated pen ids: {supported_ids}",
+        )
+
     return {
-        "id": animation_id,
-        "name": "Imported Animation",
-        "description": f"Imported from {url}",
-        "dataInputs": [],
-        "thumbnail": "📦",
-        "source": url
+        **animation,
+        "imported": True,
+        "source": url,
     }
 
 @router.post("/sessions/create")

@@ -228,11 +228,13 @@ class StructuredLightingService:
             if not session:
                 return None
             self._clear_derived_outputs(session_id)
+            self._clear_capture_dir(session_id)
             session["status"] = "waiting_for_worker" if not self._worker_is_connected() else "ready"
             session["current_step_index"] = 0
             session["captured_frames"] = 0
             session["last_capture_at"] = None
             session["captured_step_indices"] = []
+            session["captures"] = {}
             session["decode"] = self._default_decode_state()
             session["calibration"] = self._default_calibration_state()
             session["review"] = self._default_review_state()
@@ -354,12 +356,32 @@ class StructuredLightingService:
             session.get("captures", {}).values(),
             key=lambda capture: capture["step_index"],
         )
+        captures = [
+            {
+                **capture,
+                "url": f"/api/structured-lighting/sessions/{session_id}/captures/{capture['step_index']}/image",
+            }
+            for capture in captures
+        ]
         return {
             "session_id": session_id,
             "captures": captures,
             "captured_frames": session.get("captured_frames", 0),
             "expected_frames": session["pattern_frame_count"],
         }
+
+    def render_capture_image(self, session_id: str, step_index: int) -> Optional[bytes]:
+        session = self.get_session(session_id)
+        if not session:
+            return None
+        capture = session.get("captures", {}).get(str(step_index))
+        if not capture:
+            return None
+        stored_path = capture.get("stored_path")
+        if not stored_path or not os.path.exists(stored_path):
+            return None
+        with open(stored_path, "rb") as handle:
+            return handle.read()
 
     def decode_session(self, session_id: str, sample_step: int = 1, tuning_params: Optional[Dict] = None) -> Optional[Dict]:
         with self._lock:
@@ -417,12 +439,23 @@ class StructuredLightingService:
             self._persist_session(session)
             return dict(session)
 
-    def run_tuning_search(self, session_id: str, sample_step: int = 1) -> Optional[Dict]:
+    def run_tuning_search(
+        self,
+        session_id: str,
+        sample_step: int = 1,
+        tuning_params: Optional[Dict] = None,
+        parameter_grid: Optional[Dict] = None,
+    ) -> Optional[Dict]:
         session = self.get_session(session_id)
         if not session:
             return None
 
-        cam2proj, white_path, black_path = self._decode_raw_cam2proj(session_id, sample_step=max(1, sample_step))
+        base_params = self._normalize_tuning_params(tuning_params)
+        cam2proj, white_path, black_path = self._decode_raw_cam2proj(
+            session_id,
+            sample_step=max(1, sample_step),
+            tuning_params=base_params,
+        )
         projector_width = session["projector_width"]
         projector_height = session["projector_height"]
         decode_dir = self._ensure_decode_dir(session_id)
@@ -432,7 +465,7 @@ class StructuredLightingService:
         os.makedirs(search_dir, exist_ok=True)
 
         candidates = []
-        for candidate_index, candidate in enumerate(self._parameter_search_candidates()):
+        for candidate_index, candidate in enumerate(self._parameter_search_candidates(base_params, parameter_grid)):
             candidate_id = f"candidate_{candidate_index:02d}"
             candidate_dir = os.path.join(search_dir, candidate_id)
             os.makedirs(candidate_dir, exist_ok=True)
@@ -474,6 +507,8 @@ class StructuredLightingService:
                 "status": "completed",
                 "generated_at": datetime.utcnow().isoformat(),
                 "sample_step": sample_step,
+                "base_tuning_params": base_params,
+                "parameter_grid": parameter_grid or {},
                 "candidates": candidates,
             }
             session["updated_at"] = datetime.utcnow().isoformat()
@@ -825,7 +860,7 @@ class StructuredLightingService:
             raise RuntimeError("Structured lighting session not found")
         tuning = self._normalize_tuning_params(tuning_params)
         self._set_decode_progress(session_id, phase="loading", label="Loading captures", percent=5)
-        cam2proj_u, white_path, black_path = self._decode_raw_cam2proj(session_id, sample_step)
+        cam2proj_u, white_path, black_path = self._decode_raw_cam2proj(session_id, sample_step, tuning)
         self._set_decode_progress(session_id, phase="mapping", label="Building projector maps", percent=60)
 
         try:
@@ -963,6 +998,9 @@ class StructuredLightingService:
             raise RuntimeError("Failed to load white reference image for mask generation.")
 
         params = self._normalize_tuning_params(tuning_params)
+        brightness_gain = float(params["brightness_gain"])
+        white_bgr = self._apply_brightness_gain(white_bgr, brightness_gain)
+        black_bgr = self._apply_brightness_gain(black_bgr, brightness_gain)
         decode_dir = output_dir or self._ensure_decode_dir(session_id)
         raw_layers_dir = os.path.join(decode_dir, "second_pass_projector_layers")
         filtered_masks_dir = os.path.join(decode_dir, "second_pass_projector_layers_filtered")
@@ -983,6 +1021,10 @@ class StructuredLightingService:
                 int(params["bilateral_sigma_space"]),
             ),
             gradient_kernel=int(params["gradient_kernel_size"]),
+            edge_mode=str(params["edge_mode"]),
+            canny_low=int(params["canny_low_threshold"]),
+            canny_high=int(params["canny_high_threshold"]),
+            laplacian_ksize=int(params["laplacian_ksize"]),
         )
         self._set_decode_progress(session_id, phase="segmentation", label="Building wall-edge image", percent=70)
         segmentation_source_path = os.path.join(decode_dir, "warped_for_projector.png")
@@ -1180,15 +1222,36 @@ class StructuredLightingService:
             "repair_support_mask_path": repair_support_mask_path,
         }
 
-    def _build_wall_edge_map(self, img_white_bgr, blur_ksize: int, bilateral_params, gradient_kernel: int):
+    def _build_wall_edge_map(
+        self,
+        img_white_bgr,
+        blur_ksize: int,
+        bilateral_params,
+        gradient_kernel: int,
+        *,
+        edge_mode: str,
+        canny_low: int,
+        canny_high: int,
+        laplacian_ksize: int,
+    ):
         import cv2
+        import numpy as np
 
         clean = cv2.medianBlur(img_white_bgr, blur_ksize)
         smooth = cv2.bilateralFilter(clean, bilateral_params[0], bilateral_params[1], bilateral_params[2])
         gray = cv2.cvtColor(smooth, cv2.COLOR_BGR2GRAY)
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (gradient_kernel, gradient_kernel))
-        gradient = cv2.morphologyEx(gray, cv2.MORPH_GRADIENT, kernel)
-        return {"clean": clean, "smooth": smooth, "gray": gray, "gradient": gradient}
+        edge_mode = (edge_mode or "morph_gradient").lower()
+
+        if edge_mode == "canny":
+            gradient = cv2.Canny(gray, canny_low, canny_high)
+        elif edge_mode == "laplacian":
+            laplace = cv2.Laplacian(gray, cv2.CV_32F, ksize=max(1, laplacian_ksize | 1))
+            gradient = cv2.convertScaleAbs(np.abs(laplace))
+        else:
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (gradient_kernel, gradient_kernel))
+            gradient = cv2.morphologyEx(gray, cv2.MORPH_GRADIENT, kernel)
+
+        return {"clean": clean, "smooth": smooth, "gray": gray, "gradient": gradient, "edge_mode": edge_mode}
 
     def _segment_projector_source(
         self,
@@ -1868,6 +1931,11 @@ class StructuredLightingService:
         os.makedirs(capture_dir, exist_ok=True)
         return capture_dir
 
+    def _clear_capture_dir(self, session_id: str) -> None:
+        capture_dir = os.path.join(self._session_dir(session_id), "captures")
+        if os.path.isdir(capture_dir):
+            shutil.rmtree(capture_dir)
+
     def _ensure_decode_dir(self, session_id: str) -> str:
         decode_dir = os.path.join(self._session_dir(session_id), "decode")
         os.makedirs(decode_dir, exist_ok=True)
@@ -1911,7 +1979,7 @@ class StructuredLightingService:
                 return candidate
         return None
 
-    def _decode_raw_cam2proj(self, session_id: str, sample_step: int):
+    def _decode_raw_cam2proj(self, session_id: str, sample_step: int, tuning_params: Optional[Dict] = None):
         session = self.get_session(session_id)
         if not session:
             raise RuntimeError("Structured lighting session not found")
@@ -1928,6 +1996,9 @@ class StructuredLightingService:
         except ImportError as exc:
             raise RuntimeError("Decoding requires opencv-contrib-python and numpy in the backend environment.") from exc
 
+        params = self._normalize_tuning_params(tuning_params)
+        brightness_gain = float(params["brightness_gain"])
+
         plan = self.get_capture_plan(session_id)
         graycode_steps = [step for step in plan["steps"] if step["kind"] == "graycode"]
         pattern_images = []
@@ -1938,7 +2009,7 @@ class StructuredLightingService:
             image = cv2.imread(capture_meta["stored_path"], cv2.IMREAD_GRAYSCALE)
             if image is None:
                 raise RuntimeError(f"Failed to load capture {capture_meta['stored_path']}.")
-            pattern_images.append(image)
+            pattern_images.append(self._apply_brightness_gain(image, brightness_gain))
 
         if hasattr(cv2, "structured_light_GrayCodePattern"):
             graycode = cv2.structured_light_GrayCodePattern.create(session["projector_width"], session["projector_height"])
@@ -1947,8 +2018,8 @@ class StructuredLightingService:
         else:
             raise RuntimeError("OpenCV structured light module is unavailable.")
 
-        graycode.setWhiteThreshold(5)
-        graycode.setBlackThreshold(40)
+        graycode.setWhiteThreshold(int(params["white_threshold"]))
+        graycode.setBlackThreshold(int(params["black_threshold"]))
 
         h, w = pattern_images[0].shape
         cam2proj = np.full((h, w, 2), -1, dtype=np.int32)
@@ -1970,6 +2041,19 @@ class StructuredLightingService:
                 )
         return cam2proj, white_path, black_path
 
+    def _apply_brightness_gain(self, image, gain: float):
+        try:
+            import cv2
+            import numpy as np
+        except ImportError as exc:
+            raise RuntimeError("Brightness adjustment requires opencv-contrib-python and numpy in the backend environment.") from exc
+
+        gain = max(0.1, float(gain))
+        if abs(gain - 1.0) < 1e-6:
+            return image
+        adjusted = np.clip(image.astype(np.float32) * gain, 0, 255).astype(np.uint8)
+        return adjusted
+
     def _set_decode_progress(self, session_id: str, *, phase: str, label: str, percent: int) -> None:
         with self._lock:
             session = self._sessions.get(session_id)
@@ -1989,11 +2073,18 @@ class StructuredLightingService:
 
     def _default_tuning_params(self) -> Dict:
         return {
+            "edge_mode": "morph_gradient",
+            "brightness_gain": 1.0,
+            "white_threshold": 5,
+            "black_threshold": 40,
             "median_blur_ksize": 11,
             "bilateral_d": 15,
             "bilateral_sigma_color": 75,
             "bilateral_sigma_space": 75,
             "gradient_kernel_size": 5,
+            "canny_low_threshold": 30,
+            "canny_high_threshold": 90,
+            "laplacian_ksize": 3,
             "segmentation_scale": 1.0,
             "segmentation_threshold": 5,
             "segmentation_blur": 7,
@@ -2022,41 +2113,144 @@ class StructuredLightingService:
         params = self._default_tuning_params()
         if overrides:
             params.update(overrides)
+        params["brightness_gain"] = max(0.1, float(params["brightness_gain"]))
+        params["white_threshold"] = int(max(0, min(255, int(params["white_threshold"]))))
+        params["black_threshold"] = int(max(0, min(255, int(params["black_threshold"]))))
         return params
 
-    def _parameter_search_candidates(self) -> List[Dict]:
+    def _parameter_search_candidates(self, base_params: Optional[Dict] = None, parameter_grid: Optional[Dict] = None) -> List[Dict]:
+        normalized_base = self._normalize_tuning_params(base_params)
+        normalized_grid = self._normalize_parameter_grid(parameter_grid)
+        grid_candidates = []
+        seen = set()
+
+        for edge_mode in normalized_grid["edge_mode"]:
+            for brightness_gain in normalized_grid["brightness_gain"]:
+                for white_threshold in normalized_grid["white_threshold"]:
+                    for black_threshold in normalized_grid["black_threshold"]:
+                        key = (edge_mode, brightness_gain, white_threshold, black_threshold)
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        params = self._normalize_tuning_params(
+                            {
+                                **normalized_base,
+                                "edge_mode": edge_mode,
+                                "brightness_gain": brightness_gain,
+                                "white_threshold": white_threshold,
+                                "black_threshold": black_threshold,
+                            }
+                        )
+                        grid_candidates.append(
+                            {
+                                "label": f"{edge_mode} • b{brightness_gain:g} • w{white_threshold} • k{black_threshold}",
+                                "description": "Grid search candidate across edge mode, brightness, and GrayCode thresholds.",
+                                "params": params,
+                            }
+                        )
+                        if len(grid_candidates) >= 18:
+                            return grid_candidates
+
+        if grid_candidates:
+            return grid_candidates
+
         return [
             {
                 "label": "Balanced",
                 "description": "Default repair and layer filtering.",
-                "params": self._normalize_tuning_params(),
+                "params": self._normalize_tuning_params(normalized_base),
+            },
+            {
+                "label": "Canny Edges",
+                "description": "Use Canny edges for crisper boundary extraction before segmentation.",
+                "params": self._normalize_tuning_params({
+                    **normalized_base,
+                    "edge_mode": "canny",
+                    "canny_low_threshold": 25,
+                    "canny_high_threshold": 80,
+                    "segmentation_threshold": 4,
+                    "segmentation_blur": 5,
+                }),
+            },
+            {
+                "label": "Laplacian Edges",
+                "description": "Use Laplacian edges to emphasize softer wall boundaries.",
+                "params": self._normalize_tuning_params({
+                    **normalized_base,
+                    "edge_mode": "laplacian",
+                    "laplacian_ksize": 5,
+                    "segmentation_blur": 9,
+                    "layer_min_area": 750,
+                }),
             },
             {
                 "label": "Fine Layers",
                 "description": "Keep smaller layers and sharper segmentation.",
-                "params": self._normalize_tuning_params({"segmentation_blur": 5, "layer_min_area": 250}),
+                "params": self._normalize_tuning_params({**normalized_base, "segmentation_blur": 5, "layer_min_area": 250}),
             },
             {
                 "label": "Smooth Segmentation",
                 "description": "Heavier blur for cleaner large regions.",
-                "params": self._normalize_tuning_params({"segmentation_blur": 11}),
+                "params": self._normalize_tuning_params({**normalized_base, "segmentation_blur": 11}),
             },
             {
                 "label": "Low Threshold",
                 "description": "More aggressive wall detection and lighter layer filtering.",
-                "params": self._normalize_tuning_params({"segmentation_threshold": 3, "contrast_threshold": 20, "layer_min_area": 500}),
+                "params": self._normalize_tuning_params({**normalized_base, "segmentation_threshold": 3, "contrast_threshold": 20, "layer_min_area": 500}),
             },
             {
                 "label": "High Contrast",
                 "description": "Stricter trusted pixels and more conservative masks.",
-                "params": self._normalize_tuning_params({"contrast_threshold": 35, "layer_min_area": 2500}),
+                "params": self._normalize_tuning_params({**normalized_base, "contrast_threshold": 35, "layer_min_area": 2500}),
             },
             {
                 "label": "Strict Segmentation",
                 "description": "Higher segmentation threshold with smoother region boundaries.",
-                "params": self._normalize_tuning_params({"segmentation_threshold": 7, "segmentation_blur": 11, "layer_min_area": 1000}),
+                "params": self._normalize_tuning_params({**normalized_base, "segmentation_threshold": 7, "segmentation_blur": 11, "layer_min_area": 1000}),
+            },
+            {
+                "label": "Wide Gradient",
+                "description": "Use a broader morphological gradient kernel for large structural edges.",
+                "params": self._normalize_tuning_params({
+                    **normalized_base,
+                    "edge_mode": "morph_gradient",
+                    "gradient_kernel_size": 9,
+                    "segmentation_blur": 9,
+                    "layer_min_area": 1200,
+                }),
             },
         ]
+
+    def _normalize_parameter_grid(self, parameter_grid: Optional[Dict] = None) -> Dict:
+        grid = parameter_grid or {}
+
+        def _normalize_numeric_list(key: str, fallback: List[float], cast):
+            raw_values = grid.get(key)
+            if not isinstance(raw_values, list) or not raw_values:
+                return fallback
+            values = []
+            for item in raw_values:
+                try:
+                    values.append(cast(item))
+                except (TypeError, ValueError):
+                    continue
+            return values or fallback
+
+        edge_modes = grid.get("edge_mode")
+        if not isinstance(edge_modes, list) or not edge_modes:
+            edge_modes = ["morph_gradient", "canny", "laplacian"]
+        edge_modes = [
+            str(item)
+            for item in edge_modes
+            if str(item) in {"morph_gradient", "canny", "laplacian"}
+        ] or ["morph_gradient", "canny", "laplacian"]
+
+        return {
+            "edge_mode": edge_modes,
+            "brightness_gain": _normalize_numeric_list("brightness_gain", [1.0], float),
+            "white_threshold": _normalize_numeric_list("white_threshold", [5, 12], int),
+            "black_threshold": _normalize_numeric_list("black_threshold", [30, 40, 55], int),
+        }
 
     def _artifact_preview_specs(self) -> List[tuple[str, str, str]]:
         return [

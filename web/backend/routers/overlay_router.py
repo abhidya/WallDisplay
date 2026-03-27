@@ -169,6 +169,20 @@ async def get_overlay_window_refresh_state(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/widget-data")
+async def get_overlay_widget_data(
+    config_id: int = Query(..., description="Overlay configuration ID"),
+    db: Session = Depends(get_db)
+):
+    try:
+        service = OverlayService(db)
+        return service.get_live_widget_data(config_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/cast", response_model=OverlayCastSessionResponse)
 async def start_overlay_cast(
     cast_request: OverlayCastStartRequest,

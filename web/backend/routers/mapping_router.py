@@ -47,6 +47,23 @@ def get_mapping_scene(scene_id: int, db: Session = Depends(get_db)):
     return scene
 
 
+@router.get("/scenes/{scene_id}/export")
+def export_mapping_scene(scene_id: int, db: Session = Depends(get_db)):
+    try:
+        bundle_path = MappingSceneService(db).export_scene_bundle(scene_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return FileResponse(bundle_path, media_type="application/zip", filename=f"mapping_scene_{scene_id}.zip")
+
+
+@router.post("/scenes/import", response_model=MappingSceneResponse)
+async def import_mapping_scene(bundle: UploadFile = File(...), db: Session = Depends(get_db)):
+    try:
+        return await MappingSceneService(db).import_scene_bundle(bundle)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.put("/scenes/{scene_id}", response_model=MappingSceneResponse)
 def update_mapping_scene(scene_id: int, payload: MappingSceneUpdate, db: Session = Depends(get_db)):
     scene = MappingSceneService(db).update_scene(scene_id, payload)

@@ -1,6 +1,9 @@
+import json
 import os
 import shutil
+import tempfile
 import uuid
+import zipfile
 from typing import Dict, List, Optional
 
 from fastapi import UploadFile
@@ -146,6 +149,135 @@ class MappingSceneService:
         self.db.commit()
         self.db.refresh(scene)
         return self._to_response(scene)
+
+    def export_scene_bundle(self, scene_id: int) -> str:
+        scene = self.db.query(MappingScene).filter(MappingScene.id == scene_id).first()
+        if not scene:
+            raise ValueError("Scene not found")
+
+        scene_dir = self._ensure_scene_dir(scene_id)
+        export_path = os.path.join(scene_dir, "scene_bundle.zip")
+        backend_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+        scene_payload = self._to_response(scene).model_dump(mode="json")
+        bundle_masks = []
+
+        with zipfile.ZipFile(export_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for mask in scene_payload.get("masks", []):
+                stored_path = mask.get("stored_path")
+                if not stored_path:
+                    continue
+                absolute_path = os.path.join(backend_root, stored_path)
+                if not os.path.exists(absolute_path):
+                    continue
+                archive_name = f"masks/{mask['id']}_{mask['file_name']}"
+                archive.write(absolute_path, archive_name)
+                bundle_masks.append(
+                    {
+                        **mask,
+                        "bundle_path": archive_name,
+                    }
+                )
+
+            archive.writestr(
+                "scene.json",
+                json.dumps(
+                    {
+                        "scene": {
+                            **scene_payload,
+                            "masks": bundle_masks,
+                        },
+                        "exported_at": scene_payload.get("updated_at"),
+                        "bundle_version": 1,
+                    },
+                    indent=2,
+                    sort_keys=True,
+                ),
+            )
+
+        return export_path
+
+    async def import_scene_bundle(self, bundle: UploadFile) -> MappingSceneResponse:
+        with tempfile.TemporaryDirectory(prefix="mapping_scene_import_") as temp_dir:
+            bundle_path = os.path.join(temp_dir, bundle.filename or "scene_bundle.zip")
+            content = await bundle.read()
+            with open(bundle_path, "wb") as handle:
+                handle.write(content)
+
+            with zipfile.ZipFile(bundle_path, "r") as archive:
+                try:
+                    with archive.open("scene.json") as handle:
+                        payload = json.load(handle)
+                except KeyError as exc:
+                    raise ValueError("Scene bundle is missing scene.json") from exc
+                archive.extractall(temp_dir)
+
+            scene_data = payload.get("scene") or {}
+            masks = scene_data.get("masks") or []
+
+            imported_scene = self.create_scene(
+                MappingSceneCreate(
+                    name=f"{scene_data.get('name', 'Imported Scene')} (Imported)",
+                    canvas_width=scene_data.get("canvas_width", 1280),
+                    canvas_height=scene_data.get("canvas_height", 720),
+                    mask_mode=scene_data.get("mask_mode", "luminance"),
+                    groups=[],
+                    masks=[],
+                    render_settings=scene_data.get("render_settings") or {},
+                )
+            )
+
+            scene = self.db.query(MappingScene).filter(MappingScene.id == imported_scene.id).first()
+            if not scene:
+                raise ValueError("Imported scene not found after creation")
+
+            mask_dir = os.path.join(self._ensure_scene_dir(scene.id), "masks")
+            os.makedirs(mask_dir, exist_ok=True)
+            backend_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            imported_masks = []
+
+            for sort_order, mask in enumerate(sorted(masks, key=lambda item: item.get("sort_order", 0))):
+                bundle_mask_path = mask.get("bundle_path")
+                if not bundle_mask_path:
+                    continue
+                extracted_mask_path = os.path.join(temp_dir, bundle_mask_path)
+                if not os.path.exists(extracted_mask_path):
+                    continue
+
+                suffix = os.path.splitext(mask.get("file_name") or extracted_mask_path)[1].lower() or ".png"
+                stored_name = f"{uuid.uuid4().hex}{suffix}"
+                stored_path = os.path.join(mask_dir, stored_name)
+                shutil.copyfile(extracted_mask_path, stored_path)
+                image = Image.open(stored_path)
+                rel_path = os.path.relpath(stored_path, backend_root)
+                imported_masks.append(
+                    MappingMask(
+                        id=mask.get("id") or uuid.uuid4().hex,
+                        name=mask.get("name") or os.path.splitext(mask.get("file_name") or stored_name)[0],
+                        file_name=mask.get("file_name") or stored_name,
+                        stored_path=rel_path.replace("\\", "/"),
+                        width=image.width,
+                        height=image.height,
+                        sort_order=sort_order,
+                    ).model_dump()
+                )
+
+            imported_groups = []
+            valid_mask_ids = {mask["id"] for mask in imported_masks}
+            for group in scene_data.get("groups") or []:
+                next_group = dict(group)
+                next_group["mask_ids"] = [
+                    mask_id
+                    for mask_id in (group.get("mask_ids") or [])
+                    if mask_id in valid_mask_ids
+                ]
+                imported_groups.append(next_group)
+
+            scene.masks = imported_masks
+            scene.groups = imported_groups
+            self.db.commit()
+            self.db.refresh(scene)
+            return self._to_response(scene)
 
     def create_polygon_mask(self, scene_id: int, name: str, points: List[MappingPoint]) -> MappingSceneResponse:
         scene = self.db.query(MappingScene).filter(MappingScene.id == scene_id).first()

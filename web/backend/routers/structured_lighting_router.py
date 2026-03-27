@@ -49,6 +49,8 @@ class StructuredLightingDecodeRequest(BaseModel):
 
 class StructuredLightingParameterSearchRequest(BaseModel):
     sample_step: int = Field(1, ge=1, le=16, description="Decode every Nth camera pixel for search candidates")
+    tuning_params: Optional[Dict[str, float]] = Field(None, description="Base tuning parameters applied to every candidate")
+    parameter_grid: Optional[Dict[str, List[float | str]]] = Field(None, description="Explicit parameter grid for candidate generation")
 
 
 class StructuredLightingReviewUpdate(BaseModel):
@@ -153,6 +155,15 @@ def list_captures(session_id: str) -> Dict:
     return captures
 
 
+@router.get("/sessions/{session_id}/captures/{step_index}/image")
+def get_capture_image(session_id: str, step_index: int) -> Response:
+    service = get_structured_lighting_service()
+    image_bytes = service.render_capture_image(session_id, step_index)
+    if image_bytes is None:
+        raise HTTPException(status_code=404, detail="Structured lighting capture not found")
+    return Response(content=image_bytes, media_type="image/png")
+
+
 @router.post("/sessions/{session_id}/decode")
 def decode_session(session_id: str, payload: StructuredLightingDecodeRequest) -> Dict:
     service = get_structured_lighting_service()
@@ -170,7 +181,12 @@ def decode_session(session_id: str, payload: StructuredLightingDecodeRequest) ->
 def run_tuning_search(session_id: str, payload: StructuredLightingParameterSearchRequest) -> Dict:
     service = get_structured_lighting_service()
     try:
-        result = service.run_tuning_search(session_id, sample_step=payload.sample_step)
+        result = service.run_tuning_search(
+            session_id,
+            sample_step=payload.sample_step,
+            tuning_params=payload.tuning_params,
+            parameter_grid=payload.parameter_grid,
+        )
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not result:
