@@ -2,6 +2,7 @@ import asyncio
 import base64
 import html
 import logging
+import queue
 import re
 import socket
 import subprocess
@@ -33,6 +34,53 @@ class ReusableThreadingHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = True
 
 
+class FanoutRelayState:
+    def __init__(self):
+        self._clients: dict[str, queue.Queue] = {}
+        self._lock = threading.Lock()
+        self.closed = False
+
+    def register_client(self) -> tuple[str, queue.Queue]:
+        client_id = str(uuid.uuid4())
+        client_queue: queue.Queue = queue.Queue(maxsize=128)
+        with self._lock:
+            self._clients[client_id] = client_queue
+        return client_id, client_queue
+
+    def unregister_client(self, client_id: str):
+        with self._lock:
+            self._clients.pop(client_id, None)
+
+    def publish(self, chunk: bytes):
+        if not chunk:
+            return
+        stale_clients: list[str] = []
+        with self._lock:
+            for client_id, client_queue in self._clients.items():
+                try:
+                    client_queue.put_nowait(chunk)
+                except queue.Full:
+                    stale_clients.append(client_id)
+        for client_id in stale_clients:
+            self.unregister_client(client_id)
+
+    def close(self):
+        with self._lock:
+            self.closed = True
+            clients = list(self._clients.values())
+            self._clients.clear()
+        for client_queue in clients:
+            try:
+                client_queue.put_nowait(None)
+            except queue.Full:
+                pass
+
+    @property
+    def active_client_count(self) -> int:
+        with self._lock:
+            return len(self._clients)
+
+
 class OverlayCastRelayHandler(BaseHTTPRequestHandler):
     server_version = "OverlayCastRelay/1.0"
 
@@ -44,8 +92,8 @@ class OverlayCastRelayHandler(BaseHTTPRequestHandler):
             self.send_error(404)
             return
 
-        ffmpeg_proc = getattr(self.server, "ffmpeg_proc", None)
-        if ffmpeg_proc is None or ffmpeg_proc.stdout is None:
+        relay_state: Optional[FanoutRelayState] = getattr(self.server, "relay_state", None)
+        if relay_state is None:
             self.send_error(503, "Relay not ready")
             return
 
@@ -55,17 +103,24 @@ class OverlayCastRelayHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
         session = getattr(self.server, "overlay_session", None)
+        client_id, client_queue = relay_state.register_client()
         if session is not None:
-            session.active_clients += 1
+            session.active_clients = relay_state.active_client_count
             session.last_client_connected_at = datetime.utcnow()
             session.last_client_activity_at = session.last_client_connected_at
 
         try:
             while True:
-                chunk = ffmpeg_proc.stdout.read(32768)
-                if not chunk:
+                try:
+                    chunk = client_queue.get(timeout=1.0)
+                except queue.Empty:
+                    if relay_state.closed:
+                        break
+                    continue
+                if chunk is None:
                     break
                 self.wfile.write(chunk)
+                self.wfile.flush()
                 if session is not None:
                     session.last_client_activity_at = datetime.utcnow()
         except (BrokenPipeError, ConnectionResetError):
@@ -73,8 +128,9 @@ class OverlayCastRelayHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             logger.warning("Overlay cast relay stream error: %s", exc)
         finally:
+            relay_state.unregister_client(client_id)
             if session is not None:
-                session.active_clients = max(0, session.active_clients - 1)
+                session.active_clients = relay_state.active_client_count
                 session.last_client_disconnected_at = datetime.utcnow()
 
 
@@ -108,9 +164,11 @@ class OverlayCastSession:
     browser = None
     page = None
     ffmpeg_proc: Optional[subprocess.Popen] = None
+    relay_state: Optional[FanoutRelayState] = None
     relay_server: Optional[ThreadingHTTPServer] = None
     relay_thread: Optional[threading.Thread] = None
     ffmpeg_log_thread: Optional[threading.Thread] = None
+    ffmpeg_stdout_thread: Optional[threading.Thread] = None
     frame_writer_thread: Optional[threading.Thread] = None
     latest_frame: Optional[bytes] = None
     frame_interval_seconds: float = 1 / 20
@@ -270,7 +328,15 @@ class OverlayCastService:
 
             playwright_context = await async_playwright().start()
             self._log_step(session, "browser_launch", "Launching headless Chromium")
-            browser = await playwright_context.chromium.launch(headless=True, args=["--no-sandbox"])
+            browser = await playwright_context.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--use-angle=metal",
+                    "--enable-gpu-rasterization",
+                    "--enable-zero-copy",
+                ],
+            )
             self._log_step(session, "page_create", "Opening overlay page")
             page = await browser.new_page(
                 viewport={"width": viewport_width, "height": viewport_height}
@@ -297,6 +363,14 @@ class OverlayCastService:
             )
             ffmpeg_log_thread.start()
 
+            relay_state = FanoutRelayState()
+            ffmpeg_stdout_thread = threading.Thread(
+                target=self._pump_ffmpeg_stdout,
+                args=(session, ffmpeg_proc, relay_state),
+                daemon=True,
+            )
+            ffmpeg_stdout_thread.start()
+
             frame_writer_thread = threading.Thread(
                 target=self._pump_latest_frame_to_ffmpeg,
                 args=(session, ffmpeg_proc),
@@ -306,7 +380,7 @@ class OverlayCastService:
 
             self._log_step(session, "relay_bind", f"Starting local relay on port {session.stream_port}")
             relay_server = ReusableThreadingHTTPServer(("0.0.0.0", session.stream_port), OverlayCastRelayHandler)
-            relay_server.ffmpeg_proc = ffmpeg_proc
+            relay_server.relay_state = relay_state
             relay_server.overlay_session = session
             relay_thread = threading.Thread(target=relay_server.serve_forever, daemon=True)
             relay_thread.start()
@@ -332,16 +406,18 @@ class OverlayCastService:
                     "quality": quality,
                     "maxWidth": capture_width,
                     "maxHeight": capture_height,
-                    "everyNthFrame": 5,
+                    "everyNthFrame": 1,
                 },
             )
 
             session.browser = browser
             session.page = page
             session.ffmpeg_proc = ffmpeg_proc
+            session.relay_state = relay_state
             session.relay_server = relay_server
             session.relay_thread = relay_thread
             session.ffmpeg_log_thread = ffmpeg_log_thread
+            session.ffmpeg_stdout_thread = ffmpeg_stdout_thread
             session.frame_writer_thread = frame_writer_thread
             session.ready_event.set()
 
@@ -452,10 +528,19 @@ class OverlayCastService:
             except Exception:
                 pass
             try:
+                if session.ffmpeg_proc.stdout is not None:
+                    session.ffmpeg_proc.stdout.close()
+            except Exception:
+                pass
+            try:
                 session.ffmpeg_proc.kill()
             except Exception:
                 pass
             session.ffmpeg_proc = None
+
+        if session.relay_state is not None:
+            session.relay_state.close()
+            session.relay_state = None
 
         if session.relay_server is not None:
             try:
@@ -467,6 +552,7 @@ class OverlayCastService:
 
         session.relay_thread = None
         session.ffmpeg_log_thread = None
+        session.ffmpeg_stdout_thread = None
         session.frame_writer_thread = None
         session.latest_frame = None
 
@@ -547,9 +633,34 @@ class OverlayCastService:
                 break
             time.sleep(session.frame_interval_seconds)
 
+    def _pump_ffmpeg_stdout(
+        self,
+        session: OverlayCastSession,
+        ffmpeg_proc: subprocess.Popen,
+        relay_state: FanoutRelayState,
+    ):
+        if ffmpeg_proc.stdout is None:
+            relay_state.close()
+            return
+
+        try:
+            while not session.stop_event.is_set():
+                chunk = ffmpeg_proc.stdout.read(32768)
+                if not chunk:
+                    break
+                relay_state.publish(chunk)
+        except Exception as exc:
+            logger.warning("Overlay cast relay pump stopped for session %s: %s", session.session_id, exc)
+        finally:
+            relay_state.close()
+
     def _build_ffmpeg_command(self, frame_rate: int) -> tuple[str, list[str]]:
         encoder = "h264_videotoolbox" if sys.platform == "darwin" else "libx264"
-        encoder_options = ["-realtime", "1"] if encoder == "h264_videotoolbox" else ["-preset", "ultrafast"]
+        encoder_options = (
+            ["-realtime", "1", "-prio_speed", "1", "-power_efficient", "0"]
+            if encoder == "h264_videotoolbox"
+            else ["-preset", "ultrafast"]
+        )
         ffmpeg_cmd = [
             "ffmpeg",
             "-y",
