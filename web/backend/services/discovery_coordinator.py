@@ -63,7 +63,10 @@ class DiscoveryCoordinator:
             "devices_removed": 0,
             "registration_failures": 0,
             "last_error": None,
+            "discovery_transport_ok": True,
         }
+        self._probe_failure_warning_logged = False
+        self._discovery_transport_failure_logged = False
 
     def _inventory_len(self) -> int:
         if self.device_inventory is not None:
@@ -93,7 +96,8 @@ class DiscoveryCoordinator:
 
     def _candidate_discovery_hosts(self, host: Optional[str] = None) -> List[str]:
         if host and host != "0.0.0.0":
-            return [host]
+            # Preserve explicit host pinning while keeping the legacy-safe wildcard fallback.
+            return [host, "0.0.0.0"]
 
         candidates: List[str] = []
         seen = set()
@@ -244,6 +248,7 @@ class DiscoveryCoordinator:
                     "devices_removed": 0,
                     "registration_failures": 0,
                     "last_error": None,
+                    "discovery_transport_ok": True,
                 }
                 discovered_devices = self.discover_dlna_devices()
                 logger.debug("Found %s DLNA devices", len(discovered_devices))
@@ -266,9 +271,21 @@ class DiscoveryCoordinator:
                     )
                 self._last_cycle_status["devices_seen_this_pass"] = len(current_devices)
 
-                disconnect_summary = self.evaluate_disconnected_devices(current_devices)
-                self._last_cycle_status["devices_marked_disconnected"] = disconnect_summary["marked_disconnected"]
-                self._last_cycle_status["devices_removed"] = disconnect_summary["removed"]
+                if self._last_cycle_status.get("discovery_transport_ok", True):
+                    if self._discovery_transport_failure_logged:
+                        logger.info("DLNA discovery transport recovered")
+                        self._discovery_transport_failure_logged = False
+                    disconnect_summary = self.evaluate_disconnected_devices(current_devices)
+                    self._last_cycle_status["devices_marked_disconnected"] = disconnect_summary["marked_disconnected"]
+                    self._last_cycle_status["devices_removed"] = disconnect_summary["removed"]
+                else:
+                    if not self._discovery_transport_failure_logged:
+                        logger.warning(
+                            "Skipping disconnect evaluation; SSDP probes failed on all discovery interfaces"
+                        )
+                        self._discovery_transport_failure_logged = True
+                    self._last_cycle_status["devices_marked_disconnected"] = 0
+                    self._last_cycle_status["devices_removed"] = 0
                 logger.debug("Finished DLNA discovery cycle")
             except Exception as exc:
                 self._last_cycle_status["last_error"] = str(exc)
@@ -286,46 +303,88 @@ class DiscoveryCoordinator:
         devices = []
         attempted_hosts = self._candidate_discovery_hosts(host)
         self._last_cycle_status["candidate_hosts"] = attempted_hosts
+        self._last_cycle_status["discovery_transport_ok"] = False
         logger.debug("Searching for DLNA devices on candidate hosts %s", attempted_hosts)
 
+        successful_probe = False
         for candidate_host in attempted_hosts:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-            try:
-                ttl = struct.pack("B", 4)
-                sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl)
-                if candidate_host != "0.0.0.0":
-                    sock.setsockopt(
-                        socket.IPPROTO_IP,
-                        socket.IP_MULTICAST_IF,
-                        socket.inet_aton(candidate_host),
+            if candidate_host == "0.0.0.0":
+                probe_attempts = [("0.0.0.0", False)]
+            else:
+                probe_attempts = [
+                    (candidate_host, True),
+                    (candidate_host, False),
+                    ("0.0.0.0", False),
+                ]
+
+            attempt_errors = []
+            candidate_probe_succeeded = False
+            for bind_host, set_multicast_if in probe_attempts:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+                try:
+                    ttl = struct.pack("B", 4)
+                    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl)
+                    if set_multicast_if and bind_host != "0.0.0.0":
+                        sock.setsockopt(
+                            socket.IPPROTO_IP,
+                            socket.IP_MULTICAST_IF,
+                            socket.inet_aton(bind_host),
+                        )
+                    sock.bind((bind_host, 0))
+
+                    logger.debug(
+                        "Sending SSDP broadcast message for candidate %s via bind=%s multicast_if=%s",
+                        candidate_host,
+                        bind_host,
+                        set_multicast_if,
                     )
-                sock.bind((candidate_host, 0))
+                    sock.sendto(SSDP_BROADCAST_MSG.encode("UTF-8"), (SSDP_BROADCAST_ADDR, SSDP_BROADCAST_PORT))
+                    successful_probe = True
+                    candidate_probe_succeeded = True
+                    sock.settimeout(timeout)
 
-                logger.debug("Sending SSDP broadcast message on %s", candidate_host)
-                sock.sendto(SSDP_BROADCAST_MSG.encode("UTF-8"), (SSDP_BROADCAST_ADDR, SSDP_BROADCAST_PORT))
-                sock.settimeout(timeout)
+                    while True:
+                        try:
+                            data, _addr = sock.recvfrom(1024)
+                        except socket.timeout:
+                            break
 
-                while True:
-                    try:
-                        data, _addr = sock.recvfrom(1024)
-                    except socket.timeout:
-                        break
+                        try:
+                            info = [line.split(":", 1) for line in data.decode("UTF-8").split("\r\n")[1:] if ":" in line]
+                            device = {
+                                left[0].strip().lower(): left[1].strip()
+                                for left in info
+                                if len(left) >= 2
+                            }
+                            devices.append(device)
+                            self._last_cycle_status["ssdp_response_count"] += 1
+                        except Exception as exc:
+                            logger.error("Error parsing DLNA device response: %s", exc)
 
-                    try:
-                        info = [line.split(":", 1) for line in data.decode("UTF-8").split("\r\n")[1:]]
-                        device = {
-                            left[0].strip().lower(): left[1].strip()
-                            for left in info
-                            if len(left) >= 2
-                        }
-                        devices.append(device)
-                        self._last_cycle_status["ssdp_response_count"] += 1
-                    except Exception as exc:
-                        logger.error("Error parsing DLNA device response: %s", exc)
-            except OSError as exc:
-                logger.warning("DLNA discovery send failed on host %s: %s", candidate_host, exc)
-            finally:
-                sock.close()
+                    break
+                except OSError as exc:
+                    attempt_errors.append((bind_host, set_multicast_if, exc))
+                    logger.debug(
+                        "DLNA discovery send failed for candidate %s via bind=%s multicast_if=%s: %s",
+                        candidate_host,
+                        bind_host,
+                        set_multicast_if,
+                        exc,
+                    )
+                finally:
+                    sock.close()
+
+            if attempt_errors and not candidate_probe_succeeded:
+                logger.debug("DLNA candidate %s failed in all socket modes", candidate_host)
+
+        self._last_cycle_status["discovery_transport_ok"] = successful_probe
+        if attempted_hosts and not successful_probe:
+            if not self._probe_failure_warning_logged:
+                logger.warning("DLNA discovery probes failed on all candidate hosts %s", attempted_hosts)
+                self._probe_failure_warning_logged = True
+        elif self._probe_failure_warning_logged:
+            logger.info("DLNA discovery probe transport recovered")
+            self._probe_failure_warning_logged = False
 
         devices_urls = [
             dev["location"]

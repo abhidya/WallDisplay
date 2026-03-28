@@ -795,9 +795,20 @@ class StreamingService:
         """
         logger.info(f"Attempting to reconnect streaming session {session.session_id}")
         
-        # First, check if the server for this session is still running
+        # First, check if the server for this session is still running.
+        # Sessions created by TwistedStreamingServer are tracked outside self.servers.
         server_key = f"{session.server_ip}:{session.server_port}"
-        if server_key not in self.servers:
+        server_running = server_key in self.servers
+        if not server_running:
+            try:
+                from core.twisted_streaming import TwistedStreamingServer
+
+                twisted_server = TwistedStreamingServer.get_instance()
+                server_running = session.server_port in getattr(twisted_server, "server_sites", {})
+            except Exception:
+                server_running = False
+
+        if not server_running:
             logger.warning(f"Server {server_key} for session {session.session_id} is no longer running")
             return False
             

@@ -31,6 +31,28 @@ class DevicePlaybackService:
 
     def play_video(self, device_id: int, video_path: str, loop: bool = False) -> bool:
         try:
+            started_new_stream = False
+            created_streaming_port = None
+            created_session_id = None
+            created_streaming_server = None
+
+            def _cleanup_failed_playback_attempt() -> None:
+                nonlocal created_session_id, created_streaming_port, created_streaming_server
+                try:
+                    from core.streaming_registry import StreamingSessionRegistry
+
+                    registry = StreamingSessionRegistry.get_instance()
+                    if created_session_id:
+                        registry.unregister_session(created_session_id)
+                except Exception as cleanup_exc:
+                    logger.warning(f"Failed to clean up streaming session after play failure: {cleanup_exc}")
+
+                if started_new_stream and created_streaming_server is not None and created_streaming_port is not None:
+                    try:
+                        created_streaming_server.stop_server(port=created_streaming_port)
+                    except Exception as cleanup_exc:
+                        logger.warning(f"Failed to stop streaming server on port {created_streaming_port}: {cleanup_exc}")
+
             device = self.get_device_instance(device_id)
             if not device:
                 logger.error(f"Device with ID {device_id} not found")
@@ -93,6 +115,9 @@ class DevicePlaybackService:
                     video_url = urls[file_name]
                     port_match = re.search(r":(\d+)/", video_url)
                     streaming_port = int(port_match.group(1)) if port_match else None
+                    started_new_stream = True
+                    created_streaming_port = streaming_port
+                    created_streaming_server = streaming_server
 
                     if db_device:
                         db_device.streaming_url = video_url
@@ -114,6 +139,7 @@ class DevicePlaybackService:
                             server_ip=serve_ip,
                             server_port=streaming_port,
                         )
+                        created_session_id = session.session_id
                         logger.info(f"Registered streaming session {session.session_id} for device {device.name}")
                 except RuntimeError as exc:
                     if "No available port" in str(exc):
@@ -135,6 +161,11 @@ class DevicePlaybackService:
 
             if not success:
                 logger.error(f"Failed to play video {video_url} on device {device_id}")
+                _cleanup_failed_playback_attempt()
+                if db_device and started_new_stream:
+                    db_device.streaming_url = None
+                    db_device.streaming_port = None
+                    self.db.commit()
                 return False
 
             db_device.is_playing = False

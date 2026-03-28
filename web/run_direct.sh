@@ -88,5 +88,22 @@ echo ""
 echo "To stop the application, run: ./stop_direct.sh"
 echo "Press Ctrl+C to stop the application"
 
-trap "echo 'Stopping application...'; bash ./stop_direct.sh; exit 0" INT
-wait
+trap "echo 'Stopping application...'; bash ./stop_direct.sh; exit 0" INT TERM
+
+# Keep run_direct alive only while all required child processes are healthy.
+# This lets launchd/system supervisor restart the stack if either child crashes.
+while true; do
+    sleep 2
+
+    if ! ps -p "$BACKEND_PID" > /dev/null 2>&1; then
+        echo "Backend process ($BACKEND_PID) exited unexpectedly. Stopping application set."
+        bash ./stop_direct.sh
+        exit 1
+    fi
+
+    if [ "$NANODLNA_FRONTEND_ENABLED" = "1" ] && [ -n "$FRONTEND_PID" ] && ! ps -p "$FRONTEND_PID" > /dev/null 2>&1; then
+        echo "Frontend process ($FRONTEND_PID) exited unexpectedly. Stopping application set."
+        bash ./stop_direct.sh
+        exit 1
+    fi
+done

@@ -39,7 +39,7 @@ class OverlayService:
         self._global_api_config_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             "uploads",
-            "overlay_global_api_configs.json",
+            "env.overlay_global_api_configs.json",
         )
 
     def get_global_api_configs(self) -> Dict[str, Any]:

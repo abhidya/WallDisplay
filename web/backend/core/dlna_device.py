@@ -392,6 +392,10 @@ class DLNADevice(Device):
             except Exception as e:
                 last_exception = e
                 logger.warning(f"DLNA request failed (attempt {retry+1}/{self.max_retries}): {e}")
+                error_text = str(e)
+                if "No route to host" in error_text or "Errno 65" in error_text:
+                    if self._recover_control_route():
+                        logger.info("Recovered control route for %s, retrying %s", self.name, action)
                 if retry < self.max_retries - 1:
                     logger.info(f"Retrying in {RETRY_DELAY} seconds...")
                     time.sleep(RETRY_DELAY)
@@ -621,21 +625,113 @@ class DLNADevice(Device):
             "SOAPAction": f'"urn:schemas-upnp-org:service:AVTransport:1#{action}"',
         }
         
-        # Send the request
-        try:
-            response = requests.post(self.action_url, data=xml_str_bytes, headers=headers, timeout=10) # Send bytes
-            
-            # Check if the request was successful
-            if response.status_code == 200:
-                logger.debug(f"AVTransport action {action} succeeded")
-                return True
-            else:
+        # Send the request with one endpoint-refresh retry for transient routing failures.
+        for attempt in range(2):
+            try:
+                response = requests.post(self.action_url, data=xml_str_bytes, headers=headers, timeout=10)
+                if response.status_code == 200:
+                    logger.debug(f"AVTransport action {action} succeeded")
+                    return True
                 logger.error(f"AVTransport action {action} failed with status {response.status_code}")
                 logger.error(f"Response: {response.text}")
                 return False
-        except requests.exceptions.RequestException as e: # More specific exception
-            logger.error(f"Error sending AVTransport action {action}: {e}")
+            except requests.exceptions.RequestException as e:
+                error_text = str(e)
+                should_retry = (
+                    attempt == 0
+                    and ("No route to host" in error_text or "Errno 65" in error_text)
+                    and self._recover_control_route()
+                )
+                if should_retry:
+                    logger.warning(
+                        "Retrying AVTransport action %s on refreshed endpoint %s",
+                        action,
+                        self.action_url,
+                    )
+                    continue
+                logger.error(f"Error sending AVTransport action {action}: {e}")
+                return False
+        return False
+
+    def _refresh_endpoint_from_discovery(self) -> bool:
+        runtime = getattr(self, "runtime", None)
+        if runtime is None or not hasattr(runtime, "discover_dlna_devices"):
             return False
+
+        try:
+            discovered = runtime.discover_dlna_devices(timeout=3)
+        except Exception as exc:
+            logger.debug("Endpoint refresh discovery failed for %s: %s", self.name, exc)
+            return False
+
+        for device_info in discovered or []:
+            discovered_name = (
+                device_info.get("friendly_name")
+                or device_info.get("name")
+                or device_info.get("device_name")
+            )
+            if discovered_name != self.name:
+                continue
+
+            new_action_url = device_info.get("action_url") or self.action_url
+            new_hostname = device_info.get("hostname") or self.hostname
+            if new_action_url != self.action_url or new_hostname != self.hostname:
+                logger.info(
+                    "Refreshed DLNA endpoint for %s: host %s -> %s, action_url %s -> %s",
+                    self.name,
+                    self.hostname,
+                    new_hostname,
+                    self.action_url,
+                    new_action_url,
+                )
+            self.hostname = new_hostname
+            self.action_url = new_action_url
+            return True
+
+        return False
+
+    def _recover_control_route(self) -> bool:
+        """
+        Try to recover connectivity to the renderer control endpoint after route failures.
+        """
+        from urllib.parse import urlparse
+
+        parsed = urlparse(self.action_url or "")
+        host = parsed.hostname or self.hostname
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        if not host:
+            return False
+
+        def can_reach() -> bool:
+            try:
+                probe = socket.create_connection((host, port), timeout=2.0)
+                probe.close()
+                return True
+            except OSError:
+                return False
+
+        # Fast path: route is already back.
+        if can_reach():
+            return True
+
+        # Refresh endpoint metadata first.
+        self._refresh_endpoint_from_discovery()
+
+        # If we have a location URL, probing it can wake some renderers.
+        location_url = getattr(self, "location", None)
+        if location_url:
+            try:
+                urllibreq.urlopen(location_url, timeout=3).read(1)
+            except Exception:
+                pass
+
+        # Retry route probe briefly.
+        for _ in range(3):
+            if can_reach():
+                return True
+            time.sleep(0.5)
+
+        return False
 
     def _handle_streaming_health_check(self, session_id: str, reason: str) -> None:
         """

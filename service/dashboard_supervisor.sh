@@ -26,73 +26,15 @@ stop_children() {
     wait 2>/dev/null || true
 }
 
-ensure_backend_dependencies() {
-    cd "$NANODLNA_BACKEND_DIR"
-
-    if [ ! -d "$NANODLNA_VENV_DIR" ]; then
-        log "Creating Python virtual environment at $NANODLNA_VENV_DIR"
-        python3 -m venv "$NANODLNA_VENV_DIR"
-    fi
-
-    if [ -x "$NANODLNA_VENV_DIR/bin/python" ]; then
-        NANODLNA_PYTHON_BIN="$NANODLNA_VENV_DIR/bin/python"
-    fi
-
-    log "Installing backend dependencies"
-    "$NANODLNA_PYTHON_BIN" -m pip install -r requirements.txt >> "$NANODLNA_LOG_DIR/backend.stdout.log" 2>> "$NANODLNA_LOG_DIR/backend.stderr.log"
-
-    if [ "$NANODLNA_INSTALL_PLAYWRIGHT" = "1" ] && "$NANODLNA_PYTHON_BIN" -c "import playwright" >/dev/null 2>&1; then
-        log "Installing Playwright Chromium runtime"
-        "$NANODLNA_PYTHON_BIN" -m playwright install chromium >> "$NANODLNA_LOG_DIR/backend.stdout.log" 2>> "$NANODLNA_LOG_DIR/backend.stderr.log"
-    fi
-}
-
-ensure_frontend_dependencies() {
-    if [ "$NANODLNA_FRONTEND_ENABLED" != "1" ]; then
-        return
-    fi
-
-    cd "$NANODLNA_FRONTEND_DIR"
-    log "Installing frontend dependencies"
-    "$NANODLNA_NPM_BIN" install >> "$NANODLNA_LOG_DIR/frontend.stdout.log" 2>> "$NANODLNA_LOG_DIR/frontend.stderr.log"
-}
-
-start_children() {
-    cd "$NANODLNA_BACKEND_DIR"
-    log "Starting backend"
-    PYTHONPATH="$NANODLNA_BACKEND_DIR" "$NANODLNA_PYTHON_BIN" run.py --host "$NANODLNA_HOST" --port "$NANODLNA_BACKEND_PORT" >> "$NANODLNA_LOG_DIR/backend.stdout.log" 2>> "$NANODLNA_LOG_DIR/backend.stderr.log" &
-    BACKEND_PID=$!
-
-    FRONTEND_PID=""
-    if [ "$NANODLNA_FRONTEND_ENABLED" = "1" ]; then
-        cd "$NANODLNA_FRONTEND_DIR"
-        log "Starting frontend"
-        PORT="$NANODLNA_FRONTEND_PORT" BROWSER=none "$NANODLNA_NPM_BIN" start >> "$NANODLNA_LOG_DIR/frontend.stdout.log" 2>> "$NANODLNA_LOG_DIR/frontend.stderr.log" &
-        FRONTEND_PID=$!
-    fi
-}
-
 trap 'log "Received stop signal"; stop_children; exit 0' INT TERM
 
 while true; do
-    ensure_backend_dependencies
-    ensure_frontend_dependencies
-    start_children
-
-    while true; do
-        sleep 2
-
-        if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
-            log "Backend exited; restarting service set"
-            break
-        fi
-
-        if [ "$NANODLNA_FRONTEND_ENABLED" = "1" ] && [ -n "$FRONTEND_PID" ] && ! kill -0 "$FRONTEND_PID" 2>/dev/null; then
-            log "Frontend exited; restarting service set"
-            break
-        fi
-    done
-
-    stop_children
+    log "Starting dashboard through run_dashboard.sh"
+    set +e
+    "$NANODLNA_ROOT_DIR/run_dashboard.sh" >> "$NANODLNA_LOG_DIR/launchd-dashboard.out.log" 2>> "$NANODLNA_LOG_DIR/launchd-dashboard.err.log"
+    exit_code=$?
+    set -e
+    log "run_dashboard.sh exited with code $exit_code; restarting after delay"
+    "$NANODLNA_ROOT_DIR/stop_dashboard.sh" >> "$NANODLNA_LOG_DIR/launchd-dashboard.out.log" 2>> "$NANODLNA_LOG_DIR/launchd-dashboard.err.log" || true
     sleep "$NANODLNA_SERVICE_RESTART_DELAY"
 done

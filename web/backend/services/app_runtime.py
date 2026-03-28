@@ -122,12 +122,12 @@ class AppRuntime:
     def start_background_services(self) -> None:
         logger.info("Starting device discovery")
         self.discovery_manager.register_enabled_backends()
-        self.unified_discovery_lifecycle_service.start()
-        if not self.uses_unified_discovery_authority:
+        if self.uses_unified_discovery_authority:
+            self.unified_discovery_lifecycle_service.start()
+            logger.info("Unified discovery authority enabled; skipping legacy discovery loop startup")
+        else:
             discovery_controller = AppRuntime._get_discovery_controller(self)
             discovery_controller.start()
-        else:
-            logger.info("Unified discovery authority enabled; skipping legacy discovery loop startup")
 
         if self.migration_adapter is None:
             try:
