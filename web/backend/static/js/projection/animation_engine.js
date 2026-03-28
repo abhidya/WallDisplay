@@ -89,6 +89,7 @@ class AnimationEngine {
         }
         
         const animation = new AnimationClass(zone, container, this.maskImage);
+        animation.externalClock = true;
         animation.init();
         
         // Store reference
@@ -100,6 +101,14 @@ class AnimationEngine {
         }
         
         return animation;
+    }
+
+    renderFrame(timestamp) {
+        this.animations.forEach(animation => {
+            if (animation?.renderFrame) {
+                animation.renderFrame(timestamp);
+            }
+        });
     }
     
     updateData(data) {
@@ -138,6 +147,9 @@ class BaseAnimation {
         // Mask canvas for clipping
         this.maskCanvas = null;
         this.maskCtx = null;
+        this.tempCanvas = null;
+        this.tempCtx = null;
+        this.externalClock = false;
     }
     
     init() {
@@ -191,19 +203,48 @@ class BaseAnimation {
     start() {
         if (this.isRunning) return;
         this.isRunning = true;
-        this.animate();
+        if (!this.externalClock) {
+            this.animate();
+        }
     }
     
     stop() {
         this.isRunning = false;
         if (this.animationId) {
             cancelAnimationFrame(this.animationId);
+            this.animationId = null;
+        }
+
+        if (this.gl) {
+            const loseContext = this.gl.getExtension && this.gl.getExtension('WEBGL_lose_context');
+            if (loseContext && loseContext.loseContext) {
+                loseContext.loseContext();
+            }
+            this.gl = null;
+        }
+
+        if (this.glCanvas) {
+            this.glCanvas.width = 1;
+            this.glCanvas.height = 1;
+            this.glCanvas = null;
         }
     }
     
     animate() {
         if (!this.isRunning) return;
-        
+        this.renderFrame(performance.now());
+
+        if (this.externalClock) {
+            return;
+        }
+
+        // Continue animation
+        this.animationId = requestAnimationFrame(() => this.animate());
+    }
+
+    renderFrame(_timestamp) {
+        if (!this.isRunning) return;
+
         // Clear canvas
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
         
@@ -213,10 +254,18 @@ class BaseAnimation {
             this.ctx.save();
             
             // Draw animation to a temporary canvas first
-            const tempCanvas = document.createElement('canvas');
-            tempCanvas.width = this.canvas.width;
-            tempCanvas.height = this.canvas.height;
-            const tempCtx = tempCanvas.getContext('2d');
+            if (!this.tempCanvas) {
+                this.tempCanvas = document.createElement('canvas');
+                this.tempCanvas.width = this.canvas.width;
+                this.tempCanvas.height = this.canvas.height;
+                this.tempCtx = this.tempCanvas.getContext('2d');
+            } else if (this.tempCanvas.width !== this.canvas.width || this.tempCanvas.height !== this.canvas.height) {
+                this.tempCanvas.width = this.canvas.width;
+                this.tempCanvas.height = this.canvas.height;
+                this.tempCtx = this.tempCanvas.getContext('2d');
+            }
+            const tempCtx = this.tempCtx;
+            tempCtx.clearRect(0, 0, this.tempCanvas.width, this.tempCanvas.height);
             
             // Store original context and replace with temp
             const originalCtx = this.ctx;
@@ -229,7 +278,7 @@ class BaseAnimation {
             this.ctx = originalCtx;
             
             // Apply the animation to main canvas
-            this.ctx.drawImage(tempCanvas, 0, 0);
+            this.ctx.drawImage(this.tempCanvas, 0, 0);
             
             // Apply mask using destination-in composite operation
             this.ctx.globalCompositeOperation = 'destination-in';
@@ -241,9 +290,6 @@ class BaseAnimation {
             // No mask, draw normally
             this.draw();
         }
-        
-        // Continue animation
-        this.animationId = requestAnimationFrame(() => this.animate());
     }
     
     draw() {

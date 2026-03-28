@@ -3,6 +3,7 @@ import hmac
 import os
 import threading
 import time
+import re
 from urllib.parse import urlencode
 from urllib.parse import quote
 
@@ -28,9 +29,11 @@ from schemas.overlay import (
     OverlayWindowInitResponse,
 )
 from core.streaming_service import get_streaming_service
+from services.overlay_playback_sync_service import get_overlay_playback_sync_service
 
 _LIVE_WIDGET_CACHE: Dict[str, Dict[str, Any]] = {}
 _LIVE_WIDGET_CACHE_LOCK = threading.RLock()
+_IMAGE_URL_RE = re.compile(r"\.(png|jpe?g|gif|webp|bmp|svg)(\?|$)", re.IGNORECASE)
 
 class OverlayService:
     def __init__(self, db: Session):
@@ -409,6 +412,14 @@ class OverlayService:
             return os.getenv(env_key, "")
         return ""
 
+    def _widget_state(self, status: str, message: str = "", **extra: Any) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "status": status,
+            "message": message,
+        }
+        payload.update(extra)
+        return payload
+
     def _refresh_oauth_access_token(self, token_url: str, client_id: str, client_secret: str, refresh_token: str) -> str:
         response = requests.post(
             token_url,
@@ -448,7 +459,7 @@ class OverlayService:
     def _fetch_weather_summary(self, api_configs: Dict[str, Any]) -> Dict[str, Any]:
         api_key = self._resolve_api_config(api_configs, "weather_api_key", "WEATHER_API_KEY")
         if not api_key:
-            return {"status": "unconfigured"}
+            return self._widget_state("unconfigured", "Configure weather API key")
 
         city = self._fetch_default_city()
         response = requests.get(
@@ -465,21 +476,22 @@ class OverlayService:
         weather_info = (payload.get("weather") or [{}])[0]
         main = payload.get("main") or {}
         wind = payload.get("wind") or {}
-        return {
-            "status": "active",
-            "temperature": main.get("temp"),
-            "humidity": main.get("humidity"),
-            "windSpeed": wind.get("speed", 0),
-            "windDirection": wind.get("deg", 0),
-            "conditions": weather_info.get("main", ""),
-            "description": weather_info.get("description", "Weather unavailable"),
-            "location": payload.get("name") or city,
-        }
+        return self._widget_state(
+            "active",
+            weather_info.get("description", "Weather available"),
+            temperature=main.get("temp"),
+            humidity=main.get("humidity"),
+            windSpeed=wind.get("speed", 0),
+            windDirection=wind.get("deg", 0),
+            conditions=weather_info.get("main", ""),
+            description=weather_info.get("description", "Weather unavailable"),
+            location=payload.get("name") or city,
+        )
 
     def _fetch_transit_predictions(self, api_configs: Dict[str, Any]) -> Dict[str, Any]:
         stop_id = self._resolve_api_config(api_configs, "transit_stop_id", "TRANSIT_STOP_ID")
         if not stop_id:
-            return {"status": "unconfigured", "routes": []}
+            return self._widget_state("unconfigured", "Configure transit stop ID", routes=[])
 
         response = requests.get(
             f"https://webservices.umoiq.com/api/pub/v1/agencies/sfmta-cis/stopcodes/{quote(stop_id, safe='')}/predictions",
@@ -509,11 +521,9 @@ class OverlayService:
                 }
             )
 
-        return {
-            "status": "active" if routes else "idle",
-            "routes": routes,
-            "stop_id": stop_id,
-        }
+        status = "active" if routes else "idle"
+        message = "Live arrivals available" if routes else "No predictions available right now"
+        return self._widget_state(status, message, routes=routes, stop_id=stop_id)
 
     def _spotify_currently_playing(self, access_token: str) -> requests.Response:
         return requests.get(
@@ -535,7 +545,7 @@ class OverlayService:
                 refresh_token,
             )
         if not access_token:
-            return {"status": "unconfigured"}
+            return self._widget_state("unconfigured", "Configure Spotify credentials")
 
         response = self._spotify_currently_playing(access_token)
         if (
@@ -551,25 +561,37 @@ class OverlayService:
                 refresh_token,
             )
             if not access_token:
-                return {"status": "unconfigured"}
+                return self._widget_state("unconfigured", "Configure Spotify credentials")
             response = self._spotify_currently_playing(access_token)
         if response.status_code == 204:
-            return {"status": "idle"}
+            return self._widget_state("idle", "Nothing is playing right now")
+        if response.status_code == 403:
+            return self._widget_state("unavailable", "Spotify playback state is unavailable for this account")
+        if response.status_code == 429:
+            return self._widget_state("unavailable", "Spotify rate limit reached")
         response.raise_for_status()
-        payload = response.json()
+        payload = response.json() or {}
         item = payload.get("item") or {}
+        if not item:
+            return self._widget_state("idle", "Open Spotify on a device to resume playback")
         artists = item.get("artists") or []
         album_images = ((item.get("album") or {}).get("images") or [])
         duration_ms = item.get("duration_ms") or 0
         progress_ms = payload.get("progress_ms") or 0
-        return {
-            "status": "active",
-            "title": item.get("name") or "Unknown Track",
-            "artist": ", ".join(filter(None, [artist.get("name") for artist in artists])) or "Unknown Artist",
-            "album_art": album_images[0].get("url") if album_images else "",
-            "progress": (progress_ms / duration_ms) if duration_ms else 0,
-            "is_playing": bool(payload.get("is_playing")),
-        }
+        is_playing = bool(payload.get("is_playing"))
+        return self._widget_state(
+            "active" if is_playing else "paused",
+            "Now playing" if is_playing else "Playback paused",
+            title=item.get("name") or "Unknown Track",
+            artist=", ".join(filter(None, [artist.get("name") for artist in artists])) or "Unknown Artist",
+            album_art=album_images[0].get("url") if album_images else "",
+            progress=(progress_ms / duration_ms) if duration_ms else 0,
+            progress_ms=progress_ms,
+            duration_ms=duration_ms,
+            is_playing=is_playing,
+            album=((item.get("album") or {}).get("name") or ""),
+            device_name=((payload.get("device") or {}).get("name") or ""),
+        )
 
     def _fetch_gmail_summary(self, api_configs: Dict[str, Any]) -> Dict[str, Any]:
         client_id = self._resolve_api_config(api_configs, "gmail_client_id", "GMAIL_CLIENT_ID")
@@ -584,7 +606,7 @@ class OverlayService:
                 refresh_token,
             )
         if not access_token:
-            return {"status": "unconfigured", "items": []}
+            return self._widget_state("unconfigured", "Configure Gmail credentials", items=[], count=0)
 
         list_response = requests.get(
             "https://gmail.googleapis.com/gmail/v1/users/me/messages",
@@ -592,6 +614,21 @@ class OverlayService:
             params={"labelIds": "INBOX", "maxResults": 5, "q": "is:unread"},
             timeout=10,
         )
+        if list_response.status_code == 401 and refresh_token and client_id and client_secret:
+            access_token = self._refresh_oauth_access_token(
+                "https://oauth2.googleapis.com/token",
+                client_id,
+                client_secret,
+                refresh_token,
+            )
+            if not access_token:
+                return self._widget_state("unconfigured", "Configure Gmail credentials", items=[], count=0)
+            list_response = requests.get(
+                "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+                headers={"Authorization": f"Bearer {access_token}"},
+                params={"labelIds": "INBOX", "maxResults": 5, "q": "is:unread"},
+                timeout=10,
+            )
         list_response.raise_for_status()
         messages = (list_response.json().get("messages") or [])[:5]
         items = []
@@ -614,17 +651,15 @@ class OverlayService:
                     "title": headers.get("Subject", payload.get("snippet", "Unread message")),
                 }
             )
-        return {
-            "status": "active" if items else "idle",
-            "items": items,
-            "count": len(items),
-        }
+        status = "active" if items else "idle"
+        message = f"{len(items)} unread messages" if items else "No unread messages"
+        return self._widget_state(status, message, items=items, count=len(items))
 
     def _fetch_google_calendar_events(self, api_configs: Dict[str, Any]) -> Dict[str, Any]:
         api_key = self._resolve_api_config(api_configs, "google_calendar_api_key", "GOOGLE_CALENDAR_API_KEY")
         calendar_id = self._resolve_api_config(api_configs, "google_calendar_id", "GOOGLE_CALENDAR_ID")
         if not api_key or not calendar_id:
-            return {"status": "unconfigured", "items": []}
+            return self._widget_state("unconfigured", "Configure Google Calendar API key and calendar ID", items=[], count=0)
 
         now_iso = datetime.utcnow().isoformat(timespec="seconds") + "Z"
         response = requests.get(
@@ -651,17 +686,15 @@ class OverlayService:
                     "location": item.get("location") or "",
                 }
             )
-        return {
-            "status": "active" if items else "idle",
-            "items": items,
-            "count": len(items),
-        }
+        status = "active" if items else "idle"
+        message = f"{len(items)} upcoming events" if items else "No upcoming events"
+        return self._widget_state(status, message, items=items, count=len(items))
 
     def _fetch_steam_status(self, api_configs: Dict[str, Any]) -> Dict[str, Any]:
         api_key = self._resolve_api_config(api_configs, "steam_api_key", "STEAM_API_KEY")
         steam_id = self._resolve_api_config(api_configs, "steam_id", "STEAM_ID")
         if not api_key or not steam_id:
-            return {"status": "unconfigured"}
+            return self._widget_state("unconfigured", "Configure Steam API credentials")
 
         response = requests.get(
             "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/",
@@ -671,15 +704,25 @@ class OverlayService:
         response.raise_for_status()
         players = (((response.json() or {}).get("response") or {}).get("players") or [])
         if not players:
-            return {"status": "idle"}
+            return self._widget_state("idle", "Steam profile is offline or unavailable")
         player = players[0]
-        return {
-            "status": "active",
-            "persona_name": player.get("personaname", "Steam"),
-            "online_state": player.get("personastate", 0),
-            "game": player.get("gameextrainfo", ""),
-            "avatar": player.get("avatarfull", ""),
-        }
+        game = player.get("gameextrainfo", "")
+        online_state = player.get("personastate", 0)
+        status = "active" if game else "idle"
+        if game:
+            message = f"{player.get('personaname', 'Player')} is playing now"
+        elif online_state:
+            message = f"{player.get('personaname', 'Player')} is online"
+        else:
+            message = f"{player.get('personaname', 'Player')} is offline"
+        return self._widget_state(
+            status,
+            message,
+            persona_name=player.get("personaname", "Steam"),
+            online_state=online_state,
+            game=game,
+            avatar=player.get("avatarfull", ""),
+        )
 
     def _fetch_tuya_climate(self, api_configs: Dict[str, Any]) -> Dict[str, Any]:
         access_id = self._resolve_api_config(api_configs, "tuya_access_id", "TUYA_ACCESS_ID")
@@ -687,7 +730,7 @@ class OverlayService:
         device_id = self._resolve_api_config(api_configs, "tuya_device_id", "TUYA_DEVICE_ID")
         base_url = self._resolve_api_config(api_configs, "tuya_api_base_url", "TUYA_API_BASE_URL") or "https://openapi.tuyaus.com"
         if not access_id or not access_secret or not device_id:
-            return {"status": "unconfigured"}
+            return self._widget_state("unconfigured", "Configure Tuya climate credentials")
 
         token = self._get_tuya_token(base_url, access_id, access_secret)
         path = f"/v1.0/devices/{device_id}/status"
@@ -715,11 +758,16 @@ class OverlayService:
         values = {item.get("code"): item.get("value") for item in result}
         temperature = values.get("temp_current") or values.get("va_temperature")
         humidity = values.get("humidity_value") or values.get("va_humidity")
-        return {
-            "status": "active",
-            "temperature": (float(temperature) / 10.0) if temperature is not None else None,
-            "humidity": (float(humidity) / 10.0) if humidity is not None else None,
-        }
+        normalized_temperature = (float(temperature) / 10.0) if temperature is not None else None
+        normalized_humidity = (float(humidity) / 10.0) if humidity is not None else None
+        status = "active" if normalized_temperature is not None or normalized_humidity is not None else "idle"
+        message = "Climate sensor online" if status == "active" else "Climate data unavailable"
+        return self._widget_state(
+            status,
+            message,
+            temperature=normalized_temperature,
+            humidity=normalized_humidity,
+        )
 
     def _get_tuya_token(self, base_url: str, access_id: str, access_secret: str) -> str:
         cache_key = f"tuya-token:{base_url}:{access_id}"
@@ -766,12 +814,26 @@ class OverlayService:
             })
         groups = []
         for group in scene.groups or []:
-            media_urls = self._resolve_group_media_urls(group)
+            media_items = self._resolve_group_media_items(group)
+            media_urls = [item["url"] for item in media_items if item.get("url")]
+            animation_list_payload = self._resolve_animation_list_payload(group.get("animation_list_id"))
             groups.append({
                 **group,
                 "media_url": media_urls[0] if media_urls else None,
                 "media_urls": media_urls,
+                "media_items": media_items,
+                "animation_list_payload": animation_list_payload,
+                "playback_sync_key": self._resolve_group_source_key(group, media_urls),
             })
+        playback_sync_snapshot = get_overlay_playback_sync_service().get_scene_snapshot(scene.id, groups)
+        source_snapshots = playback_sync_snapshot.get("sources") or {}
+        groups = [
+            {
+                **group,
+                "playback_sync": source_snapshots.get(group.get("playback_sync_key")),
+            }
+            for group in groups
+        ]
         return {
             "id": scene.id,
             "name": scene.name,
@@ -781,11 +843,43 @@ class OverlayService:
             "masks": masks,
             "groups": groups,
             "render_settings": scene.render_settings or {},
+            "playback_sync": playback_sync_snapshot,
         }
 
-    def _resolve_group_media_urls(self, group: dict) -> List[str]:
+    def _resolve_animation_list_payload(self, animation_list_id: Optional[str]) -> Optional[Dict[str, Any]]:
+        if not animation_list_id:
+            return None
+        backend_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(backend_root, "uploads", "projection", "animation_lists.json")
+        if not os.path.exists(path):
+            return None
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                items = json.load(handle) or []
+        except (OSError, json.JSONDecodeError):
+            return None
+        if not isinstance(items, list):
+            return None
+        return next((item for item in items if item.get("id") == animation_list_id), None)
+
+    def _resolve_group_source_key(self, group: dict, media_urls: List[str]) -> str:
+        binding_type = str(group.get("media_binding_type") or "").lower()
+        if binding_type == "animation" and group.get("animation_id"):
+            return f"animation:{group['animation_id']}"
+        if binding_type == "animation_list" and group.get("animation_list_id"):
+            return f"animation_list:{group['animation_list_id']}"
+        if media_urls:
+            return f"{binding_type}:{'|'.join(media_urls)}"
+        return f"{binding_type}:group:{group.get('id')}"
+
+    def _resolve_group_media_items(self, group: dict) -> List[Dict[str, Any]]:
         if group.get("media_binding_type") == "direct_url" and group.get("direct_url"):
-            return [group.get("direct_url")]
+            url = group.get("direct_url")
+            return [{
+                "url": url,
+                "kind": "image" if _IMAGE_URL_RE.search(url or "") else "video",
+                "duration_ms": None,
+            }]
 
         if group.get("media_binding_type") == "media_directory" and (
             group.get("media_directory_ids") or group.get("media_directory_id")
@@ -798,24 +892,24 @@ class OverlayService:
                 VideoModel.source_directory_id.in_(valid_directory_ids)
             ).order_by(VideoModel.source_directory_id.asc(), VideoModel.name.asc()).all()
             seen_video_ids = set()
-            urls = []
+            items = []
             for video in videos:
                 if video.id in seen_video_ids:
                     continue
                 seen_video_ids.add(video.id)
-                playback_url = self._resolve_video_playback_url(video.id)
-                if playback_url:
-                    urls.append(playback_url)
-            return urls
+                item = self._resolve_video_media_item(video.id)
+                if item:
+                    items.append(item)
+            return items
 
         if group.get("media_binding_type") == "media_list" and group.get("media_list_id"):
             media_list = self.db.query(MediaList).filter(MediaList.id == group["media_list_id"]).first()
             if not media_list or not media_list.video_ids:
                 return []
             return [
-                url for url in
-                (self._resolve_video_playback_url(video_id) for video_id in media_list.video_ids)
-                if url
+                item for item in
+                (self._resolve_video_media_item(video_id) for video_id in media_list.video_ids)
+                if item
             ]
 
         if group.get("media_binding_type") == "photo_list" and group.get("photo_list_id"):
@@ -823,9 +917,9 @@ class OverlayService:
             if not photo_list or not photo_list.photo_ids:
                 return []
             return [
-                url for url in
-                (self._resolve_photo_playback_url(photo_id) for photo_id in photo_list.photo_ids)
-                if url
+                item for item in
+                (self._resolve_photo_media_item(photo_id) for photo_id in photo_list.photo_ids)
+                if item
             ]
 
         video_id = group.get("video_id")
@@ -838,13 +932,13 @@ class OverlayService:
         if group.get("media_binding_type") == "photo":
             if not photo_id:
                 return []
-            playback_url = self._resolve_photo_playback_url(photo_id)
-            return [playback_url] if playback_url else []
+            item = self._resolve_photo_media_item(photo_id)
+            return [item] if item else []
 
         if not video_id:
             return []
-        playback_url = self._resolve_video_playback_url(video_id)
-        return [playback_url] if playback_url else []
+        item = self._resolve_video_media_item(video_id)
+        return [item] if item else []
 
     def _normalize_directory_ids(self, directory_ids: List[object]) -> List[int]:
         normalized_ids: List[int] = []
@@ -863,11 +957,52 @@ class OverlayService:
             return None
         return f"/api/videos/{video_id}/file"
 
+    def _resolve_video_media_item(self, video_id: int) -> Optional[Dict[str, Any]]:
+        video = self.db.query(VideoModel).filter(VideoModel.id == video_id).first()
+        if not video:
+            return None
+        return {
+            "id": video.id,
+            "url": f"/api/videos/{video_id}/file",
+            "kind": "video",
+            "duration_ms": int((video.duration or 0) * 1000) if video.duration else None,
+            "name": video.name,
+        }
+
     def _resolve_photo_playback_url(self, photo_id: int) -> Optional[str]:
         photo = self.db.query(PhotoModel).filter(PhotoModel.id == photo_id).first()
         if not photo:
             return None
         return f"/api/photos/{photo_id}/file"
+
+    def _resolve_photo_media_item(self, photo_id: int) -> Optional[Dict[str, Any]]:
+        photo = self.db.query(PhotoModel).filter(PhotoModel.id == photo_id).first()
+        if not photo:
+            return None
+        return {
+            "id": photo.id,
+            "url": f"/api/photos/{photo_id}/file",
+            "kind": "image",
+            "duration_ms": None,
+            "name": photo.name,
+        }
+
+    def get_mapping_playback_sync(self, config_id: int) -> Dict[str, Any]:
+        config = self.db.query(OverlayConfig).filter(OverlayConfig.id == config_id).first()
+        if not config:
+            raise ValueError("Configuration not found")
+        if config.background_type != "mapping" or not config.mapping_scene_id:
+            return {
+                "config_id": config_id,
+                "background_type": config.background_type,
+                "server_now_ms": int(time.time() * 1000),
+                "sources": {},
+            }
+        scene = self._resolve_mapping_scene(config.mapping_scene_id)
+        snapshot = scene.get("playback_sync") or {}
+        snapshot["config_id"] = config_id
+        snapshot["background_type"] = config.background_type
+        return snapshot
 
     def _resolve_video_stream_url(self, video_id: int, consumer_hint: Optional[str] = None) -> Optional[str]:
         video = self.db.query(VideoModel).filter(VideoModel.id == video_id).first()

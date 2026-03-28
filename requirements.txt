@@ -8,6 +8,7 @@ aiohttp~=3.13.3
 playwright~=1.58.0
 watchdog~=6.0.0
 fastapi~=0.135.2
+aiortc~=1.10.1
 SQLAlchemy~=2.0.48
 numpy~=2.4.3
 streamlit~=1.55.0

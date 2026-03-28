@@ -1047,18 +1047,25 @@
         let mappingScene = null;
         let videoTransform = { x: 0, y: 0, scale: 1, rotation: 0 };
         let widgets = [];
+        let widgetsById = new Map();
+        let widgetElsById = new Map();
         let mappingMaskCache = new Map();
+        let mappingMaskCacheByUrl = new Map();
+        let mappingMaskLoadPromises = new Map();
         let mappingMediaCache = new Map();
         let mappingMediaState = new Map();
         let mappingMediaAdvanceTimers = new Map();
         let mappingGroupRenderCache = new Map();
+        let mappingPreparedSceneCache = new Map();
         let mappingSharedSourceMeta = new Map();
+        let mappingSharedSourceFrameCache = new Map();
         let mappingSharedAnimationStates = new Map();
         let mappingRenderableGroups = [];
         let mappingAnimationFrame = null;
         let mappingAnimationEngine = null;
         let mappingCanvasContext = null;
         let mappingLastRenderTimestamp = 0;
+        let mappingRenderFrameToken = 0;
         let mappingDirty = true;
         let animationListCache = new Map();
         let latestMappingWeather = null;
@@ -1066,7 +1073,15 @@
         const MIN_MAPPING_CLIP_SECONDS = 60;
         const MAPPING_IMAGE_ADVANCE_MS = 10000;
         const MAPPING_IMAGE_CROSSFADE_MS = 1400;
+        const MAPPING_PRELOAD_LEAD_MS = 3000;
         const MAPPING_TARGET_FRAME_MS = 1000 / 30;
+        const MAPPING_MEDIUM_TARGET_FRAME_MS = 1000 / 24;
+        const MAPPING_HEAVY_TARGET_FRAME_MS = 1000 / 20;
+        const MAPPING_HIDDEN_TARGET_FRAME_MS = 1000 / 5;
+        const PLAYBACK_SYNC_POLL_MS = 5000;
+        let mappingPlaybackSyncBySourceKey = new Map();
+        let mappingServerTimeOffsetMs = 0;
+        let mappingPlaybackHeartbeatTimer = null;
         let isDragging = false;
         let isResizing = false;
         let isRotating = false;
@@ -1089,6 +1104,7 @@
         let refreshStatePollInterval = null;
         let widgetLayoutFrame = null;
         let dirtyWidgetIds = new Set();
+        let dirtyResponsiveWidgetIds = new Set();
         const loadedAnimationScripts = new Set();
         const animationScriptPromises = new Map();
         const ANIMATION_SCRIPT_MANIFEST = {
@@ -1204,32 +1220,62 @@
             if (!widgetEl || !widget) {
                 return;
             }
-            widgetEl.style.width = `${widget.size.width}px`;
-            widgetEl.style.height = `${widget.size.height}px`;
-            widgetEl.style.transform = `translate3d(${widget.position.x}px, ${widget.position.y}px, 0) rotate(${widget.rotation || 0}deg)`;
+            const width = `${widget.size.width}px`;
+            const height = `${widget.size.height}px`;
+            const transform = `translate3d(${widget.position.x}px, ${widget.position.y}px, 0) rotate(${widget.rotation || 0}deg)`;
+            if (widgetEl._lastWidth !== width) {
+                widgetEl.style.width = width;
+                widgetEl._lastWidth = width;
+            }
+            if (widgetEl._lastHeight !== height) {
+                widgetEl.style.height = height;
+                widgetEl._lastHeight = height;
+            }
+            if (widgetEl._lastTransform !== transform) {
+                widgetEl.style.transform = transform;
+                widgetEl._lastTransform = transform;
+            }
         }
 
         function flushDirtyWidgetLayouts() {
             widgetLayoutFrame = null;
             dirtyWidgetIds.forEach((widgetId) => {
-                const widget = widgets.find((item) => item.id === widgetId);
-                const widgetEl = document.getElementById(widgetId);
+                const widget = widgetsById.get(widgetId);
+                const widgetEl = widgetElsById.get(widgetId);
                 if (widget && widgetEl) {
                     applyWidgetLayout(widgetEl, widget);
+                    if (dirtyResponsiveWidgetIds.has(widgetId)) {
+                        applyResponsiveWidgetSizing(widgetEl, widget);
+                    }
                 }
             });
             dirtyWidgetIds.clear();
+            dirtyResponsiveWidgetIds.clear();
         }
 
-        function scheduleWidgetLayout(widgetId) {
+        function scheduleWidgetLayout(widgetId, needsResponsive = false) {
             if (!widgetId) {
                 return;
             }
             dirtyWidgetIds.add(widgetId);
+            if (needsResponsive) {
+                dirtyResponsiveWidgetIds.add(widgetId);
+            }
             if (widgetLayoutFrame != null) {
                 return;
             }
             widgetLayoutFrame = requestAnimationFrame(flushDirtyWidgetLayouts);
+        }
+
+        function rebuildWidgetIndex() {
+            widgetsById = new Map();
+            widgets.forEach((widget) => {
+                widgetsById.set(widget.id, widget);
+            });
+        }
+
+        function getWidget(widgetId) {
+            return widgetsById.get(widgetId) || null;
         }
 
         function registerWidgetElement(widgetType, widgetEl) {
@@ -1237,6 +1283,7 @@
                 widgetElementsByType.set(widgetType, []);
             }
             widgetElementsByType.get(widgetType).push(widgetEl);
+            widgetElsById.set(widgetEl.id, widgetEl);
         }
 
         function getWidgetElements(widgetType) {
@@ -1605,7 +1652,9 @@
             mappingScene = payload.mappingScene || payload.mapping_scene || null;
             videoTransform = config.video_transform || { x: 0, y: 0, scale: 1, rotation: 0 };
             widgets = config.widgets || [];
+            rebuildWidgetIndex();
             resetMappingPlaybackState();
+            normalizePlaybackSyncSnapshot(mappingScene?.playback_sync || {});
 
             document.getElementById('loading').style.display = 'none';
 
@@ -1630,6 +1679,12 @@
             createVisibilityControls();
             startDataUpdates();
             startOverlayStatusPolling();
+            if (backgroundType === 'mapping') {
+                fetchMappingPlaybackSync().catch((error) => {
+                    console.error('Initial playback sync fetch failed:', error);
+                });
+                startMappingPlaybackHeartbeat();
+            }
         }
 
         async function bootstrapFromUrl() {
@@ -1768,6 +1823,7 @@
 
         function resetMappingPlaybackState() {
             clearMappingAdvanceTimers();
+            stopMappingPlaybackHeartbeat();
             if (mappingAnimationFrame) {
                 cancelAnimationFrame(mappingAnimationFrame);
                 mappingAnimationFrame = null;
@@ -1781,16 +1837,146 @@
                 animationHost.innerHTML = '';
             }
             animationListCache = new Map();
-            mappingMaskCache = new Map();
             mappingMediaCache = new Map();
             mappingMediaState = new Map();
             mappingGroupRenderCache = new Map();
             mappingSharedSourceMeta = new Map();
+            mappingSharedSourceFrameCache = new Map();
             mappingSharedAnimationStates = new Map();
+            mappingPlaybackSyncBySourceKey = new Map();
+            mappingServerTimeOffsetMs = 0;
             mappingRenderableGroups = [];
             mappingCanvasContext = null;
             mappingLastRenderTimestamp = 0;
+            mappingRenderFrameToken = 0;
             mappingDirty = true;
+        }
+
+        function mulberry32(seed) {
+            let state = seed >>> 0;
+            return function next() {
+                state = (state + 0x6D2B79F5) >>> 0;
+                let value = state;
+                value = Math.imul(value ^ (value >>> 15), value | 1);
+                value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+                return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+            };
+        }
+
+        function deterministicShuffleIndices(length, seed) {
+            const indices = Array.from({ length }, (_, idx) => idx);
+            if (indices.length <= 1) {
+                return indices;
+            }
+            const rand = mulberry32(Number(seed) || 0);
+            for (let idx = indices.length - 1; idx > 0; idx -= 1) {
+                const swapIdx = Math.floor(rand() * (idx + 1));
+                [indices[idx], indices[swapIdx]] = [indices[swapIdx], indices[idx]];
+            }
+            return indices;
+        }
+
+        function getPlaybackSyncNowMs() {
+            return Date.now() + mappingServerTimeOffsetMs;
+        }
+
+        function getGroupPlaybackSyncKey(group) {
+            return group?.playback_sync_key || getGroupSharedSourceKey(group);
+        }
+
+        function getPlaybackSyncSnapshot(group) {
+            return mappingPlaybackSyncBySourceKey.get(getGroupPlaybackSyncKey(group)) || group?.playback_sync || null;
+        }
+
+        function normalizePlaybackSyncSnapshot(payload) {
+            const serverNowMs = Number(payload?.server_now_ms || 0);
+            if (serverNowMs) {
+                mappingServerTimeOffsetMs = serverNowMs - Date.now();
+            }
+            const nextSnapshots = new Map();
+            Object.entries(payload?.sources || {}).forEach(([sourceKey, snapshot]) => {
+                nextSnapshots.set(sourceKey, snapshot);
+            });
+            mappingPlaybackSyncBySourceKey = nextSnapshots;
+        }
+
+        async function fetchMappingPlaybackSync() {
+            if (!currentConfigId || backgroundType !== 'mapping') {
+                return;
+            }
+            const response = await fetch(`/api/overlay/playback-sync?config_id=${encodeURIComponent(currentConfigId)}`);
+            if (!response.ok) {
+                throw new Error(`Failed to fetch playback sync (${response.status})`);
+            }
+            const payload = await response.json();
+            normalizePlaybackSyncSnapshot(payload);
+            synchronizeMappingGroups();
+        }
+
+        function stopMappingPlaybackHeartbeat() {
+            if (mappingPlaybackHeartbeatTimer) {
+                clearInterval(mappingPlaybackHeartbeatTimer);
+                mappingPlaybackHeartbeatTimer = null;
+            }
+        }
+
+        function startMappingPlaybackHeartbeat() {
+            stopMappingPlaybackHeartbeat();
+            if (backgroundType !== 'mapping' || !currentConfigId) {
+                return;
+            }
+            mappingPlaybackHeartbeatTimer = window.setInterval(() => {
+                fetchMappingPlaybackSync().catch((error) => {
+                    console.error('Failed to refresh playback sync:', error);
+                });
+            }, PLAYBACK_SYNC_POLL_MS);
+        }
+
+        function buildDeterministicPlaybackOrder(items, snapshot) {
+            const listLength = Array.isArray(items) ? items.length : 0;
+            if (!listLength) {
+                return [];
+            }
+            if (!snapshot?.shuffle_enabled) {
+                return Array.from({ length: listLength }, (_, idx) => idx);
+            }
+            return deterministicShuffleIndices(listLength, Number(snapshot.shared_seed) || 0);
+        }
+
+        function drawMediaWithTransition(ctx, mediaState, bounds, transform) {
+            const currentMedia = mediaState.element;
+            const previousMedia = mediaState.previousElement;
+            const transitionStart = Number(mediaState.transitionStart || 0);
+            const transitionDuration = Math.max(1, Number(mediaState.transitionDuration || MAPPING_IMAGE_CROSSFADE_MS));
+
+            if (!currentMedia) {
+                return;
+            }
+
+            if (!previousMedia || !transitionStart) {
+                drawMediaCover(ctx, currentMedia, bounds, transform);
+                return;
+            }
+
+            const elapsed = performance.now() - transitionStart;
+            const progress = Math.max(0, Math.min(1, elapsed / transitionDuration));
+
+            ctx.save();
+            ctx.globalAlpha = 1 - progress;
+            drawMediaCover(ctx, previousMedia, bounds, transform);
+            ctx.restore();
+
+            ctx.save();
+            ctx.globalAlpha = progress;
+            drawMediaCover(ctx, currentMedia, bounds, transform);
+            ctx.restore();
+
+            if (progress >= 1) {
+                mediaState.previousElement = null;
+                mediaState.transitionStart = 0;
+                mappingMediaState.set(mediaState.groupId, mediaState);
+                markMappingDirty();
+            }
         }
 
         function getNextMappingSourceIndex(state, group) {
@@ -1808,6 +1994,195 @@
                 return nextIndex;
             }
             return (state.currentIndex + 1) % state.sources.length;
+        }
+
+        function synchronizeMappingGroups() {
+            if (!mappingRenderableGroups.length) {
+                return;
+            }
+            mappingRenderableGroups.forEach((group) => {
+                const state = mappingMediaState.get(group.id);
+                const snapshot = getPlaybackSyncSnapshot(group);
+                if (!state || !snapshot) {
+                    return;
+                }
+                if (state.type === 'animation_list') {
+                    synchronizeAnimationListState(group, state, snapshot);
+                } else if (state.syncManaged) {
+                    synchronizeDeterministicMediaState(group, state, snapshot);
+                }
+            });
+        }
+
+        function scheduleManagedAdvanceTimer(groupId, key, delayMs, callback) {
+            const timerKey = `${groupId}:${key}`;
+            clearGroupAdvanceTimer(timerKey);
+            mappingMediaAdvanceTimers.set(
+                timerKey,
+                window.setTimeout(() => {
+                    clearGroupAdvanceTimer(timerKey);
+                    callback();
+                }, Math.max(0, delayMs))
+            );
+        }
+
+        function createManagedVideoElement(url) {
+            const video = document.createElement('video');
+            video.muted = true;
+            video.autoplay = true;
+            video.playsInline = true;
+            video.preload = 'auto';
+            video.crossOrigin = 'anonymous';
+            video.src = url;
+            video.load();
+            return video;
+        }
+
+        function loadManagedMediaElement(item, offsetMs = 0) {
+            return new Promise((resolve, reject) => {
+                if (!item?.url) {
+                    reject(new Error('Missing media url'));
+                    return;
+                }
+                if (item.kind === 'video') {
+                    const video = createManagedVideoElement(item.url);
+                    const settleVideo = () => {
+                        const durationMs = Number(item.duration_ms || 0);
+                        if (durationMs > 0) {
+                            const offsetSec = (offsetMs % durationMs) / 1000;
+                            if (Number.isFinite(offsetSec)) {
+                                try {
+                                    video.currentTime = Math.max(0, offsetSec);
+                                } catch (error) {
+                                    // Ignore early seek failures and continue with loaded data.
+                                }
+                            }
+                        }
+                        video.play().catch(() => {});
+                        resolve(video);
+                    };
+                    video.onloadedmetadata = settleVideo;
+                    video.onloadeddata = settleVideo;
+                    video.onerror = () => reject(new Error(`Failed to load video ${item.url}`));
+                    return;
+                }
+
+                const image = new Image();
+                image.onload = () => resolve(image);
+                image.onerror = () => reject(new Error(`Failed to load image ${item.url}`));
+                image.src = item.url;
+            });
+        }
+
+        function commitManagedMediaElement(group, state, token, forceElement = null) {
+            if (state.transitionToken !== token) {
+                return;
+            }
+            const preload = forceElement ? { element: forceElement, counter: state.nextCounter, index: state.nextIndex } : state.preloadedLayer;
+            if (!preload?.element) {
+                return;
+            }
+            const previousElement = state.element || null;
+            state.previousElement = previousElement;
+            state.element = preload.element;
+            state.currentCounter = preload.counter;
+            state.currentIndex = preload.index;
+            state.transitionStart = performance.now();
+            state.transitionDuration = MAPPING_IMAGE_CROSSFADE_MS;
+            state.preloadedLayer = null;
+            mappingMediaCache.set(group.id, preload.element);
+            mappingMediaState.set(group.id, state);
+            markMappingDirty();
+        }
+
+        function scheduleManagedMediaPreload(group, state, snapshot, orderedItems) {
+            if (!orderedItems.length) {
+                return;
+            }
+            const nowMs = getPlaybackSyncNowMs();
+            const nextIndex = Number(snapshot.next_index || 0) % orderedItems.length;
+            const nextCounter = Number(snapshot.global_counter || 0) + 1;
+            const preloadDelayMs = Math.max(0, Number(snapshot.next_transition_at_ms || nowMs) - nowMs - MAPPING_PRELOAD_LEAD_MS);
+            state.nextCounter = nextCounter;
+            state.nextIndex = nextIndex;
+            state.transitionToken = `${snapshot.generation}:${nextCounter}:${nextIndex}`;
+            scheduleManagedAdvanceTimer(group.id, 'preload', preloadDelayMs, () => {
+                loadManagedMediaElement(orderedItems[nextIndex], 0)
+                    .then((element) => {
+                        state.preloadedLayer = {
+                            element,
+                            counter: nextCounter,
+                            index: nextIndex,
+                        };
+                        mappingMediaState.set(group.id, state);
+                    })
+                    .catch((error) => {
+                        console.error('Failed to preload next media item:', error);
+                    });
+            });
+            scheduleManagedAdvanceTimer(group.id, 'commit', Math.max(0, Number(snapshot.next_transition_at_ms || nowMs) - nowMs), () => {
+                if (state.preloadedLayer?.counter === nextCounter) {
+                    commitManagedMediaElement(group, state, state.transitionToken);
+                } else {
+                    loadManagedMediaElement(orderedItems[nextIndex], 0)
+                        .then((element) => {
+                            commitManagedMediaElement(group, state, state.transitionToken, element);
+                        })
+                        .catch((error) => {
+                            console.error('Failed to commit next media item:', error);
+                        });
+                }
+            });
+        }
+
+        function synchronizeDeterministicMediaState(group, state, snapshot) {
+            const orderedIndices = buildDeterministicPlaybackOrder(state.items || [], snapshot);
+            if (!orderedIndices.length) {
+                return;
+            }
+            const orderedItems = orderedIndices.map((index) => state.items[index]);
+            const currentIndex = Number(snapshot.current_index || 0) % orderedItems.length;
+            const currentCounter = Number(snapshot.global_counter || 0);
+            const offsetMs = Math.max(0, getPlaybackSyncNowMs() - Number(snapshot.item_started_at_ms || getPlaybackSyncNowMs()));
+            const activeToken = `${snapshot.generation}:${currentCounter}:${currentIndex}`;
+
+            if (!state.element || state.activeToken !== activeToken) {
+                loadManagedMediaElement(orderedItems[currentIndex], offsetMs)
+                    .then((element) => {
+                        state.previousElement = state.element || null;
+                        state.element = element;
+                        state.currentCounter = currentCounter;
+                        state.currentIndex = currentIndex;
+                        state.activeToken = activeToken;
+                        state.transitionStart = state.previousElement ? performance.now() : 0;
+                        state.transitionDuration = MAPPING_IMAGE_CROSSFADE_MS;
+                        mappingMediaCache.set(group.id, element);
+                        mappingMediaState.set(group.id, state);
+                        markMappingDirty();
+                        scheduleManagedMediaPreload(group, state, snapshot, orderedItems);
+                    })
+                    .catch((error) => {
+                        console.error('Failed to sync media item:', error);
+                    });
+                return;
+            }
+
+            if (state.element instanceof HTMLVideoElement) {
+                const activeItem = orderedItems[currentIndex] || {};
+                const activeDurationMs = Number(activeItem.duration_ms || 0);
+                const normalizedOffsetMs = activeDurationMs > 0 ? (offsetMs % activeDurationMs) : offsetMs;
+                const desiredTimeSec = Math.max(0, normalizedOffsetMs / 1000);
+                if (Math.abs((state.element.currentTime || 0) - desiredTimeSec) > 0.75) {
+                    try {
+                        state.element.currentTime = desiredTimeSec;
+                    } catch (error) {
+                        console.warn('Unable to re-seek synced video:', error);
+                    }
+                }
+                state.element.play().catch(() => {});
+            }
+
+            scheduleManagedMediaPreload(group, state, snapshot, orderedItems);
         }
 
         function scheduleImageAdvance(group, state) {
@@ -1908,6 +2283,21 @@
             return `${bindingType}:group:${group.id}`;
         }
 
+        function getPreparedSceneCacheKey(scene, canvasWidth, canvasHeight) {
+            const visibleGroups = (scene?.groups || [])
+                .filter(group => group.visible !== false && group.mask_ids && group.mask_ids.length)
+                .map((group) => ({
+                    id: group.id,
+                    masks: [...(group.mask_ids || [])].sort((a, b) => String(a).localeCompare(String(b))),
+                }));
+            return JSON.stringify({
+                sceneId: scene?.id || 'none',
+                canvasWidth,
+                canvasHeight,
+                groups: visibleGroups,
+            });
+        }
+
         function applySharedSourceState(sourceKey, state) {
             const sharedMeta = mappingSharedSourceMeta.get(sourceKey);
             const groupIds = sharedMeta?.groupIds || [];
@@ -1950,6 +2340,25 @@
             return maskCanvas;
         }
 
+        function cropMaskCanvasToBounds(maskCanvas, bounds) {
+            const cropped = document.createElement('canvas');
+            cropped.width = Math.max(1, Math.round(bounds.width));
+            cropped.height = Math.max(1, Math.round(bounds.height));
+            const croppedCtx = cropped.getContext('2d');
+            croppedCtx.drawImage(
+                maskCanvas,
+                bounds.x,
+                bounds.y,
+                bounds.width,
+                bounds.height,
+                0,
+                0,
+                bounds.width,
+                bounds.height,
+            );
+            return cropped;
+        }
+
         function prepareMappingGroupRenderCaches(scene, canvasWidth, canvasHeight) {
             mappingGroupRenderCache = new Map();
             mappingSharedSourceMeta = new Map();
@@ -1957,37 +2366,46 @@
                 .filter(group => group.visible !== false && group.mask_ids && group.mask_ids.length)
                 .sort((a, b) => (a.z_index || 0) - (b.z_index || 0));
 
+            const sceneCacheKey = getPreparedSceneCacheKey(scene, canvasWidth, canvasHeight);
+            const cachedSceneTemplates = mappingPreparedSceneCache.get(sceneCacheKey);
+            const sceneTemplates = new Map();
+            if (cachedSceneTemplates) {
+                cachedSceneTemplates.forEach((template) => {
+                    sceneTemplates.set(template.groupId, template);
+                });
+            }
+
             mappingRenderableGroups.forEach((group) => {
                 const maskImages = getGroupMaskImages(group);
                 if (!maskImages.length) {
                     return;
                 }
 
-                const bounds = computeMaskBounds(maskImages, canvasWidth, canvasHeight);
                 const sourceKey = getGroupSharedSourceKey(group);
-                const groupCanvas = document.createElement('canvas');
-                groupCanvas.width = canvasWidth;
-                groupCanvas.height = canvasHeight;
-                const maskCanvas = buildCombinedMaskCanvas(maskImages, canvasWidth, canvasHeight);
+                const cachedTemplate = sceneTemplates.get(group.id);
+                const maskBounds = cachedTemplate?.bounds || computeMaskBounds(maskImages, canvasWidth, canvasHeight);
+                const maskCanvas = cachedTemplate?.maskCanvas || buildCombinedMaskCanvas(maskImages, canvasWidth, canvasHeight);
                 const sharedMeta = mappingSharedSourceMeta.get(sourceKey);
                 if (sharedMeta) {
-                    sharedMeta.bounds = mergeBounds(sharedMeta.bounds, bounds);
+                    sharedMeta.bounds = mergeBounds(sharedMeta.bounds, maskBounds);
                     sharedMeta.groupIds.push(group.id);
                 } else {
                     mappingSharedSourceMeta.set(sourceKey, {
                         sourceKey,
-                        bounds,
+                        bounds: maskBounds,
                         groupIds: [group.id],
                     });
                 }
 
                 mappingGroupRenderCache.set(group.id, {
                     maskImages,
-                    bounds,
+                    bounds: maskBounds,
+                    sourceBounds: maskBounds,
                     sourceKey,
-                    groupCanvas,
-                    groupCtx: groupCanvas.getContext('2d'),
-                    maskCanvas,
+                    groupCanvas: null,
+                    groupCtx: null,
+                    fullMaskCanvas: maskCanvas,
+                    maskCanvas: null,
                     staticLayerCanvas: null,
                     staticLayerCtx: null,
                     staticLayerKey: '',
@@ -1997,9 +2415,26 @@
             mappingGroupRenderCache.forEach((renderCache) => {
                 const sharedMeta = mappingSharedSourceMeta.get(renderCache.sourceKey);
                 if (sharedMeta?.bounds) {
-                    renderCache.bounds = sharedMeta.bounds;
+                    renderCache.sourceBounds = sharedMeta.bounds;
                 }
+                renderCache.maskCanvas = cropMaskCanvasToBounds(renderCache.fullMaskCanvas, renderCache.bounds);
             });
+            mappingPreparedSceneCache.set(
+                sceneCacheKey,
+                mappingRenderableGroups
+                    .map((group) => {
+                        const renderCache = mappingGroupRenderCache.get(group.id);
+                        if (!renderCache) {
+                            return null;
+                        }
+                        return {
+                            groupId: group.id,
+                            bounds: renderCache.bounds,
+                            maskCanvas: renderCache.maskCanvas,
+                        };
+                    })
+                    .filter(Boolean),
+            );
             markMappingDirty();
         }
 
@@ -2072,6 +2507,116 @@
             };
         }
 
+        function preloadAnimationMediaState(group, animationId, bounds, sourceKey = null) {
+            return Promise.resolve(createAnimationMediaState(group, animationId, bounds, sourceKey));
+        }
+
+        function scheduleAnimationListPreload(group, state, snapshot, orderedAnimationIds, bounds) {
+            if (!orderedAnimationIds.length) {
+                return;
+            }
+            const nowMs = getPlaybackSyncNowMs();
+            const nextIndex = Number(snapshot.next_index || 0) % orderedAnimationIds.length;
+            const nextCounter = Number(snapshot.global_counter || 0) + 1;
+            state.nextCounter = nextCounter;
+            state.nextIndex = nextIndex;
+            state.transitionToken = `${snapshot.generation}:${nextCounter}:${nextIndex}`;
+            const preloadDelayMs = Math.max(0, Number(snapshot.next_transition_at_ms || nowMs) - nowMs - MAPPING_PRELOAD_LEAD_MS);
+            scheduleManagedAdvanceTimer(group.id, 'anim-preload', preloadDelayMs, () => {
+                preloadAnimationMediaState(group, orderedAnimationIds[nextIndex], bounds, state.sourceKey || null)
+                    .then((nextState) => {
+                        if (!nextState) {
+                            return;
+                        }
+                        state.preloadedLayer = {
+                            state: nextState,
+                            counter: nextCounter,
+                            index: nextIndex,
+                        };
+                        mappingMediaState.set(group.id, state);
+                    })
+                    .catch((error) => {
+                        console.error('Failed to preload animation list item:', error);
+                    });
+            });
+            scheduleManagedAdvanceTimer(group.id, 'anim-commit', Math.max(0, Number(snapshot.next_transition_at_ms || nowMs) - nowMs), () => {
+                const preload = state.preloadedLayer;
+                if (!preload?.state) {
+                    return;
+                }
+                clearAnimationGroupState(group.id);
+                const previousElement = state.element || null;
+                state.previousElement = previousElement;
+                state.element = preload.state.element;
+                state.animation = preload.state.animation;
+                state.container = preload.state.container;
+                state.animationId = preload.state.animationId;
+                state.currentCounter = preload.counter;
+                state.currentIndex = preload.index;
+                state.activeToken = state.transitionToken;
+                state.transitionStart = previousElement ? performance.now() : 0;
+                state.transitionDuration = MAPPING_IMAGE_CROSSFADE_MS;
+                state.preloadedLayer = null;
+                mappingMediaCache.set(group.id, state.element);
+                mappingMediaState.set(group.id, state);
+                if (state.sourceKey) {
+                    mappingSharedAnimationStates.set(state.sourceKey, {
+                        ownerGroupId: group.id,
+                        state,
+                    });
+                    applySharedSourceState(state.sourceKey, state);
+                }
+                markMappingDirty();
+            });
+        }
+
+        function synchronizeAnimationListState(group, state, snapshot) {
+            const animationIds = Array.isArray(state.animationIds) ? state.animationIds : [];
+            if (!animationIds.length) {
+                return;
+            }
+            const orderedIndices = buildDeterministicPlaybackOrder(
+                animationIds.map((animationId) => ({ animationId })),
+                snapshot
+            );
+            const orderedAnimationIds = orderedIndices.map((index) => animationIds[index]);
+            const currentIndex = Number(snapshot.current_index || 0) % orderedAnimationIds.length;
+            const currentCounter = Number(snapshot.global_counter || 0);
+            const activeToken = `${snapshot.generation}:${currentCounter}:${currentIndex}`;
+            const renderCache = mappingGroupRenderCache.get(group.id);
+            const bounds = renderCache?.bounds || { x: 0, y: 0, width: 1, height: 1 };
+
+            if (!state.element || state.activeToken !== activeToken || state.animationId !== orderedAnimationIds[currentIndex]) {
+                const nextState = createAnimationMediaState(group, orderedAnimationIds[currentIndex], bounds, state.sourceKey || null);
+                if (!nextState) {
+                    return;
+                }
+                clearAnimationGroupState(group.id);
+                state.previousElement = state.element || null;
+                state.element = nextState.element;
+                state.animation = nextState.animation;
+                state.container = nextState.container;
+                state.animationId = nextState.animationId;
+                state.currentCounter = currentCounter;
+                state.currentIndex = currentIndex;
+                state.activeToken = activeToken;
+                state.transitionStart = state.previousElement ? performance.now() : 0;
+                state.transitionDuration = MAPPING_IMAGE_CROSSFADE_MS;
+                mappingMediaCache.set(group.id, state.element);
+                mappingMediaState.set(group.id, state);
+                if (state.sourceKey) {
+                    mappingSharedAnimationStates.set(state.sourceKey, {
+                        ownerGroupId: group.id,
+                        state,
+                    });
+                    applySharedSourceState(state.sourceKey, state);
+                }
+                markMappingDirty();
+            }
+
+            scheduleAnimationListPreload(group, state, snapshot, orderedAnimationIds, bounds);
+        }
+
         function scheduleAnimationListAdvance(group, bounds, animationList) {
             const currentState = mappingMediaState.get(group.id);
             if (!currentState || currentState.type !== 'animation_list') {
@@ -2088,7 +2633,15 @@
                     return;
                 }
                 const ids = animationList.animation_ids || [];
-                const nextIndex = (latestState.currentIndex + 1) % ids.length;
+                let nextIndex;
+                if (animationList.shuffle && ids.length > 1) {
+                    nextIndex = latestState.currentIndex;
+                    while (nextIndex === latestState.currentIndex) {
+                        nextIndex = Math.floor(Math.random() * ids.length);
+                    }
+                } else {
+                    nextIndex = (latestState.currentIndex + 1) % ids.length;
+                }
                 const nextBaseState = createAnimationMediaState(group, ids[nextIndex], bounds, latestState.sourceKey || null);
                 if (!nextBaseState) {
                     scheduleAnimationListAdvance(group, bounds, animationList);
@@ -2120,15 +2673,32 @@
         }
 
         function loadMappingMask(mask) {
-            return new Promise((resolve) => {
+            if (mappingMaskCache.has(mask.id)) {
+                return Promise.resolve();
+            }
+            if (mappingMaskCacheByUrl.has(mask.url)) {
+                mappingMaskCache.set(mask.id, mappingMaskCacheByUrl.get(mask.url));
+                return Promise.resolve();
+            }
+            if (mappingMaskLoadPromises.has(mask.id)) {
+                return mappingMaskLoadPromises.get(mask.id);
+            }
+            const promise = new Promise((resolve) => {
                 const image = new Image();
                 image.onload = () => {
                     mappingMaskCache.set(mask.id, image);
+                    mappingMaskCacheByUrl.set(mask.url, image);
+                    mappingMaskLoadPromises.delete(mask.id);
                     resolve();
                 };
-                image.onerror = resolve;
+                image.onerror = () => {
+                    mappingMaskLoadPromises.delete(mask.id);
+                    resolve();
+                };
                 image.src = mask.url;
             });
+            mappingMaskLoadPromises.set(mask.id, promise);
+            return promise;
         }
 
         function loadGroupMedia(group) {
@@ -2164,7 +2734,14 @@
                             return;
                         }
                         await Promise.all(animationIds.map((animationId) => ensureAnimationScriptLoaded(animationId)));
-                        const baseState = createAnimationMediaState(group, animationIds[0], bounds, sourceKey);
+                        const syncSnapshot = getPlaybackSyncSnapshot(group) || group.playback_sync || null;
+                        const orderedIndices = buildDeterministicPlaybackOrder(
+                            animationIds.map((animationId) => ({ animationId })),
+                            syncSnapshot || { shuffle_enabled: Boolean(animationList?.shuffle), shared_seed: 0 }
+                        );
+                        const orderedAnimationIds = orderedIndices.map((index) => animationIds[index]);
+                        const initialIndex = syncSnapshot ? Number(syncSnapshot.current_index || 0) % orderedAnimationIds.length : 0;
+                        const baseState = createAnimationMediaState(group, orderedAnimationIds[initialIndex], bounds, sourceKey);
                         if (!baseState) {
                             resolve();
                             return;
@@ -2174,8 +2751,11 @@
                             type: 'animation_list',
                             sourceKey,
                             listId: animationList.id,
-                            currentIndex: 0,
+                            currentIndex: initialIndex,
+                            currentCounter: syncSnapshot ? Number(syncSnapshot.global_counter || 0) : 0,
                             animationIds,
+                            activeToken: syncSnapshot ? `${syncSnapshot.generation}:${syncSnapshot.global_counter}:${initialIndex}` : null,
+                            preloadedLayer: null,
                         };
                     mappingSharedAnimationStates.set(sourceKey, {
                         ownerGroupId: group.id,
@@ -2183,7 +2763,11 @@
                     });
                     applySharedSourceState(sourceKey, state);
                     markMappingDirty();
-                    scheduleAnimationListAdvance(group, bounds, animationList);
+                    if (syncSnapshot) {
+                        synchronizeAnimationListState(group, state, syncSnapshot);
+                    } else {
+                        scheduleAnimationListAdvance(group, bounds, animationList);
+                    }
                     resolve();
                     }).catch((error) => {
                         console.error(error);
@@ -2235,10 +2819,42 @@
                 });
             }
 
-            const mediaSources = Array.isArray(group.media_urls) && group.media_urls.length
-                ? group.media_urls
-                : (group.media_url ? [group.media_url] : []);
-            if (!mediaSources.length) return Promise.resolve();
+            const mediaItems = Array.isArray(group.media_items) && group.media_items.length
+                ? group.media_items
+                : ((Array.isArray(group.media_urls) && group.media_urls.length
+                    ? group.media_urls
+                    : (group.media_url ? [group.media_url] : []))
+                    .map((url) => ({
+                        url,
+                        kind: /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$)/i.test(url || '') ? 'image' : 'video',
+                        duration_ms: null,
+                    })));
+            if (!mediaItems.length) return Promise.resolve();
+            const syncSnapshot = getPlaybackSyncSnapshot(group) || group.playback_sync || null;
+            if (syncSnapshot) {
+                const state = {
+                    groupId: group.id,
+                    sourceKey: getGroupPlaybackSyncKey(group),
+                    type: mediaItems.some((item) => item.kind === 'video') ? 'video' : 'image',
+                    items: mediaItems,
+                    element: null,
+                    previousElement: null,
+                    currentIndex: -1,
+                    currentCounter: -1,
+                    activeToken: null,
+                    preloadedLayer: null,
+                    transitionStart: 0,
+                    transitionDuration: MAPPING_IMAGE_CROSSFADE_MS,
+                    syncManaged: true,
+                    lastFrameCanvas: null,
+                    lastFrameCtx: null,
+                };
+                mappingMediaState.set(group.id, state);
+                synchronizeDeterministicMediaState(group, state, syncSnapshot);
+                return Promise.resolve();
+            }
+
+            const mediaSources = mediaItems.map((item) => item.url);
             return new Promise((resolve) => {
                 const currentIndex = 0;
                 const currentUrl = mediaSources[currentIndex];
@@ -2394,7 +3010,8 @@
             }
             mappingLastRenderTimestamp = 0;
             const loop = (timestamp) => {
-                if (!mappingLastRenderTimestamp || (timestamp - mappingLastRenderTimestamp) >= MAPPING_TARGET_FRAME_MS) {
+                const targetFrameMs = getMappingTargetFrameMs();
+                if (!mappingLastRenderTimestamp || (timestamp - mappingLastRenderTimestamp) >= targetFrameMs) {
                     mappingLastRenderTimestamp = timestamp;
                     if (mappingDirty || mappingSceneNeedsContinuousRender()) {
                         renderMappingScene();
@@ -2404,6 +3021,28 @@
                 mappingAnimationFrame = requestAnimationFrame(loop);
             };
             mappingAnimationFrame = requestAnimationFrame(loop);
+        }
+
+        function getMappingTargetFrameMs() {
+            if (document.visibilityState === 'hidden') {
+                return MAPPING_HIDDEN_TARGET_FRAME_MS;
+            }
+
+            let animatedGroupCount = 0;
+            mappingRenderableGroups.forEach((group) => {
+                const mediaState = mappingMediaState.get(group.id);
+                if (mediaState && ['video', 'animation', 'animation_list'].includes(mediaState.type)) {
+                    animatedGroupCount += 1;
+                }
+            });
+
+            if (animatedGroupCount >= 10) {
+                return MAPPING_HEAVY_TARGET_FRAME_MS;
+            }
+            if (animatedGroupCount >= 6) {
+                return MAPPING_MEDIUM_TARGET_FRAME_MS;
+            }
+            return MAPPING_TARGET_FRAME_MS;
         }
 
         function mappingSceneNeedsContinuousRender() {
@@ -2423,6 +3062,10 @@
             if (!mappingScene) return;
             const canvas = document.getElementById('mapping-canvas');
             const ctx = mappingCanvasContext || canvas.getContext('2d');
+            mappingRenderFrameToken += 1;
+            if (mappingAnimationEngine?.renderFrame) {
+                mappingAnimationEngine.renderFrame(performance.now());
+            }
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.fillStyle = 'black';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -2430,18 +3073,81 @@
             mappingRenderableGroups.forEach(group => drawMappingGroup(ctx, group, canvas.width, canvas.height));
         }
 
+        function renderSharedSourceLayer(sourceKey, sourceBounds, media, group, mediaState) {
+            if (!sourceKey || !media || !sourceBounds) {
+                return null;
+            }
+
+            const width = Math.max(1, Math.round(sourceBounds.width));
+            const height = Math.max(1, Math.round(sourceBounds.height));
+            let layer = mappingSharedSourceFrameCache.get(sourceKey);
+            if (!layer) {
+                const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+                layer = {
+                    canvas,
+                    ctx: canvas.getContext('2d'),
+                    frameToken: -1,
+                };
+                mappingSharedSourceFrameCache.set(sourceKey, layer);
+            } else if (layer.canvas.width !== width || layer.canvas.height !== height) {
+                layer.canvas.width = width;
+                layer.canvas.height = height;
+                layer.ctx = layer.canvas.getContext('2d');
+                layer.frameToken = -1;
+            }
+
+            if (layer.frameToken !== mappingRenderFrameToken) {
+                layer.ctx.clearRect(0, 0, width, height);
+                drawMediaCover(
+                    layer.ctx,
+                    media,
+                    {
+                        x: 0,
+                        y: 0,
+                        width,
+                        height,
+                    },
+                    group.transform || {}
+                );
+                layer.frameToken = mappingRenderFrameToken;
+                layer.mediaStateType = mediaState?.type || '';
+            }
+
+            return layer;
+        }
+
         function drawMappingGroup(ctx, group, canvasWidth, canvasHeight) {
             const renderCache = mappingGroupRenderCache.get(group.id);
             const maskImages = renderCache?.maskImages || (group.mask_ids || []).map(maskId => mappingMaskCache.get(maskId)).filter(Boolean);
             if (!maskImages.length) return;
 
-            const bounds = renderCache?.bounds || computeMaskBounds(maskImages, canvasWidth, canvasHeight);
-            const groupCanvas = renderCache?.groupCanvas || document.createElement('canvas');
-            if (!renderCache) {
-                groupCanvas.width = canvasWidth;
-                groupCanvas.height = canvasHeight;
+            const maskBounds = renderCache?.bounds || computeMaskBounds(maskImages, canvasWidth, canvasHeight);
+            const sourceBounds = renderCache?.sourceBounds || maskBounds;
+            let groupCanvas = renderCache?.groupCanvas;
+            let groupCtx = renderCache?.groupCtx;
+            const localWidth = Math.max(1, Math.round(maskBounds.width));
+            const localHeight = Math.max(1, Math.round(maskBounds.height));
+            const localBounds = {
+                x: 0,
+                y: 0,
+                width: localWidth,
+                height: localHeight,
+            };
+            if (!groupCanvas || !groupCtx) {
+                groupCanvas = document.createElement('canvas');
+                groupCanvas.width = localWidth;
+                groupCanvas.height = localHeight;
+                groupCtx = groupCanvas.getContext('2d');
+                if (renderCache) {
+                    renderCache.groupCanvas = groupCanvas;
+                    renderCache.groupCtx = groupCtx;
+                }
+            } else if (groupCanvas.width !== localWidth || groupCanvas.height !== localHeight) {
+                groupCanvas.width = localWidth;
+                groupCanvas.height = localHeight;
             }
-            const groupCtx = renderCache?.groupCtx || groupCanvas.getContext('2d');
 
             const media = mappingMediaCache.get(group.id);
             const mediaState = mappingMediaState.get(group.id);
@@ -2458,62 +3164,120 @@
                     source: mediaState.sources?.[mediaState.currentIndex] || '',
                     transform: group.transform || {},
                     colors: [group.color_a || '', group.color_b || ''],
-                    size: [canvasWidth, canvasHeight],
+                    size: [localWidth, localHeight],
+                    sourceBounds,
                 });
 
                 if (!renderCache.staticLayerCanvas) {
                     renderCache.staticLayerCanvas = document.createElement('canvas');
-                    renderCache.staticLayerCanvas.width = canvasWidth;
-                    renderCache.staticLayerCanvas.height = canvasHeight;
+                    renderCache.staticLayerCanvas.width = localWidth;
+                    renderCache.staticLayerCanvas.height = localHeight;
+                    renderCache.staticLayerCtx = renderCache.staticLayerCanvas.getContext('2d');
+                } else if (renderCache.staticLayerCanvas.width !== localWidth || renderCache.staticLayerCanvas.height !== localHeight) {
+                    renderCache.staticLayerCanvas.width = localWidth;
+                    renderCache.staticLayerCanvas.height = localHeight;
                     renderCache.staticLayerCtx = renderCache.staticLayerCanvas.getContext('2d');
                 }
 
                 if (renderCache.staticLayerKey !== staticLayerKey) {
                     const staticCtx = renderCache.staticLayerCtx;
-                    staticCtx.clearRect(0, 0, canvasWidth, canvasHeight);
-                    drawMediaCover(staticCtx, mediaState.element, bounds, group.transform || {});
-                    applyLuminanceMasks(staticCtx, maskImages, canvasWidth, canvasHeight, renderCache.maskCanvas || null);
+                    staticCtx.clearRect(0, 0, localWidth, localHeight);
+                    drawMediaCover(
+                        staticCtx,
+                        mediaState.element,
+                        {
+                            x: sourceBounds.x - maskBounds.x,
+                            y: sourceBounds.y - maskBounds.y,
+                            width: sourceBounds.width,
+                            height: sourceBounds.height,
+                        },
+                        group.transform || {}
+                    );
+                    applyLuminanceMasks(staticCtx, maskImages, localWidth, localHeight, renderCache.maskCanvas || null);
                     renderCache.staticLayerKey = staticLayerKey;
                     markMappingDirty();
                 }
 
-                ctx.drawImage(renderCache.staticLayerCanvas, 0, 0);
+                ctx.drawImage(renderCache.staticLayerCanvas, maskBounds.x, maskBounds.y);
                 return;
             }
 
             if (renderCache) {
                 renderCache.staticLayerKey = '';
             }
-            groupCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+            groupCtx.clearRect(0, 0, localWidth, localHeight);
 
             if (media && (media.tagName !== 'VIDEO' || media.readyState >= 2)) {
-                if (mediaState?.type === 'image') {
-                    drawImageMediaWithTransition(groupCtx, mediaState, bounds, group.transform || {});
+                const sharedSourceLayer = (renderCache?.sourceKey && ['animation', 'animation_list', 'video'].includes(mediaState?.type || ''))
+                    ? renderSharedSourceLayer(renderCache.sourceKey, sourceBounds, media, group, mediaState)
+                    : null;
+                if (sharedSourceLayer && !mediaState?.previousElement) {
+                    groupCtx.drawImage(
+                        sharedSourceLayer.canvas,
+                        Math.round(sourceBounds.x - maskBounds.x),
+                        Math.round(sourceBounds.y - maskBounds.y)
+                    );
+                } else if (mediaState?.previousElement || mediaState?.type === 'image') {
+                    drawMediaWithTransition(
+                        groupCtx,
+                        mediaState,
+                        {
+                            x: sourceBounds.x - maskBounds.x,
+                            y: sourceBounds.y - maskBounds.y,
+                            width: sourceBounds.width,
+                            height: sourceBounds.height,
+                        },
+                        group.transform || {}
+                    );
                 } else if (mediaState?.type === 'animation') {
-                    drawMediaCover(groupCtx, media, bounds, group.transform || {});
+                    drawMediaCover(
+                        groupCtx,
+                        media,
+                        {
+                            x: sourceBounds.x - maskBounds.x,
+                            y: sourceBounds.y - maskBounds.y,
+                            width: sourceBounds.width,
+                            height: sourceBounds.height,
+                        },
+                        group.transform || {}
+                    );
                 } else {
-                    drawMediaCover(groupCtx, media, bounds, group.transform || {});
+                    drawMediaCover(
+                        groupCtx,
+                        media,
+                        {
+                            x: sourceBounds.x - maskBounds.x,
+                            y: sourceBounds.y - maskBounds.y,
+                            width: sourceBounds.width,
+                            height: sourceBounds.height,
+                        },
+                        group.transform || {}
+                    );
                 }
                 if (media.tagName === 'VIDEO' && mediaState) {
                     if (!mediaState.lastFrameCanvas) {
                         mediaState.lastFrameCanvas = document.createElement('canvas');
-                        mediaState.lastFrameCanvas.width = canvasWidth;
-                        mediaState.lastFrameCanvas.height = canvasHeight;
+                        mediaState.lastFrameCanvas.width = localWidth;
+                        mediaState.lastFrameCanvas.height = localHeight;
+                        mediaState.lastFrameCtx = mediaState.lastFrameCanvas.getContext('2d');
+                    } else if (mediaState.lastFrameCanvas.width !== localWidth || mediaState.lastFrameCanvas.height !== localHeight) {
+                        mediaState.lastFrameCanvas.width = localWidth;
+                        mediaState.lastFrameCanvas.height = localHeight;
                         mediaState.lastFrameCtx = mediaState.lastFrameCanvas.getContext('2d');
                     }
                     const lastFrameCtx = mediaState.lastFrameCtx || mediaState.lastFrameCanvas.getContext('2d');
                     mediaState.lastFrameCtx = lastFrameCtx;
-                    lastFrameCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+                    lastFrameCtx.clearRect(0, 0, localWidth, localHeight);
                     lastFrameCtx.drawImage(groupCanvas, 0, 0);
                 }
             } else if (mediaState && mediaState.lastFrameCanvas) {
                 groupCtx.drawImage(mediaState.lastFrameCanvas, 0, 0);
             } else {
-                drawFallbackFill(groupCtx, group, bounds);
+                drawFallbackFill(groupCtx, group, localBounds);
             }
 
-            applyLuminanceMasks(groupCtx, maskImages, canvasWidth, canvasHeight, renderCache?.maskCanvas || null);
-            ctx.drawImage(groupCanvas, 0, 0);
+            applyLuminanceMasks(groupCtx, maskImages, localWidth, localHeight, renderCache?.maskCanvas || null);
+            ctx.drawImage(groupCanvas, maskBounds.x, maskBounds.y);
         }
 
         function computeMaskBounds(maskImages, width, height) {
@@ -2577,39 +3341,7 @@
         }
 
         function drawImageMediaWithTransition(ctx, mediaState, bounds, transform) {
-            const currentImage = mediaState.element;
-            const previousImage = mediaState.previousElement;
-            const transitionStart = Number(mediaState.transitionStart || 0);
-            const transitionDuration = Math.max(1, Number(mediaState.transitionDuration || MAPPING_IMAGE_CROSSFADE_MS));
-
-            if (!currentImage) {
-                return;
-            }
-
-            if (!previousImage || !transitionStart) {
-                drawMediaCover(ctx, currentImage, bounds, transform);
-                return;
-            }
-
-            const elapsed = performance.now() - transitionStart;
-            const progress = Math.max(0, Math.min(1, elapsed / transitionDuration));
-
-            ctx.save();
-            ctx.globalAlpha = 1 - progress;
-            drawMediaCover(ctx, previousImage, bounds, transform);
-            ctx.restore();
-
-            ctx.save();
-            ctx.globalAlpha = progress;
-            drawMediaCover(ctx, currentImage, bounds, transform);
-            ctx.restore();
-
-            if (progress >= 1) {
-                mediaState.previousElement = null;
-                mediaState.transitionStart = 0;
-                mappingMediaState.set(mediaState.groupId, mediaState);
-                markMappingDirty();
-            }
+            drawMediaWithTransition(ctx, mediaState, bounds, transform);
         }
         
         function createWidgets() {
@@ -2619,6 +3351,7 @@
             doTheBayWidgetInstances.forEach((instance) => instance.destroy());
             doTheBayWidgetInstances = new Map();
             widgetElementsByType = new Map();
+            widgetElsById = new Map();
             lastLiveWidgetPayloadKey = '';
             lastRenderedTimeString = '';
             lastRenderedDateString = '';
@@ -2830,7 +3563,7 @@
         }
         
         function toggleWidgetVisibility(widgetId, visible) {
-            const widget = widgets.find(w => w.id === widgetId);
+            const widget = getWidget(widgetId);
             if (widget) {
                 widget.visible = visible;
                 createWidgets();
@@ -2847,7 +3580,7 @@
             });
             
             // Update rotation display if we have one
-            const widget = widgets.find(w => w.id === widgetId);
+            const widget = getWidget(widgetId);
             if (widget && window.updateSelectedWidgetInfo) {
                 window.updateSelectedWidgetInfo(widget);
             }
@@ -2912,7 +3645,7 @@
             if (isDragging && currentWidget) {
                 const x = e.clientX - dragOffset.x;
                 const y = e.clientY - dragOffset.y;
-                const widget = widgets.find(w => w.id === currentWidget.id);
+                const widget = getWidget(currentWidget.id);
                 if (widget) {
                     widget.position.x = x;
                     widget.position.y = y;
@@ -2924,21 +3657,11 @@
                 
                 const newWidth = Math.max(200, resizeStart.width + deltaX);
                 const newHeight = Math.max(100, resizeStart.height + deltaY);
-                const widget = widgets.find(w => w.id === currentWidget.id);
+                const widget = getWidget(currentWidget.id);
                 if (widget) {
                     widget.size.width = newWidth;
                     widget.size.height = newHeight;
-                    scheduleWidgetLayout(widget.id);
-                    if (widgetLayoutFrame == null) {
-                        applyResponsiveWidgetSizing(currentWidget, widget);
-                    } else {
-                        requestAnimationFrame(() => {
-                            const latestWidget = widgets.find(w => w.id === currentWidget?.id);
-                            if (latestWidget && currentWidget) {
-                                applyResponsiveWidgetSizing(currentWidget, latestWidget);
-                            }
-                        });
-                    }
+                    scheduleWidgetLayout(widget.id, true);
                 }
             } else if (isRotating && currentWidget) {
                 const rect = currentWidget.getBoundingClientRect();
@@ -2955,7 +3678,7 @@
                 // Normalize angle to 0-360
                 newRotation = ((newRotation % 360) + 360) % 360;
                 
-                const widget = widgets.find(w => w.id === currentWidget.id);
+                const widget = getWidget(currentWidget.id);
                 if (widget) {
                     widget.rotation = newRotation;
                     scheduleWidgetLayout(widget.id);
@@ -3070,6 +3793,11 @@
                         if (data.type === 'sync' && data.data.event_id !== lastSyncEventId) {
                             lastSyncEventId = data.data.event_id;
                             console.log(`Sync event detected: ${data.data.triggered_by} at ${data.data.timestamp}`);
+                            if (backgroundType === 'mapping') {
+                                fetchMappingPlaybackSync().catch((error) => {
+                                    console.error('Failed to refresh playback sync after sync event:', error);
+                                });
+                            }
                             
                             // Sync video playback
                             if (backgroundType === 'mapping') {
@@ -3305,8 +4033,8 @@
                 }
             } else if (selectedWidget) {
                 // Widget movement with arrow keys
-                const widget = widgets.find(w => w.id === selectedWidget);
-                const widgetEl = document.getElementById(selectedWidget);
+                const widget = getWidget(selectedWidget);
+                const widgetEl = widgetElsById.get(selectedWidget);
                 
                 if (widget && widgetEl) {
                     switch(e.key) {
@@ -3401,20 +4129,21 @@
                 const progress = widget.querySelector('.spotify-progress-fill');
                 if (!title || !artist || !art || !progress) return;
 
-                if (data.status !== 'active') {
+                if (data.status !== 'active' && data.status !== 'paused') {
                     title.textContent = data.status === 'idle' ? 'Nothing playing' : 'Spotify unavailable';
-                    artist.textContent = data.status === 'unconfigured'
-                        ? 'Configure Spotify API credentials'
-                        : (data.error || 'No active playback');
+                    artist.textContent = data.message || data.error || 'No active playback';
                     art.removeAttribute('src');
                     progress.style.width = '0%';
                     return;
                 }
 
                 title.textContent = data.title || 'Unknown Track';
-                artist.textContent = data.artist || 'Unknown Artist';
+                const suffix = data.status === 'paused' ? ' • Paused' : '';
+                artist.textContent = `${data.artist || 'Unknown Artist'}${suffix}`;
                 if (data.album_art) {
                     art.src = data.album_art;
+                } else {
+                    art.removeAttribute('src');
                 }
                 progress.style.width = `${Math.max(0, Math.min(100, Number(data.progress || 0) * 100))}%`;
             });
@@ -3428,11 +4157,15 @@
 
                 list.innerHTML = '';
                 if (data.status === 'unconfigured') {
-                    subtitle.textContent = 'Configure Gmail API credentials';
+                    subtitle.textContent = data.message || 'Configure Gmail API credentials';
+                    return;
+                }
+                if (data.status === 'unavailable') {
+                    subtitle.textContent = data.message || data.error || 'Gmail unavailable';
                     return;
                 }
                 const items = Array.isArray(data.items) ? data.items : [];
-                subtitle.textContent = items.length ? `${items.length} unread messages` : 'No unread messages';
+                subtitle.textContent = data.message || (items.length ? `${items.length} unread messages` : 'No unread messages');
                 items.forEach((item) => {
                     const li = document.createElement('li');
                     li.className = 'gmail-item';
@@ -3453,15 +4186,15 @@
 
                 list.innerHTML = '';
                 if (data.status === 'unconfigured') {
-                    subtitle.textContent = 'Configure Google Calendar API key and calendar ID';
+                    subtitle.textContent = data.message || 'Configure Google Calendar API key and calendar ID';
                     return;
                 }
                 if (data.status === 'unavailable') {
-                    subtitle.textContent = data.error || 'Calendar unavailable';
+                    subtitle.textContent = data.message || data.error || 'Calendar unavailable';
                     return;
                 }
                 const items = Array.isArray(data.items) ? data.items : [];
-                subtitle.textContent = items.length ? `${items.length} upcoming events` : 'No upcoming events';
+                subtitle.textContent = data.message || (items.length ? `${items.length} upcoming events` : 'No upcoming events');
                 items.forEach((item) => {
                     const li = document.createElement('li');
                     li.className = 'gmail-item';
@@ -3476,16 +4209,23 @@
 
         function updateClimateWidgets(data) {
             getWidgetElements('climate').forEach((widget) => {
+                const title = widget.querySelector('.gmail-title');
                 const temperature = widget.querySelector('.climate-temperature');
                 const humidity = widget.querySelector('.climate-humidity');
                 if (!temperature || !humidity) return;
 
                 if (data.status !== 'active') {
+                    if (title) {
+                        title.textContent = data.status === 'unconfigured' ? 'Room Climate' : 'Climate unavailable';
+                    }
                     temperature.textContent = '--';
                     humidity.textContent = '--';
                     return;
                 }
 
+                if (title) {
+                    title.textContent = 'Room Climate';
+                }
                 temperature.textContent = data.temperature == null ? '--' : `${Number(data.temperature).toFixed(1)}°`;
                 humidity.textContent = data.humidity == null ? '--' : `${Math.round(Number(data.humidity))}%`;
             });
@@ -3500,17 +4240,17 @@
 
                 if (data.status !== 'active') {
                     game.textContent = data.status === 'unconfigured' ? 'Steam unavailable' : 'Steam idle';
-                    status.textContent = data.status === 'unconfigured'
-                        ? 'Configure Steam API credentials'
-                        : (data.error || 'No active game');
+                    status.textContent = data.message || data.error || 'No active game';
                     avatar.removeAttribute('src');
                     return;
                 }
 
                 game.textContent = data.game || data.persona_name || 'Steam';
-                status.textContent = data.game ? `${data.persona_name || 'Player'} is playing now` : `${data.persona_name || 'Player'} is online`;
+                status.textContent = data.message || (data.game ? `${data.persona_name || 'Player'} is playing now` : `${data.persona_name || 'Player'} is online`);
                 if (data.avatar) {
                     avatar.src = data.avatar;
+                } else {
+                    avatar.removeAttribute('src');
                 }
             });
         }
@@ -3575,9 +4315,7 @@
                 weatherWidgets.forEach((widget) => {
                     const descriptionEl = widget.querySelector('.weather-description');
                     if (descriptionEl) {
-                        descriptionEl.textContent = data.status === 'unconfigured'
-                            ? 'Configure weather API key'
-                            : (data.error || 'Weather unavailable');
+                        descriptionEl.textContent = data.message || data.error || 'Weather unavailable';
                     }
                 });
                 return;
@@ -3619,7 +4357,7 @@
                 transitWidgets.forEach((widget) => {
                     const content = widget.querySelector('.transit-content');
                     if (content) {
-                        content.innerHTML = '<div class="no-service">Configure transit stop ID</div>';
+                        content.innerHTML = `<div class="no-service">${data.message || 'Configure transit stop ID'}</div>`;
                     }
                 });
                 return;
@@ -3629,7 +4367,7 @@
                 transitWidgets.forEach((widget) => {
                     const content = widget.querySelector('.transit-content');
                     if (content) {
-                        content.innerHTML = 'Transit data unavailable';
+                        content.innerHTML = `<div class="no-service">${data.message || data.error || 'Transit data unavailable'}</div>`;
                     }
                 });
                 return;
@@ -3653,7 +4391,7 @@
 
             let latestRoutes = [];
             transitWidgets.forEach(widget => {
-                const widgetConfig = widgets.find(w => w.id === widget.id);
+                    const widgetConfig = getWidget(widget.id);
                 const routeFilter = widgetConfig?.config?.routeFilter?.toLowerCase();
 
                 let filteredRoutes = routePredictions;
@@ -3798,7 +4536,6 @@
         }
         
         async function updateSplitFlapDisplay(container, predictions) {
-            const currentHTML = container.innerHTML;
             const stopName = container.dataset.stopName || 'Nearby Stop';
             
             // If empty, create initial display
@@ -3957,6 +4694,7 @@
                     // Apply imported settings
                     videoTransform = importedData.video_transform || { x: 0, y: 0, scale: 1, rotation: 0 };
                     widgets = importedData.widgets || [];
+                    rebuildWidgetIndex();
                     
                     // Update API configs if present
                     if (importedData.api_configs && config) {

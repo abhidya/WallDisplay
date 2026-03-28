@@ -103,6 +103,8 @@ class MappingSceneService:
                     sort_order=sort_order,
                 ).model_dump()
             )
+            existing_masks[-1]["preprocessing_status"] = "pending"
+            existing_masks[-1]["preprocessing_error"] = None
             sort_order += 1
         scene.masks = existing_masks
         self.db.commit()
@@ -143,6 +145,8 @@ class MappingSceneService:
                     sort_order=sort_order,
                 ).model_dump()
             )
+            existing_masks[-1]["preprocessing_status"] = "pending"
+            existing_masks[-1]["preprocessing_error"] = None
             sort_order += 1
 
         scene.masks = existing_masks
@@ -261,6 +265,8 @@ class MappingSceneService:
                         sort_order=sort_order,
                     ).model_dump()
                 )
+                imported_masks[-1]["preprocessing_status"] = "pending"
+                imported_masks[-1]["preprocessing_error"] = None
 
             imported_groups = []
             valid_mask_ids = {mask["id"] for mask in imported_masks}
@@ -313,6 +319,8 @@ class MappingSceneService:
                 sort_order=len(existing_masks),
             ).model_dump()
         )
+        existing_masks[-1]["preprocessing_status"] = "pending"
+        existing_masks[-1]["preprocessing_error"] = None
         scene.masks = existing_masks
         self.db.commit()
         self.db.refresh(scene)

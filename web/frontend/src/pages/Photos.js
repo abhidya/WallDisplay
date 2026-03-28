@@ -11,11 +11,13 @@ import {
   DialogContent,
   DialogTitle,
   FormControl,
+  FormControlLabel,
   Grid,
   InputLabel,
   MenuItem,
   Select,
   Stack,
+  Switch,
   TextField,
   Typography,
 } from '@mui/material';
@@ -32,6 +34,7 @@ function Photos() {
   const [openAddDialog, setOpenAddDialog] = useState(false);
   const [openScanDialog, setOpenScanDialog] = useState(false);
   const [openListDialog, setOpenListDialog] = useState(false);
+  const [editingPhotoListId, setEditingPhotoListId] = useState(null);
   const [selectedPhoto, setSelectedPhoto] = useState(null);
   const [newPhoto, setNewPhoto] = useState({ name: '', path: '', category: 'background' });
   const [scanDirectory, setScanDirectory] = useState('');
@@ -123,18 +126,27 @@ function Photos() {
     }
   };
 
+  const resetPhotoListDialog = () => {
+    setOpenListDialog(false);
+    setEditingPhotoListId(null);
+    setPhotoListForm({
+      name: '',
+      category: 'background',
+      photo_ids: [],
+      playback_mode: 'sequence',
+      shuffle: false,
+      loop: true,
+    });
+  };
+
   const handleCreatePhotoList = async () => {
     try {
-      await photoListApi.createPhotoList(photoListForm);
-      setOpenListDialog(false);
-      setPhotoListForm({
-        name: '',
-        category: 'background',
-        photo_ids: [],
-        playback_mode: 'sequence',
-        shuffle: false,
-        loop: true,
-      });
+      if (editingPhotoListId) {
+        await photoListApi.updatePhotoList(editingPhotoListId, photoListForm);
+      } else {
+        await photoListApi.createPhotoList(photoListForm);
+      }
+      resetPhotoListDialog();
       setMessage('Photo list saved');
       fetchPhotos();
     } catch (err) {
@@ -154,6 +166,19 @@ function Photos() {
     }
   };
 
+  const openEditPhotoList = (list) => {
+    setEditingPhotoListId(list.id);
+    setPhotoListForm({
+      name: list.name || '',
+      category: list.category || 'background',
+      photo_ids: list.photo_ids || [],
+      playback_mode: list.playback_mode || 'sequence',
+      shuffle: Boolean(list.shuffle),
+      loop: list.loop !== false,
+    });
+    setOpenListDialog(true);
+  };
+
   return (
     <Box sx={{ p: 3 }}>
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
@@ -167,7 +192,23 @@ function Photos() {
           </Button>
           <Button variant="contained" onClick={handleUploadPhoto} disabled={!uploadFile}>Upload</Button>
           <Button variant="outlined" onClick={() => setOpenScanDialog(true)}>Scan Directory</Button>
-          <Button variant="contained" onClick={() => setOpenListDialog(true)}>Create Photo List</Button>
+          <Button
+            variant="contained"
+            onClick={() => {
+              setEditingPhotoListId(null);
+              setPhotoListForm({
+                name: '',
+                category: 'background',
+                photo_ids: [],
+                playback_mode: 'sequence',
+                shuffle: false,
+                loop: true,
+              });
+              setOpenListDialog(true);
+            }}
+          >
+            Create Photo List
+          </Button>
         </Stack>
       </Stack>
 
@@ -202,9 +243,14 @@ function Photos() {
           <Stack key={list.id} direction="row" justifyContent="space-between" alignItems="center" sx={{ p: 2, border: '1px solid #ddd', borderRadius: 1 }}>
             <Box>
               <Typography variant="subtitle1">{list.name}</Typography>
-              <Typography variant="body2" color="text.secondary">{list.photo_ids.length} photos</Typography>
+              <Typography variant="body2" color="text.secondary">
+                {list.photo_ids.length} photos • {Boolean(list.shuffle) ? 'shuffle' : 'sequence'}
+              </Typography>
             </Box>
-            <Button color="error" startIcon={<DeleteIcon />} onClick={() => handleDeletePhotoList(list.id)}>Delete</Button>
+            <Stack direction="row" spacing={1}>
+              <Button onClick={() => openEditPhotoList(list)}>Edit</Button>
+              <Button color="error" startIcon={<DeleteIcon />} onClick={() => handleDeletePhotoList(list.id)}>Delete</Button>
+            </Stack>
           </Stack>
         ))}
       </Stack>
@@ -242,11 +288,22 @@ function Photos() {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={openListDialog} onClose={() => setOpenListDialog(false)} fullWidth maxWidth="sm">
-        <DialogTitle>Create Photo List</DialogTitle>
+      <Dialog open={openListDialog} onClose={resetPhotoListDialog} fullWidth maxWidth="sm">
+        <DialogTitle>{editingPhotoListId ? 'Edit Photo List' : 'Create Photo List'}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <TextField label="Name" value={photoListForm.name} onChange={(event) => setPhotoListForm((current) => ({ ...current, name: event.target.value }))} />
+            <FormControl fullWidth>
+              <InputLabel>Playback Mode</InputLabel>
+              <Select
+                value={photoListForm.playback_mode}
+                label="Playback Mode"
+                onChange={(event) => setPhotoListForm((current) => ({ ...current, playback_mode: event.target.value }))}
+              >
+                <MenuItem value="sequence">Sequence</MenuItem>
+                <MenuItem value="manual">Manual</MenuItem>
+              </Select>
+            </FormControl>
             <FormControl fullWidth>
               <InputLabel>Photos</InputLabel>
               <Select
@@ -260,11 +317,29 @@ function Photos() {
                 ))}
               </Select>
             </FormControl>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={Boolean(photoListForm.shuffle)}
+                  onChange={(event) => setPhotoListForm((current) => ({ ...current, shuffle: event.target.checked }))}
+                />
+              }
+              label="Shuffle photo order"
+            />
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={Boolean(photoListForm.loop)}
+                  onChange={(event) => setPhotoListForm((current) => ({ ...current, loop: event.target.checked }))}
+                />
+              }
+              label="Loop list"
+            />
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setOpenListDialog(false)}>Cancel</Button>
-          <Button onClick={handleCreatePhotoList} variant="contained">Save</Button>
+          <Button onClick={resetPhotoListDialog}>Cancel</Button>
+          <Button onClick={handleCreatePhotoList} variant="contained">{editingPhotoListId ? 'Save' : 'Create'}</Button>
         </DialogActions>
       </Dialog>
     </Box>

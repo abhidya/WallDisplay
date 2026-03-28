@@ -215,7 +215,7 @@ async def start_overlay_cast(
     cast_request: OverlayCastStartRequest,
     request: Request,
 ):
-    """Render an overlay config in headless Chromium and cast the resulting MPEG-TS relay over DLNA."""
+    """Launch a visible overlay window, capture it via macOS AVFoundation, and relay MPEG-TS over DLNA."""
     try:
         service = get_overlay_cast_service()
         overlay_base_url = cast_request.overlay_base_url or str(request.base_url).rstrip("/")
@@ -231,6 +231,7 @@ async def start_overlay_cast(
             quality=cast_request.quality,
             frame_rate=cast_request.frame_rate,
             stream_port=cast_request.stream_port,
+            capture_display_index=cast_request.capture_display_index,
         )
         return OverlayCastSessionResponse(**session)
     except RuntimeError as exc:
@@ -508,6 +509,20 @@ async def get_overlay_status():
         "sync": sync_state,
         "server_time": datetime.utcnow().isoformat()
     }
+
+
+@router.get("/playback-sync")
+async def get_overlay_playback_sync(
+    config_id: int = Query(..., description="Overlay configuration id"),
+    db: Session = Depends(get_db),
+):
+    try:
+        service = OverlayService(db)
+        return service.get_mapping_playback_sync(config_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 @router.get("/brightness/status")
 async def get_brightness_status():

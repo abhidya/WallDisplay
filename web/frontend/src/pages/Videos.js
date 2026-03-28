@@ -29,10 +29,12 @@ import {
   Avatar,
   Chip,
   FormControl,
+  FormControlLabel,
   InputLabel,
   MenuItem,
   Select,
   Stack,
+  Switch,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -1063,6 +1065,24 @@ function Videos() {
               ))}
             </Select>
           </FormControl>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={Boolean(mediaListForm.shuffle)}
+                onChange={(event) => setMediaListForm((current) => ({ ...current, shuffle: event.target.checked }))}
+              />
+            }
+            label="Shuffle video order"
+          />
+          <FormControlLabel
+            control={
+              <Switch
+                checked={Boolean(mediaListForm.loop)}
+                onChange={(event) => setMediaListForm((current) => ({ ...current, loop: event.target.checked }))}
+              />
+            }
+            label="Loop list"
+          />
         </DialogContent>
         <DialogActions>
           <Button onClick={resetMediaListDialog}>Cancel</Button>

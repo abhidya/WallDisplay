@@ -10,12 +10,14 @@ import {
   CircularProgress,
   Divider,
   FormControl,
+  FormControlLabel,
   Grid,
   InputLabel,
   MenuItem,
   Paper,
   Select,
   Stack,
+  Switch,
   TextField,
   Typography,
 } from '@mui/material';
@@ -34,7 +36,7 @@ function ProjectionAnimation() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [animationLists, setAnimationLists] = useState([]);
-  const [listDraft, setListDraft] = useState({ id: '', name: '', animation_ids: [], auto_advance_seconds: 12 });
+  const [listDraft, setListDraft] = useState({ id: '', name: '', animation_ids: [], auto_advance_seconds: 12, shuffle: false });
 
   const loadLibrary = async ({ quiet = false } = {}) => {
     if (!quiet) {
@@ -91,7 +93,7 @@ function ProjectionAnimation() {
   };
 
   const resetListDraft = () => {
-    setListDraft({ id: '', name: '', animation_ids: [], auto_advance_seconds: 12 });
+    setListDraft({ id: '', name: '', animation_ids: [], auto_advance_seconds: 12, shuffle: false });
   };
 
   const saveAnimationList = async () => {
@@ -108,6 +110,7 @@ function ProjectionAnimation() {
         name: listDraft.name.trim(),
         animation_ids: listDraft.animation_ids,
         auto_advance_seconds: Number(listDraft.auto_advance_seconds) || 12,
+        shuffle: Boolean(listDraft.shuffle),
       };
       const response = listDraft.id
         ? await projectionApi.updateAnimationList(listDraft.id, payload)
@@ -131,6 +134,7 @@ function ProjectionAnimation() {
       name: animationList.name || '',
       animation_ids: animationList.animation_ids || [],
       auto_advance_seconds: animationList.auto_advance_seconds || 12,
+      shuffle: Boolean(animationList.shuffle),
     });
   };
 
@@ -303,6 +307,15 @@ function ProjectionAnimation() {
                 onChange={(event) => setListDraft((current) => ({ ...current, auto_advance_seconds: event.target.value }))}
                 inputProps={{ min: 3, step: 1 }}
               />
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={Boolean(listDraft.shuffle)}
+                    onChange={(event) => setListDraft((current) => ({ ...current, shuffle: event.target.checked }))}
+                  />
+                }
+                label="Shuffle animation order"
+              />
               <Stack direction="row" spacing={1}>
                 <Button variant="contained" onClick={saveAnimationList}>
                   {listDraft.id ? 'Update List' : 'Create List'}
@@ -331,6 +344,7 @@ function ProjectionAnimation() {
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
                         Advance every {animationList.auto_advance_seconds || 12}s
+                        {animationList.shuffle ? ' • shuffle on' : ' • sequence'}
                       </Typography>
                     </Box>
                     <Stack direction="row" spacing={1}>

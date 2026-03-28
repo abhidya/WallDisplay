@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
     Grid,
     Paper,
@@ -14,7 +15,6 @@ import {
     Select,
     MenuItem,
     TextField,
-    InputAdornment,
     List,
     ListItem,
     ListItemText,
@@ -50,8 +50,7 @@ import {
     Brightness4 as BrightnessIcon,
     LightMode as LightModeIcon,
     DarkMode as DarkModeIcon,
-    Sync as SyncIcon,
-    InfoOutlined as InfoIcon
+    Sync as SyncIcon
 } from '@mui/icons-material';
 import { api, discoveryV2Api, mappingsApi, overlayApi } from '../services/api';
 
@@ -66,7 +65,6 @@ function OverlayProjection() {
     const [projectionWindow, setProjectionWindow] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
-    const [apiConfigDialog, setApiConfigDialog] = useState(false);
     const [configNameDialog, setConfigNameDialog] = useState(false);
     const [newConfigName, setNewConfigName] = useState('');
     const [brightness, setBrightness] = useState(100);
@@ -77,6 +75,7 @@ function OverlayProjection() {
     const [castSessions, setCastSessions] = useState([]);
     const [castLoading, setCastLoading] = useState(false);
     const [castDebugOpen, setCastDebugOpen] = useState(true);
+    const navigate = useNavigate();
     const [globalApiConfigs, setGlobalApiConfigs] = useState({
         weather_api_key: '',
         transit_stop_id: '13915',
@@ -91,21 +90,6 @@ function OverlayProjection() {
         steam_api_key: '',
         steam_id: '',
     });
-
-    const apiFieldHelp = {
-        weather_api_key: 'Get your API key from openweathermap.org/api.',
-        transit_stop_id: 'Transit stop code, e.g. 13915 for Carl St & Stanyan St.',
-        timezone: 'IANA timezone string, e.g. America/Los_Angeles.',
-        apple_health_stats_json: 'Paste a JSON array of Apple Health day records. The widget uses the latest entry plus a compact step trend.',
-        spotify_client_id: 'From your Spotify developer app dashboard.',
-        spotify_client_secret: 'From your Spotify developer app dashboard.',
-        spotify_refresh_token: 'OAuth refresh token for the Spotify account you want to display.',
-        spotify_access_token: 'Optional manual override. Usually leave blank and use refresh token instead.',
-        google_calendar_api_key: 'Google Calendar API key from Google Cloud. Works with accessible/public calendars.',
-        google_calendar_id: 'Calendar ID, e.g. your public calendar ID or an address-like calendar identifier.',
-        steam_api_key: 'Get from steamcommunity.com/dev/apikey.',
-        steam_id: 'Numeric SteamID64 for the account to display.',
-    };
 
     const widgetTemplates = {
         weather: {
@@ -447,7 +431,7 @@ function OverlayProjection() {
             setError('Failed to delete configuration');
         }
     };
-    
+
     const launchProjection = async (usePopupFeatures = true) => {
         if (!selectedConfig) return;
         if (backgroundType === 'video' && !selectedVideo) return;
@@ -460,7 +444,6 @@ function OverlayProjection() {
             const windowUrl = `/backend-static/overlay_window.html?config_id=${selectedConfig.id}&controls=hidden`;
             const windowName = `overlay_projection_${selectedConfig.id}_${Date.now()}`;
 
-            // Open projection window
             const projWindow = usePopupFeatures
                 ? window.open(windowUrl, windowName, 'width=1920,height=1080')
                 : window.open(windowUrl, windowName);
@@ -549,6 +532,7 @@ function OverlayProjection() {
                 config_id: selectedConfig.id,
                 overlay_base_url: `${window.location.protocol}//${window.location.host}`,
                 controls_hidden: true,
+                frame_rate: 15,
             });
             setCastSession(response.data);
         } catch (error) {
@@ -594,42 +578,6 @@ function OverlayProjection() {
         fetchCastSessions();
     }, [selectedConfig]);
     
-    const updateApiConfig = async (key, value) => {
-        const nextConfigs = {
-            ...globalApiConfigs,
-            [key]: value
-        };
-        setGlobalApiConfigs(nextConfigs);
-        try {
-            await overlayApi.updateGlobalApiConfigs(nextConfigs);
-        } catch (error) {
-            console.error('Error updating global API config:', error);
-            setError(error.response?.data?.detail || 'Failed to update global API configuration');
-        }
-    };
-
-    const renderApiConfigField = (key, label, extra = {}) => (
-        <TextField
-            label={label}
-            fullWidth
-            value={globalApiConfigs?.[key] || ''}
-            onChange={(e) => updateApiConfig(key, e.target.value)}
-            helperText={extra.helperText}
-            type={extra.type}
-            multiline={Boolean(extra.multiline)}
-            minRows={extra.minRows}
-            InputProps={{
-                endAdornment: (
-                    <InputAdornment position="end">
-                        <Tooltip title={apiFieldHelp[key] || ''}>
-                            <InfoIcon fontSize="small" color="action" />
-                        </Tooltip>
-                    </InputAdornment>
-                ),
-            }}
-        />
-    );
-
     const addWidget = (type) => {
         if (!selectedConfig || !widgetTemplates[type]) {
             return;
@@ -859,7 +807,7 @@ function OverlayProjection() {
                                 <Stack direction="row" spacing={1}>
                                     <Button
                                         startIcon={<SettingsIcon />}
-                                        onClick={() => setApiConfigDialog(true)}
+                                        onClick={() => navigate('/settings')}
                                     >
                                         API Settings
                                     </Button>
@@ -1239,45 +1187,6 @@ function OverlayProjection() {
                 <DialogActions>
                     <Button onClick={() => setConfigNameDialog(false)}>Cancel</Button>
                     <Button onClick={createNewConfig} variant="contained">Create</Button>
-                </DialogActions>
-            </Dialog>
-            
-            {/* API Config Dialog */}
-            <Dialog open={apiConfigDialog} onClose={() => setApiConfigDialog(false)} maxWidth="sm" fullWidth>
-                <DialogTitle>API Configuration</DialogTitle>
-                <DialogContent>
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
-                        <Alert severity="info">
-                            These API credentials are now global. Updating them here affects all overlay/mapping configurations unless a config explicitly overrides a value in backend data.
-                        </Alert>
-                        {renderApiConfigField('weather_api_key', 'Weather API Key (OpenWeatherMap)', {
-                            helperText: 'Used by weather widgets across all mappings.',
-                        })}
-                        {renderApiConfigField('transit_stop_id', 'Transit Stop ID', {
-                            helperText: 'Default stop used by transit widgets.',
-                        })}
-                        {renderApiConfigField('timezone', 'Timezone')}
-                        {renderApiConfigField('apple_health_stats_json', 'Apple Health Stats JSON', {
-                            helperText: 'Paste the Apple Health JSON array directly. The Apple Health widget reads this data.',
-                            multiline: true,
-                            minRows: 8,
-                        })}
-                        <Divider />
-                        {renderApiConfigField('spotify_client_id', 'Spotify Client ID')}
-                        {renderApiConfigField('spotify_client_secret', 'Spotify Client Secret')}
-                        {renderApiConfigField('spotify_refresh_token', 'Spotify Refresh Token')}
-                        {renderApiConfigField('spotify_access_token', 'Spotify Access Token Override')}
-                        <Divider />
-                        {renderApiConfigField('google_calendar_api_key', 'Google Calendar API Key')}
-                        {renderApiConfigField('google_calendar_id', 'Google Calendar ID')}
-                        <Divider />
-                        {renderApiConfigField('steam_api_key', 'Steam API Key')}
-                        {renderApiConfigField('steam_id', 'Steam ID')}
-                        <Divider />
-                    </Box>
-                </DialogContent>
-                <DialogActions>
-                    <Button onClick={() => setApiConfigDialog(false)}>Close</Button>
                 </DialogActions>
             </Dialog>
         </Grid>

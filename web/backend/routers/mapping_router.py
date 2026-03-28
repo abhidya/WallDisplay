@@ -127,4 +127,10 @@ def get_mapping_mask_file(scene_id: int, mask_id: str, db: Session = Depends(get
     mask_path = os.path.join(backend_root, mask["stored_path"])
     if not os.path.exists(mask_path):
         raise HTTPException(status_code=404, detail="Mask file missing")
-    return FileResponse(mask_path, media_type="image/png")
+    return FileResponse(
+        mask_path,
+        media_type="image/png",
+        headers={
+            "Cache-Control": "public, max-age=31536000, immutable",
+        },
+    )

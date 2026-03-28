@@ -372,6 +372,7 @@ async def create_animation_list(data: Dict[str, object]):
         "name": name,
         "animation_ids": animation_ids,
         "auto_advance_seconds": max(3, int(data.get("auto_advance_seconds") or 12)),
+        "shuffle": bool(data.get("shuffle")),
         "created_at": now,
         "updated_at": now,
     }
@@ -412,6 +413,7 @@ async def update_animation_list(list_id: str, data: Dict[str, object]):
         "name": name,
         "animation_ids": animation_ids,
         "auto_advance_seconds": max(3, int(data.get("auto_advance_seconds") or current.get("auto_advance_seconds") or 12)),
+        "shuffle": bool(data.get("shuffle", current.get("shuffle", False))),
         "updated_at": datetime.utcnow().isoformat(),
     }
     items[index] = updated
