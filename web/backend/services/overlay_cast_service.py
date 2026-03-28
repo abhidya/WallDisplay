@@ -657,7 +657,20 @@ class OverlayCastService:
     def _build_ffmpeg_command(self, frame_rate: int) -> tuple[str, list[str]]:
         encoder = "h264_videotoolbox" if sys.platform == "darwin" else "libx264"
         encoder_options = (
-            ["-realtime", "1", "-prio_speed", "1", "-power_efficient", "0"]
+            [
+                "-realtime",
+                "1",
+                "-prio_speed",
+                "1",
+                "-power_efficient",
+                "0",
+                "-profile:v",
+                "constrained_baseline",
+                "-coder",
+                "cavlc",
+                "-max_ref_frames",
+                "1",
+            ]
             if encoder == "h264_videotoolbox"
             else ["-preset", "ultrafast"]
         )
