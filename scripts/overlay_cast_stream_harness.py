@@ -23,7 +23,7 @@ import threading
 import time
 from collections import deque
 from contextlib import suppress
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Optional
 
@@ -152,6 +152,59 @@ PROFILES = {
     "low": StreamProfile("low", 854, 480, 8, 24, 900),
     "medium": StreamProfile("medium", 960, 540, 10, 30, 1500),
     "high": StreamProfile("high", 1280, 720, 15, 34, 2200),
+}
+
+
+@dataclass(frozen=True)
+class ServiceConfigPreset:
+    name: str
+    viewport_width: int
+    viewport_height: int
+    capture_width: int
+    capture_height: int
+    frame_rate: int
+    quality: int
+    every_nth_frame: int
+    relay_mode: str
+    chromium_args: list[str]
+    include_default_chromium_args: bool
+    vt_preset: str
+
+
+SERVICE_CONFIG_PRESETS = {
+    "legacy": ServiceConfigPreset(
+        name="legacy",
+        viewport_width=1280,
+        viewport_height=720,
+        capture_width=1280,
+        capture_height=720,
+        frame_rate=20,
+        quality=30,
+        every_nth_frame=5,
+        relay_mode="shared-read",
+        chromium_args=["--no-sandbox"],
+        include_default_chromium_args=False,
+        vt_preset="legacy",
+    ),
+    "current": ServiceConfigPreset(
+        name="current",
+        viewport_width=1280,
+        viewport_height=720,
+        capture_width=960,
+        capture_height=540,
+        frame_rate=20,
+        quality=50,
+        every_nth_frame=1,
+        relay_mode="fanout",
+        chromium_args=[
+            "--no-sandbox",
+            "--use-angle=metal",
+            "--enable-gpu-rasterization",
+            "--enable-zero-copy",
+        ],
+        include_default_chromium_args=False,
+        vt_preset="current",
+    ),
 }
 
 
@@ -325,13 +378,15 @@ def resolve_encoder(encoder_name: str) -> str:
     return "h264_videotoolbox" if sys.platform == "darwin" else "libx264"
 
 
-def chromium_args_for_mode(gpu_mode: str, extra_args: list[str]) -> list[str]:
-    args = [
-        "--no-sandbox",
-        "--disable-background-timer-throttling",
-        "--disable-backgrounding-occluded-windows",
-        "--disable-renderer-backgrounding",
-    ]
+def chromium_args_for_mode(gpu_mode: str, extra_args: list[str], include_default_args: bool = True) -> list[str]:
+    args = []
+    if include_default_args:
+        args = [
+            "--no-sandbox",
+            "--disable-background-timer-throttling",
+            "--disable-backgrounding-occluded-windows",
+            "--disable-renderer-backgrounding",
+        ]
     if gpu_mode == "disable-gpu":
         args += ["--disable-gpu", "--disable-gpu-compositing"]
     elif gpu_mode == "swiftshader":
@@ -340,6 +395,22 @@ def chromium_args_for_mode(gpu_mode: str, extra_args: list[str]) -> list[str]:
         args += ["--enable-unsafe-webgpu"]
     args.extend(extra_args)
     return args
+
+
+def effective_profile(args: argparse.Namespace) -> StreamProfile:
+    profile = PROFILES[args.profile]
+    width = args.viewport_width or profile.width
+    height = args.viewport_height or profile.height
+    fps = args.stream_fps or profile.fps
+    quality = args.screencast_quality or profile.jpeg_quality
+    return replace(profile, width=width, height=height, fps=int(fps), jpeg_quality=int(quality))
+
+
+def capture_dimensions(args: argparse.Namespace, profile: StreamProfile) -> tuple[int, int]:
+    return (
+        int(args.capture_width or profile.width),
+        int(args.capture_height or profile.height),
+    )
 
 
 def build_ffmpeg_output_args(profile: StreamProfile, ffmpeg_mode: str, write_to_stdout: bool) -> list[str]:
@@ -382,9 +453,25 @@ def build_ffmpeg_cmd(
     encoder_name: str,
     source_mode: str,
     write_to_stdout: bool,
+    vt_preset: str = "auto",
 ) -> list[str]:
     encoder = resolve_encoder(encoder_name)
-    encoder_opts = ["-realtime", "1"] if encoder == "h264_videotoolbox" else ["-preset", "ultrafast"]
+    if encoder == "h264_videotoolbox":
+        if vt_preset == "legacy":
+            encoder_opts = ["-realtime", "1"]
+        elif vt_preset == "current":
+            encoder_opts = [
+                "-realtime", "1",
+                "-prio_speed", "1",
+                "-power_efficient", "0",
+                "-profile:v", "constrained_baseline",
+                "-coder", "cavlc",
+                "-max_ref_frames", "1",
+            ]
+        else:
+            encoder_opts = ["-realtime", "1"]
+    else:
+        encoder_opts = ["-preset", "ultrafast"]
     cmd = [
         "ffmpeg",
         "-y",
@@ -615,6 +702,7 @@ class SourceAdapter:
     def __init__(self, args: argparse.Namespace, profile: StreamProfile, metrics: Metrics, frame_store: FrameStore):
         self.args = args
         self.profile = profile
+        self.capture_width, self.capture_height = capture_dimensions(args, profile)
         self.metrics = metrics
         self.frame_store = frame_store
         self.stop_event = threading.Event()
@@ -676,6 +764,7 @@ class SourceAdapter:
                     args=chromium_args_for_mode(
                         self.args.gpu_mode,
                         self.args.chromium_arg,
+                        include_default_args=not self.args.disable_default_chromium_args,
                     ),
                 )
                 page = await browser.new_page(
@@ -702,8 +791,8 @@ class SourceAdapter:
                     {
                         "format": "jpeg",
                         "quality": self.args.screencast_quality,
-                        "maxWidth": self.profile.width,
-                        "maxHeight": self.profile.height,
+                        "maxWidth": self.capture_width,
+                        "maxHeight": self.capture_height,
                         "everyNthFrame": self.args.every_nth_frame,
                     },
                 )
@@ -723,7 +812,7 @@ class OverlayCaptureRunner:
     def __init__(self, args: argparse.Namespace, strategy: str):
         self.args = args
         self.strategy = strategy
-        self.profile = PROFILES[args.profile]
+        self.profile = effective_profile(args)
         self.metrics = Metrics()
         self.frame_store = FrameStore()
         self.stop_event = threading.Event()
@@ -797,6 +886,7 @@ class OverlayCaptureRunner:
                 self.args.encoder,
                 "synthetic",
                 write_to_stdout=False,
+                vt_preset=self.args.vt_preset,
             ),
             stdin=subprocess.PIPE,
             stdout=subprocess.DEVNULL,
@@ -998,10 +1088,15 @@ class OverlayCaptureRunner:
         return {
             "benchmark_mode": "overlay_capture_benchmark",
             "strategy": self.strategy,
+            "service_config_preset": self.args.service_config_preset,
             "source_mode": self.args.source_mode,
             "gpu_mode": self.args.gpu_mode,
             "every_nth_frame": self.args.every_nth_frame,
             "screencast_quality": self.args.screencast_quality,
+            "viewport_width": self.profile.width,
+            "viewport_height": self.profile.height,
+            "capture_width": self.source.capture_width,
+            "capture_height": self.source.capture_height,
             "source_frame_count": self.metrics.source_frame_count,
             "source_fps": round(self.metrics.source_fps(seconds), 3),
             "avg_inter_frame_ms": round(Metrics._avg(self.metrics.source_intervals_ms), 3),
@@ -1041,7 +1136,7 @@ class WebRTCCaptureRunner:
     def __init__(self, args: argparse.Namespace, scenario: str):
         self.args = args
         self.scenario = scenario
-        self.profile = PROFILES[args.profile]
+        self.profile = effective_profile(args)
         self.metrics = Metrics()
         self.capture_error: Optional[str] = None
         self.browser_console: list[dict[str, str]] = []
@@ -1393,7 +1488,7 @@ class WebRTCCaptureRunner:
 class RelayBroadcastRunner:
     def __init__(self, args: argparse.Namespace):
         self.args = args
-        self.profile = PROFILES[args.profile]
+        self.profile = effective_profile(args)
         self.metrics = Metrics()
         self.stop_event = threading.Event()
         self.proc: Optional[subprocess.Popen] = None
@@ -1413,6 +1508,7 @@ class RelayBroadcastRunner:
                 self.args.encoder,
                 "testsrc",
                 write_to_stdout=True,
+                vt_preset=self.args.vt_preset,
             ),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -1464,6 +1560,7 @@ class RelayBroadcastRunner:
         fairness = (min(bytes_per_client) / max(bytes_per_client)) if bytes_per_client and max(bytes_per_client) else 0.0
         return {
             "benchmark_mode": "relay_broadcast_benchmark",
+            "service_config_preset": self.args.service_config_preset,
             "relay_mode": self.args.relay_mode,
             "stream_url": self.stream_url,
             "ffmpeg_speed": self.metrics.ffmpeg_speed,
@@ -1543,6 +1640,59 @@ def render_ranked_table(results: list[dict[str, Any]]) -> str:
     return "\n".join(rendered)
 
 
+def render_service_config_overlay_table(results: list[dict[str, Any]]) -> str:
+    headers = [
+        "config",
+        "source_fps",
+        "submit_fps",
+        "ffmpeg_speed_avg",
+        "ffmpeg_speed_max",
+        "max_gap_ms",
+        "capture",
+        "relay",
+    ]
+    rows = [headers]
+    for item in results:
+        rows.append([
+            item.get("service_config_preset", "custom"),
+            f"{item['source_fps']:.2f}",
+            f"{item['submit_fps']:.2f}",
+            f"{item['ffmpeg_speed_avg']:.2f}",
+            f"{item['ffmpeg_speed_max']:.2f}",
+            f"{item['max_inter_frame_gap_ms']:.1f}",
+            f"{item['capture_width']}x{item['capture_height']}",
+            item.get("relay_mode", "n/a"),
+        ])
+    widths = [max(len(row[idx]) for row in rows) for idx in range(len(headers))]
+    rendered = []
+    for idx, row in enumerate(rows):
+        rendered.append("| " + " | ".join(cell.ljust(widths[col]) for col, cell in enumerate(row)) + " |")
+        if idx == 0:
+            rendered.append("|-" + "-|-".join("-" * width for width in widths) + "-|")
+    return "\n".join(rendered)
+
+
+def render_service_config_relay_table(results: list[dict[str, Any]]) -> str:
+    headers = ["config", "relay_mode", "fairness", "ffmpeg_speed", "ffmpeg_fps", "bytes_out"]
+    rows = [headers]
+    for item in results:
+        rows.append([
+            item.get("service_config_preset", "custom"),
+            item["relay_mode"],
+            f"{item['client_fairness_ratio']:.4f}",
+            f"{(item['ffmpeg_speed'] or 0.0):.2f}",
+            f"{(item['ffmpeg_fps'] or 0.0):.2f}",
+            str(item["relay_bytes_out"]),
+        ])
+    widths = [max(len(row[idx]) for row in rows) for idx in range(len(headers))]
+    rendered = []
+    for idx, row in enumerate(rows):
+        rendered.append("| " + " | ".join(cell.ljust(widths[col]) for col, cell in enumerate(row)) + " |")
+        if idx == 0:
+            rendered.append("|-" + "-|-".join("-" * width for width in widths) + "-|")
+    return "\n".join(rendered)
+
+
 def render_webrtc_table(results: list[dict[str, Any]]) -> str:
     headers = [
         "scenario",
@@ -1590,6 +1740,71 @@ async def run_overlay_capture_benchmark(args: argparse.Namespace) -> dict[str, A
     }
 
 
+def apply_service_config_preset(args: argparse.Namespace, preset_name: str) -> argparse.Namespace:
+    preset = SERVICE_CONFIG_PRESETS[preset_name]
+    next_args = argparse.Namespace(**vars(args))
+    next_args.service_config_preset = preset.name
+    next_args.viewport_width = preset.viewport_width
+    next_args.viewport_height = preset.viewport_height
+    next_args.capture_width = preset.capture_width
+    next_args.capture_height = preset.capture_height
+    next_args.stream_fps = preset.frame_rate
+    next_args.encode_fps = float(preset.frame_rate)
+    next_args.quality = preset.quality
+    next_args.screencast_quality = preset.quality
+    next_args.every_nth_frame = preset.every_nth_frame
+    next_args.relay_mode = preset.relay_mode
+    next_args.chromium_arg = list(preset.chromium_args)
+    next_args.disable_default_chromium_args = not preset.include_default_chromium_args
+    next_args.vt_preset = preset.vt_preset
+    next_args.encoder = "h264_videotoolbox" if sys.platform == "darwin" else "libx264"
+    next_args.ffmpeg_mode = "service"
+    next_args.profile = "high"
+    next_args.source_mode = "overlay"
+    return next_args
+
+
+async def run_service_config_compare(args: argparse.Namespace) -> dict[str, Any]:
+    overlay_results: list[dict[str, Any]] = []
+    relay_results: list[dict[str, Any]] = []
+    strategies = args.strategy or ["naive_repeat_last"]
+    for preset_name in ["legacy", "current"]:
+        preset_args = apply_service_config_preset(args, preset_name)
+        for strategy in strategies:
+            runner = OverlayCaptureRunner(preset_args, strategy)
+            runner.start()
+            await asyncio.sleep(preset_args.seconds)
+            await runner.stop()
+            result = runner.result()
+            result["relay_mode"] = preset_args.relay_mode
+            overlay_results.append(result)
+            await asyncio.sleep(0.5)
+
+        relay_args = argparse.Namespace(**vars(preset_args))
+        relay_args.source_mode = "synthetic_sparse"
+        relay_runner = RelayBroadcastRunner(relay_args)
+        relay_runner.start()
+        await asyncio.sleep(relay_args.prime_seconds)
+        client_tasks = [
+            asyncio.create_task(relay_sink_client(relay_runner.stream_url, relay_args.seconds, f"client{i + 1}"))
+            for i in range(relay_args.clients)
+        ]
+        try:
+            clients = await asyncio.gather(*client_tasks)
+        finally:
+            await relay_runner.stop()
+        relay_results.append(relay_runner.result(clients))
+        await asyncio.sleep(0.5)
+
+    return {
+        "benchmark_mode": "service_config_compare",
+        "overlay_runs": overlay_results,
+        "relay_runs": relay_results,
+        "overlay_table": render_service_config_overlay_table(overlay_results),
+        "relay_table": render_service_config_relay_table(relay_results),
+    }
+
+
 async def run_relay_broadcast_benchmark(args: argparse.Namespace) -> dict[str, Any]:
     runner = RelayBroadcastRunner(args)
     runner.start()
@@ -1623,11 +1838,12 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--mode",
-        choices=["overlay_capture_benchmark", "relay_broadcast_benchmark", "webrtc_capture_benchmark"],
+        choices=["overlay_capture_benchmark", "relay_broadcast_benchmark", "webrtc_capture_benchmark", "service_config_compare"],
         default="overlay_capture_benchmark",
     )
     parser.add_argument("--overlay-url", default=DEFAULT_OVERLAY_URL)
     parser.add_argument("--profile", choices=sorted(PROFILES.keys()), default="low")
+    parser.add_argument("--service-config-preset", choices=["custom", "legacy", "current"], default="custom")
     parser.add_argument("--seconds", type=float, default=12.0)
     parser.add_argument("--prime-seconds", type=float, default=1.0)
     parser.add_argument("--clients", type=int, default=2)
@@ -1661,6 +1877,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--zero-speed-persist-samples", type=int, default=3)
     parser.add_argument("--burst-smoothing-window", type=int, default=4)
     parser.add_argument("--synthetic-source-fps", type=float, default=1.0)
+    parser.add_argument("--viewport-width", type=int)
+    parser.add_argument("--viewport-height", type=int)
+    parser.add_argument("--capture-width", type=int)
+    parser.add_argument("--capture-height", type=int)
+    parser.add_argument("--stream-fps", type=int)
+    parser.add_argument("--quality", type=int)
     parser.add_argument("--every-nth-frame", type=int, default=1)
     parser.add_argument("--screencast-quality", type=int, default=24)
     parser.add_argument(
@@ -1669,8 +1891,10 @@ def parse_args() -> argparse.Namespace:
         default="default",
     )
     parser.add_argument("--chromium-arg", action="append", default=[])
+    parser.add_argument("--disable-default-chromium-args", action="store_true")
     parser.add_argument("--relay-mode", choices=["shared-read", "fanout"], default="fanout")
     parser.add_argument("--fanout-queue-chunks", type=int, default=32)
+    parser.add_argument("--vt-preset", choices=["auto", "legacy", "current"], default="auto")
     parser.add_argument("--webrtc-capture-fps", type=float, default=15.0)
     parser.add_argument("--webrtc-scenario", action="append", choices=WEBRTC_SCENARIOS)
     return parser.parse_args()
@@ -1680,6 +1904,8 @@ async def main() -> int:
     args = parse_args()
     if args.mode == "overlay_capture_benchmark":
         result = await run_overlay_capture_benchmark(args)
+    elif args.mode == "service_config_compare":
+        result = await run_service_config_compare(args)
     elif args.mode == "webrtc_capture_benchmark":
         result = await run_webrtc_capture_benchmark(args)
     else:
@@ -1687,6 +1913,10 @@ async def main() -> int:
     print(json.dumps(result, indent=2, sort_keys=True))
     if isinstance(result, dict) and "ranked_table" in result:
         print(result["ranked_table"])
+    if isinstance(result, dict) and "overlay_table" in result:
+        print(result["overlay_table"])
+    if isinstance(result, dict) and "relay_table" in result:
+        print(result["relay_table"])
     return 0
 
 
