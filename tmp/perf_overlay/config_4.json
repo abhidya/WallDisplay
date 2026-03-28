@@ -1,0 +1,76 @@
+{
+  "config_id": 4,
+  "widgetCount": 0,
+  "mappingVisible": true,
+  "videoVisible": false,
+  "resources": 24,
+  "resourceBytes": 136731,
+  "taskDuration": 5.831,
+  "scriptDuration": 0.33,
+  "layoutDuration": 0.044,
+  "recalcStyleDuration": 0.009,
+  "layoutCount": 4,
+  "recalcStyleCount": 8,
+  "nodes": 416,
+  "jsHeapUsedSizeMB": 1.28,
+  "navDomContentLoadedMs": 681.8,
+  "navLoadMs": 682,
+  "topResources": [
+    {
+      "name": "http://abdulrehmans-macbook-pro.local:3000/api/mappings/scenes/2/masks/63822da8cf15459dbfe91bfe0ad7344b/file",
+      "initiatorType": "img",
+      "duration": 1043.5999999996275,
+      "transferSize": 5608,
+      "encodedBodySize": 5308
+    },
+    {
+      "name": "http://abdulrehmans-macbook-pro.local:3000/api/mappings/scenes/2/masks/f9a97c665497436396927443af9698b4/file",
+      "initiatorType": "img",
+      "duration": 1037.7000000001863,
+      "transferSize": 10264,
+      "encodedBodySize": 9964
+    },
+    {
+      "name": "http://abdulrehmans-macbook-pro.local:3000/api/mappings/scenes/2/masks/dbf8f74156594d43afb2c5c260c38c0a/file",
+      "initiatorType": "img",
+      "duration": 1037,
+      "transferSize": 6240,
+      "encodedBodySize": 5940
+    },
+    {
+      "name": "http://abdulrehmans-macbook-pro.local:3000/api/mappings/scenes/2/masks/2320a31a86dd4ab3a68dace248f9ba66/file",
+      "initiatorType": "img",
+      "duration": 1035.3999999994412,
+      "transferSize": 5961,
+      "encodedBodySize": 5661
+    },
+    {
+      "name": "http://abdulrehmans-macbook-pro.local:3000/api/mappings/scenes/2/masks/66643d8570474020bbac7c5e569176db/file",
+      "initiatorType": "img",
+      "duration": 984.2000000001863,
+      "transferSize": 3840,
+      "encodedBodySize": 3540
+    },
+    {
+      "name": "http://abdulrehmans-macbook-pro.local:3000/api/mappings/scenes/2/masks/a40109ade6b140b0af14e6fe81f2a57b/file",
+      "initiatorType": "img",
+      "duration": 696.9000000003725,
+      "transferSize": 2758,
+      "encodedBodySize": 2458
+    },
+    {
+      "name": "http://abdulrehmans-macbook-pro.local:3000/api/mappings/scenes/2/masks/5c06f4fca6bd4c269d874dd106dd9fdf/file",
+      "initiatorType": "img",
+      "duration": 687.4000000003725,
+      "transferSize": 3372,
+      "encodedBodySize": 3072
+    },
+    {
+      "name": "http://abdulrehmans-macbook-pro.local:3000/api/mappings/scenes/2/masks/ad1e67b1750b40d0b794de8109df7995/file",
+      "initiatorType": "img",
+      "duration": 685.7999999998137,
+      "transferSize": 6399,
+      "encodedBodySize": 6099
+    }
+  ]
+}

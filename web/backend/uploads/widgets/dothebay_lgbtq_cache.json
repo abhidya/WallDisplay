@@ -1,0 +1,232 @@
+{
+  "events": [
+    {
+      "dateTimeText": "9:30PM",
+      "eventUrl": "https://dothebay.com/events/2026/3/27/wublic-perks-public-works-tickets",
+      "imageUrl": "https://assets0.dostuffmedia.com/uploads/aws_asset/aws_asset/30749631/e69e44e1-6d34-4869-a543-335be10c589e.jpg",
+      "startDate": "2026-03-27T21:30-0700",
+      "summary": "ELECTROLUXX Presents: All Night Dance Party",
+      "title": "Wublic Werks @ Public Works",
+      "venue": "Public Works"
+    },
+    {
+      "dateTimeText": "1:00PM",
+      "eventUrl": "https://dothebay.com/events/2026/3/27/prop-contingency-management-tickets",
+      "imageUrl": "https://assets0.dostuffmedia.com/uploads/aws_asset/aws_asset/30681632/c4864d38-07ba-4ded-b61c-64de06d289f4.jpg",
+      "startDate": "2026-03-27T13:00-0700",
+      "summary": "",
+      "title": "PROP Contingency Management",
+      "venue": "San Francisco AIDS Foundation"
+    },
+    {
+      "dateTimeText": "3:00PM",
+      "eventUrl": "https://dothebay.com/events/2026/3/27/prop-for-all-contingency-management-tickets",
+      "imageUrl": "https://assets0.dostuffmedia.com/uploads/aws_asset/aws_asset/30681597/da77eeef-fd7b-4baf-9e52-c9f8f92745a8.jpg",
+      "startDate": "2026-03-27T15:00-0700",
+      "summary": "",
+      "title": "PROP for All \u2013 Contingency Management",
+      "venue": "San Francisco AIDS Foundation"
+    },
+    {
+      "dateTimeText": "10:00AM",
+      "eventUrl": "https://dothebay.com/events/2026/3/28/community-coffee-social-elizabeth-taylor-50-plus-network-tickets",
+      "imageUrl": "https://cloudinary-assets.dostuffmedia.com/res/dostuff-media/image/upload/metro-bkg_1-18/1481123129.jpg",
+      "startDate": "2026-03-28T10:00-0700",
+      "summary": "",
+      "title": "Community Coffee Social (Elizabeth Taylor 50-Plus Network)",
+      "venue": "San Francisco AIDS Foundation"
+    },
+    {
+      "dateTimeText": "2:00PM (doors)",
+      "eventUrl": "https://dothebay.com/events/2026/3/29/never-too-much-the-latin-hip-hop-and-r-b-day-party-tickets",
+      "imageUrl": "https://assets0.dostuffmedia.com/uploads/aws_asset/aws_asset/29654098/89207fa1-3e07-458e-8e3f-d273565dcc04.jpg",
+      "startDate": "2026-03-29T14:00-0700",
+      "summary": "BOSS IDEA HOUSE PRESENTS",
+      "title": "Never Too Much: The Latin, Hip-Hop and R&B Day Party",
+      "venue": "The Cafe"
+    },
+    {
+      "dateTimeText": "12:00PM",
+      "eventUrl": "https://dothebay.com/events/2026/3/29/tgi-intergenerational-brunch-tickets",
+      "imageUrl": "https://assets0.dostuffmedia.com/uploads/aws_asset/aws_asset/30681590/c729cd06-9d00-4b8b-9fa9-cbcfecd7c02f.jpg",
+      "startDate": "2026-03-29T12:00-0700",
+      "summary": "",
+      "title": "TGI Intergenerational Brunch",
+      "venue": "San Francisco AIDS Foundation"
+    },
+    {
+      "dateTimeText": "2:30PM",
+      "eventUrl": "https://dothebay.com/events/2026/3/30/express-yourself-support-group-tickets",
+      "imageUrl": "https://assets0.dostuffmedia.com/uploads/aws_asset/aws_asset/30020725/714703cf-ca2c-4bb2-8830-558ba5ce07e7.jpg",
+      "startDate": "2026-03-30T14:30-0700",
+      "summary": "",
+      "title": "Express Yourself \u2013 Support Group",
+      "venue": "San Francisco AIDS Foundation"
+    },
+    {
+      "dateTimeText": "6:00PM",
+      "eventUrl": "https://dothebay.com/events/2026/3/30/harm-reduction-skills-group-online-tickets",
+      "imageUrl": "https://cloudinary-assets.dostuffmedia.com/res/dostuff-media/image/upload/metro-bkg_1-18/1481123129.jpg",
+      "startDate": "2026-03-30T18:00-0700",
+      "summary": "",
+      "title": "Harm Reduction Skills Group (Online)",
+      "venue": "San Francisco AIDS Foundation"
+    },
+    {
+      "dateTimeText": "7:00PM",
+      "eventUrl": "https://dothebay.com/events/weekly/tue/musical-bingo-tickets",
+      "imageUrl": "https://assets0.dostuffmedia.com/uploads/aws_asset/aws_asset/30062274/f26644d2-b164-4deb-8019-6133f420dfdf.jpg",
+      "startDate": "2026-01-27T19:00-0800",
+      "summary": "Jacob Solbux",
+      "title": "Musical Bingo",
+      "venue": "Townhouse Cocktail Lounge"
+    },
+    {
+      "dateTimeText": "2:30PM",
+      "eventUrl": "https://dothebay.com/events/2026/3/31/off-mute-support-group-tickets",
+      "imageUrl": "https://assets0.dostuffmedia.com/uploads/aws_asset/aws_asset/30020729/9b157950-4e82-457d-999d-16331b123d3b.png",
+      "startDate": "2026-03-31T14:30-0700",
+      "summary": "",
+      "title": "Off Mute \u2013 Support Group",
+      "venue": "San Francisco AIDS Foundation"
+    },
+    {
+      "dateTimeText": "6:00PM",
+      "eventUrl": "https://dothebay.com/events/2026/3/31/emotions-mindfulness-support-group-online-tickets",
+      "imageUrl": "https://assets0.dostuffmedia.com/uploads/aws_asset/aws_asset/30020734/06f82c6b-2bdf-4e0a-9ec1-f2820308c423.png",
+      "startDate": "2026-03-31T18:00-0700",
+      "summary": "",
+      "title": "Emotions & Mindfulness \u2013 Support Group (Online)",
+      "venue": "San Francisco AIDS Foundation"
+    },
+    {
+      "dateTimeText": "7:00PM",
+      "eventUrl": "https://dothebay.com/events/2026/4/1/the-drillmaster-staged-reading-tickets",
+      "imageUrl": "https://assets0.dostuffmedia.com/uploads/aws_asset/aws_asset/30897092/4c987255-eedd-4ae6-8b5e-eed105ddf8c8.jpg",
+      "startDate": "2026-04-01T19:00-0700",
+      "summary": "",
+      "title": "The Drillmaster Staged Reading",
+      "venue": "SF Eagle"
+    },
+    {
+      "dateTimeText": "1:00PM",
+      "eventUrl": "https://dothebay.com/events/2026/4/1/prop-contingency-management-tickets",
+      "imageUrl": "https://assets0.dostuffmedia.com/uploads/aws_asset/aws_asset/30681633/a23052ea-55f0-4c2f-94e2-500afbcb7def.jpg",
+      "startDate": "2026-04-01T13:00-0700",
+      "summary": "",
+      "title": "PROP Contingency Management",
+      "venue": "San Francisco AIDS Foundation"
+    },
+    {
+      "dateTimeText": "3:00PM",
+      "eventUrl": "https://dothebay.com/events/2026/4/1/prop-for-all-contingency-management-tickets",
+      "imageUrl": "https://assets0.dostuffmedia.com/uploads/aws_asset/aws_asset/30681644/4da4ed12-2cac-4f82-8d13-5b7c0073cfaa.jpg",
+      "startDate": "2026-04-01T15:00-0700",
+      "summary": "",
+      "title": "PROP for All \u2013 Contingency Management",
+      "venue": "San Francisco AIDS Foundation"
+    },
+    {
+      "dateTimeText": "1:00PM",
+      "eventUrl": "https://dothebay.com/events/2026/4/1/translife-galaxy-mental-health-series-tickets",
+      "imageUrl": "https://assets0.dostuffmedia.com/uploads/aws_asset/aws_asset/30681652/ebf42887-c56f-4e51-942a-b7f5201de99f.jpg",
+      "startDate": "2026-04-01T13:00-0700",
+      "summary": "",
+      "title": "TransLife Galaxy Mental Health Series",
+      "venue": "San Francisco AIDS Foundation"
+    },
+    {
+      "dateTimeText": "3:00PM",
+      "eventUrl": "https://dothebay.com/events/2026/4/2/el-grupo-de-apoyo-latino-tickets",
+      "imageUrl": "https://assets0.dostuffmedia.com/uploads/aws_asset/aws_asset/29187695/335d8725-6575-42ba-9774-859f0f2c7fc4.jpg",
+      "startDate": "2026-04-02T15:00-0700",
+      "summary": "",
+      "title": "El Grupo de Apoyo Latino",
+      "venue": "San Francisco AIDS Foundation"
+    },
+    {
+      "dateTimeText": "1:00PM",
+      "eventUrl": "https://dothebay.com/events/2026/4/3/prop-contingency-management-tickets",
+      "imageUrl": "https://assets0.dostuffmedia.com/uploads/aws_asset/aws_asset/30681666/560fecbf-5177-460e-ae09-f6bfb32037fa.jpg",
+      "startDate": "2026-04-03T13:00-0700",
+      "summary": "",
+      "title": "PROP Contingency Management",
+      "venue": "San Francisco AIDS Foundation"
+    },
+    {
+      "dateTimeText": "3:00PM",
+      "eventUrl": "https://dothebay.com/events/2026/4/3/prop-for-all-contingency-management-tickets",
+      "imageUrl": "https://assets0.dostuffmedia.com/uploads/aws_asset/aws_asset/30681681/455b219b-dbf2-4c0e-87dd-f6b9e5f3bbc1.jpg",
+      "startDate": "2026-04-03T15:00-0700",
+      "summary": "",
+      "title": "PROP for All \u2013 Contingency Management",
+      "venue": "San Francisco AIDS Foundation"
+    },
+    {
+      "dateTimeText": "10:00AM",
+      "eventUrl": "https://dothebay.com/events/2026/4/4/community-coffee-social-elizabeth-taylor-50-plus-network-tickets",
+      "imageUrl": "https://cloudinary-assets.dostuffmedia.com/res/dostuff-media/image/upload/metro-bkg_1-18/1481123129.jpg",
+      "startDate": "2026-04-04T10:00-0700",
+      "summary": "",
+      "title": "Community Coffee Social (Elizabeth Taylor 50-Plus Network)",
+      "venue": "San Francisco AIDS Foundation"
+    },
+    {
+      "dateTimeText": "3:00PM",
+      "eventUrl": "https://dothebay.com/events/2026/4/6/prop-for-all-contingency-management-tickets",
+      "imageUrl": "https://assets0.dostuffmedia.com/uploads/aws_asset/aws_asset/30681635/9b324e2b-6586-457a-b7e2-6906388f685a.jpg",
+      "startDate": "2026-04-06T15:00-0700",
+      "summary": "",
+      "title": "PROP for All \u2013 Contingency Management",
+      "venue": "San Francisco AIDS Foundation"
+    },
+    {
+      "dateTimeText": "1:00PM",
+      "eventUrl": "https://dothebay.com/events/2026/4/6/prop-contingency-management-tickets",
+      "imageUrl": "https://assets0.dostuffmedia.com/uploads/aws_asset/aws_asset/30681669/38bdfbcf-7a55-485c-a291-9ab4cc9a6b5b.jpg",
+      "startDate": "2026-04-06T13:00-0700",
+      "summary": "",
+      "title": "PROP Contingency Management",
+      "venue": "San Francisco AIDS Foundation"
+    },
+    {
+      "dateTimeText": "3:00PM",
+      "eventUrl": "https://dothebay.com/events/2026/4/7/grupo-de-asistencia-legal-del-programa-latino-tickets",
+      "imageUrl": "https://cloudinary-assets.dostuffmedia.com/res/dostuff-media/image/upload/metro-bkg_1-18/1481123129.jpg",
+      "startDate": "2026-04-07T15:00-0700",
+      "summary": "",
+      "title": "Grupo de Asistencia Legal del Programa Latino",
+      "venue": "San Francisco AIDS Foundation"
+    },
+    {
+      "dateTimeText": "3:00PM",
+      "eventUrl": "https://dothebay.com/events/2026/4/7/grupos-de-educacion-sobre-salud-del-programa-latino-tickets",
+      "imageUrl": "https://cloudinary-assets.dostuffmedia.com/res/dostuff-media/image/upload/metro-bkg_1-18/1481123129.jpg",
+      "startDate": "2026-04-07T15:00-0700",
+      "summary": "",
+      "title": "Grupos de Educaci\u00f3n sobre Salud del Programa Latino",
+      "venue": "San Francisco AIDS Foundation"
+    },
+    {
+      "dateTimeText": "6:00PM",
+      "eventUrl": "https://dothebay.com/events/2026/4/8/50-plus-wednesday-night-virtual-check-in-members-only-elizabeth-taylor-50-plus-network-tickets",
+      "imageUrl": "https://cloudinary-assets.dostuffmedia.com/res/dostuff-media/image/upload/metro-bkg_1-18/1481123129.jpg",
+      "startDate": "2026-04-08T18:00-0700",
+      "summary": "",
+      "title": "50-Plus Wednesday Night Virtual Check-in (Members Only) \u2013 Elizabeth Taylor 50-Plus Network",
+      "venue": "San Francisco AIDS Foundation"
+    },
+    {
+      "dateTimeText": "3:00PM",
+      "eventUrl": "https://dothebay.com/events/2026/4/9/el-grupo-de-apoyo-latino-tickets",
+      "imageUrl": "https://assets0.dostuffmedia.com/uploads/aws_asset/aws_asset/29223643/504e80e4-55dd-4167-bb55-95d1ac7e56c3.jpg",
+      "startDate": "2026-04-09T15:00-0700",
+      "summary": "",
+      "title": "El Grupo de Apoyo Latino",
+      "venue": "San Francisco AIDS Foundation"
+    }
+  ],
+  "fetchedAt": "2026-03-27T19:58:04.314929+00:00",
+  "source": "https://dothebay.com/events/lgbtq/today",
+  "stale": false
+}
