@@ -109,7 +109,6 @@ class OverlayCastStartRequest(BaseModel):
     quality: int = 50
     frame_rate: int = 20
     stream_port: Optional[int] = None
-    capture_display_index: Optional[int] = None
 
 
 class OverlayCastSessionResponse(BaseModel):

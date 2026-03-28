@@ -215,7 +215,7 @@ async def start_overlay_cast(
     cast_request: OverlayCastStartRequest,
     request: Request,
 ):
-    """Launch a visible overlay window, capture it via macOS AVFoundation, and relay MPEG-TS over DLNA."""
+    """Launch a headless overlay capture session and relay MPEG-TS over DLNA."""
     try:
         service = get_overlay_cast_service()
         overlay_base_url = cast_request.overlay_base_url or str(request.base_url).rstrip("/")
@@ -231,7 +231,6 @@ async def start_overlay_cast(
             quality=cast_request.quality,
             frame_rate=cast_request.frame_rate,
             stream_port=cast_request.stream_port,
-            capture_display_index=cast_request.capture_display_index,
         )
         return OverlayCastSessionResponse(**session)
     except RuntimeError as exc:
