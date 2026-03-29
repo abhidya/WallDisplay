@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+import html
 import json
 import math
 import os
@@ -173,6 +174,8 @@ class ServiceConfigPreset:
     ffmpeg_input_mode: str
     stdin_flush_mode: str
     muxrate_policy: str
+    browser_channel: Optional[str]
+    gpu_mode: str
 
 
 SERVICE_CONFIG_PRESETS = {
@@ -193,29 +196,30 @@ SERVICE_CONFIG_PRESETS = {
         ffmpeg_input_mode="image2pipe",
         stdin_flush_mode="every",
         muxrate_policy="fixed_4000k",
+        browser_channel=None,
+        gpu_mode="default",
     ),
     "current": ServiceConfigPreset(
         name="current",
         viewport_width=1280,
         viewport_height=720,
-        capture_width=854,
-        capture_height=480,
-        frame_rate=12,
-        quality=50,
+        capture_width=640,
+        capture_height=360,
+        frame_rate=6,
+        quality=28,
         every_nth_frame=1,
         relay_mode="fanout",
         chromium_args=[
             "--no-sandbox",
-            "--use-angle=metal",
-            "--enable-gpu-rasterization",
-            "--enable-zero-copy",
         ],
         include_default_chromium_args=False,
         vt_preset="current",
-        bitrate_k=2000,
+        bitrate_k=1000,
         ffmpeg_input_mode="mjpeg",
-        stdin_flush_mode="every",
-        muxrate_policy="fixed_4000k",
+        stdin_flush_mode="none",
+        muxrate_policy="none",
+        browser_channel="chrome",
+        gpu_mode="chrome-hardware",
     ),
 }
 
@@ -241,6 +245,7 @@ class FrameSnapshot:
 class FrameStore:
     latest: Optional[FrameSnapshot] = None
     previous: Optional[FrameSnapshot] = None
+    frames: queue.Queue[FrameSnapshot] = field(default_factory=lambda: queue.Queue(maxsize=2))
     lock: threading.Lock = field(default_factory=threading.Lock)
     event: threading.Event = field(default_factory=threading.Event)
 
@@ -248,11 +253,24 @@ class FrameStore:
         with self.lock:
             self.previous = self.latest
             self.latest = frame
+            while True:
+                try:
+                    self.frames.put_nowait(frame)
+                    break
+                except queue.Full:
+                    with suppress(queue.Empty):
+                        self.frames.get_nowait()
             self.event.set()
 
     def snapshot(self) -> tuple[Optional[FrameSnapshot], Optional[FrameSnapshot]]:
         with self.lock:
             return self.latest, self.previous
+
+    def pop(self) -> Optional[FrameSnapshot]:
+        try:
+            return self.frames.get_nowait()
+        except queue.Empty:
+            return None
 
 
 @dataclass
@@ -406,6 +424,14 @@ def chromium_args_for_mode(gpu_mode: str, extra_args: list[str], include_default
         args += ["--disable-gpu", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"]
     elif gpu_mode == "webgpu":
         args += ["--enable-unsafe-webgpu"]
+    elif gpu_mode == "chrome-hardware":
+        args += ["--enable-gpu", "--ignore-gpu-blocklist"]
+        if sys.platform == "darwin":
+            args += ["--use-angle=metal"]
+        elif sys.platform.startswith("linux"):
+            args += ["--use-angle=egl", "--use-gl=egl"]
+        else:
+            args += ["--use-angle=default"]
     args.extend(extra_args)
     return args
 
@@ -519,6 +545,8 @@ def build_ffmpeg_cmd(
             encoder_opts = ["-realtime", "1"]
     else:
         encoder_opts = ["-preset", "ultrafast"]
+        if args.low_latency_ffmpeg:
+            encoder_opts += ["-tune", "zerolatency"]
     cmd = [
         "ffmpeg",
         "-y",
@@ -546,8 +574,10 @@ def build_ffmpeg_cmd(
                 "-framerate", str(profile.fps),
                 "-vcodec", "mjpeg",
                 "-i", "-",
-            ]
+        ]
     cmd += ["-c:v", encoder, *encoder_opts]
+    if args.low_latency_ffmpeg:
+        cmd += ["-fflags", "nobuffer", "-flags", "low_delay"]
     cmd += build_ffmpeg_output_args(profile, args, write_to_stdout)
     return cmd
 
@@ -845,14 +875,17 @@ class SourceAdapter:
 
         try:
             async with async_playwright() as playwright:
-                browser = await playwright.chromium.launch(
-                    headless=True,
-                    args=chromium_args_for_mode(
+                launch_kwargs: dict[str, Any] = {
+                    "headless": not self.args.headed,
+                    "args": chromium_args_for_mode(
                         self.args.gpu_mode,
                         self.args.chromium_arg,
                         include_default_args=not self.args.disable_default_chromium_args,
                     ),
-                )
+                }
+                if self.args.browser_channel:
+                    launch_kwargs["channel"] = self.args.browser_channel
+                browser = await playwright.chromium.launch(**launch_kwargs)
                 page = await browser.new_page(
                     viewport={"width": self.profile.width, "height": self.profile.height}
                 )
@@ -911,6 +944,16 @@ class OverlayCaptureRunner:
         self.progress_thread: Optional[threading.Thread] = None
         self.scheduler_thread: Optional[threading.Thread] = None
         self.stdout_drain_thread: Optional[threading.Thread] = None
+        self.relay_server: Optional[ReusableThreadingHTTPServer] = None
+        self.relay_thread: Optional[threading.Thread] = None
+        self.relay_lock = threading.Lock()
+        self.fanout: Optional[FanoutRelay] = None
+        self.stream_port: Optional[int] = None
+        self.stream_url: Optional[str] = None
+        self.cast_set_uri_ok = False
+        self.cast_play_ok = False
+        self.cast_stop_ok = False
+        self.cast_error: Optional[str] = None
         self.source = SourceAdapter(args, self.profile, self.metrics, self.frame_store)
         self.rate_lock = threading.Lock()
         self.current_scheduler_fps = float(self.args.encode_fps or self.profile.fps)
@@ -971,25 +1014,44 @@ class OverlayCaptureRunner:
 
     def start(self) -> None:
         self.started_at = now()
+        write_to_stdout = bool(self.args.cast_control_url)
+        if write_to_stdout:
+            self.stream_port = self.args.stream_port or reserve_free_port()
+            self.stream_url = f"http://{local_ip()}:{self.stream_port}/live.ts"
         self.proc = subprocess.Popen(
             build_ffmpeg_cmd(
                 self.profile,
                 self.args,
                 self.args.encoder,
                 "synthetic",
-                write_to_stdout=False,
+                write_to_stdout=write_to_stdout,
                 vt_preset=self.args.vt_preset,
             ),
             stdin=subprocess.PIPE,
-            stdout=subprocess.DEVNULL,
+            stdout=subprocess.PIPE if write_to_stdout else subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             bufsize=0,
         )
         self.progress_thread = threading.Thread(target=self._pump_ffmpeg_logs, daemon=True)
         self.progress_thread.start()
+        if write_to_stdout:
+            self._start_relay()
         self.source.start()
         self.scheduler_thread = threading.Thread(target=self._scheduler_loop, daemon=True)
         self.scheduler_thread.start()
+
+    def _start_relay(self) -> None:
+        assert self.proc is not None and self.stream_port is not None
+        handler = SharedReadRelayHandler if self.args.relay_mode == "shared-read" else FanoutRelayHandler
+        self.relay_server = ReusableThreadingHTTPServer(("", self.stream_port), handler)
+        self.relay_server.runner = self
+        if self.args.relay_mode == "shared-read":
+            self.relay_server.ffmpeg_proc = self.proc
+        else:
+            self.fanout = FanoutRelay(self.proc, self.metrics, self.stop_event, self.args.fanout_queue_chunks)
+            self.relay_server.fanout_relay = self.fanout
+        self.relay_thread = threading.Thread(target=self.relay_server.serve_forever, daemon=True)
+        self.relay_thread.start()
 
     def _pump_ffmpeg_logs(self) -> None:
         assert self.proc is not None and self.proc.stderr is not None
@@ -1042,6 +1104,8 @@ class OverlayCaptureRunner:
         interpolation_flip = False
         burst_remaining = 0
         burst_anchor: Optional[FrameSnapshot] = None
+        latest_frame: Optional[FrameSnapshot] = None
+        previous_frame: Optional[FrameSnapshot] = None
 
         while not self.stop_event.is_set():
             rate = self._scheduler_rate()
@@ -1053,7 +1117,13 @@ class OverlayCaptureRunner:
             else:
                 next_tick = now()
 
-            latest, previous = self.frame_store.snapshot()
+            next_frame = self.frame_store.pop()
+            if next_frame is not None:
+                previous_frame = latest_frame
+                latest_frame = next_frame
+
+            latest = latest_frame
+            previous = previous_frame
             chosen = latest
             repeated = False
             submit_rate = rate
@@ -1171,12 +1241,101 @@ class OverlayCaptureRunner:
         await self.source.stop()
         self.frame_store.event.set()
         self.ended_at = now()
+        if self.args.cast_control_url and self.args.cast_stop_on_exit:
+            await self._send_stop()
+        if self.fanout is not None:
+            self.fanout.close()
+        if self.relay_server is not None:
+            with suppress(Exception):
+                self.relay_server.shutdown()
+                self.relay_server.server_close()
         if self.proc is not None:
             with suppress(Exception):
                 if self.proc.stdin is not None:
                     self.proc.stdin.close()
             with suppress(Exception):
                 self.proc.kill()
+
+    async def start_cast(self) -> None:
+        if not self.args.cast_control_url or not self.stream_url:
+            return
+        metadata = (
+            '<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" '
+            'xmlns:dc="http://purl.org/dc/elements/1.1/" '
+            'xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/">'
+            f'<item id="0" parentID="-1" restricted="1"><dc:title>{html.escape(self.args.cast_friendly_name)}</dc:title>'
+            '<upnp:class>object.item.videoItem</upnp:class>'
+            f'<res protocolInfo="http-get:*:video/mpeg:DLNA.ORG_PN=MPEG_TS_SD_EU_ISO">{self.stream_url}</res>'
+            "</item></DIDL-Lite>"
+        )
+        set_uri_body = (
+            '<?xml version="1.0" encoding="utf-8"?>'
+            '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">'
+            '<s:Body><u:SetAVTransportURI xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">'
+            "<InstanceID>0</InstanceID>"
+            f"<CurrentURI>{self.stream_url}</CurrentURI>"
+            f"<CurrentURIMetaData>{html.escape(metadata)}</CurrentURIMetaData>"
+            "</u:SetAVTransportURI></s:Body></s:Envelope>"
+        )
+        play_body = (
+            '<?xml version="1.0" encoding="utf-8"?>'
+            '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">'
+            '<s:Body><u:Play xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">'
+            "<InstanceID>0</InstanceID><Speed>1</Speed>"
+            "</u:Play></s:Body></s:Envelope>"
+        )
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    self.args.cast_control_url,
+                    data=set_uri_body,
+                    headers={
+                        "Content-Type": "text/xml",
+                        "SOAPACTION": '"urn:schemas-upnp-org:service:AVTransport:1#SetAVTransportURI"',
+                    },
+                ) as response:
+                    self.cast_set_uri_ok = response.status == 200
+                    if response.status != 200:
+                        raise RuntimeError(f"SetAVTransportURI failed with {response.status}")
+                await asyncio.sleep(self.args.cast_play_delay_seconds)
+                async with session.post(
+                    self.args.cast_control_url,
+                    data=play_body,
+                    headers={
+                        "Content-Type": "text/xml",
+                        "SOAPACTION": '"urn:schemas-upnp-org:service:AVTransport:1#Play"',
+                    },
+                ) as response:
+                    self.cast_play_ok = response.status == 200
+                    if response.status != 200:
+                        raise RuntimeError(f"Play failed with {response.status}")
+        except Exception as exc:
+            self.cast_error = f"{type(exc).__name__}:{exc}"
+            raise
+
+    async def _send_stop(self) -> None:
+        if not self.args.cast_control_url:
+            return
+        stop_body = (
+            '<?xml version="1.0" encoding="utf-8"?>'
+            '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">'
+            '<s:Body><u:Stop xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">'
+            "<InstanceID>0</InstanceID>"
+            "</u:Stop></s:Body></s:Envelope>"
+        )
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    self.args.cast_control_url,
+                    data=stop_body,
+                    headers={
+                        "Content-Type": "text/xml",
+                        "SOAPACTION": '"urn:schemas-upnp-org:service:AVTransport:1#Stop"',
+                    },
+                ) as response:
+                    self.cast_stop_ok = response.status == 200
+        except Exception as exc:
+            self.cast_error = f"{type(exc).__name__}:{exc}"
 
     def result(self) -> dict[str, Any]:
         seconds = self.args.seconds
@@ -1190,6 +1349,8 @@ class OverlayCaptureRunner:
             "service_config_preset": self.args.service_config_preset,
             "source_mode": self.args.source_mode,
             "gpu_mode": self.args.gpu_mode,
+            "browser_channel": self.args.browser_channel,
+            "headed": self.args.headed,
             "ffmpeg_mode": self.args.ffmpeg_mode,
             "target_bitrate_k": self.profile.bitrate_k,
             "every_nth_frame": self.args.every_nth_frame,
@@ -1220,6 +1381,14 @@ class OverlayCaptureRunner:
             "ffmpeg_bitrate_kbps": self.metrics.ffmpeg_bitrate_kbps,
             "ffmpeg_dup_frames": self.metrics.ffmpeg_dup_frames,
             "ffmpeg_drop_frames": self.metrics.ffmpeg_drop_frames,
+            "stream_url": self.stream_url,
+            "relay_peak_clients": self.metrics.relay_peak_clients,
+            "relay_bytes_out": self.metrics.relay_bytes_out,
+            "cast_control_url": self.args.cast_control_url,
+            "cast_set_uri_ok": self.cast_set_uri_ok,
+            "cast_play_ok": self.cast_play_ok,
+            "cast_stop_ok": self.cast_stop_ok,
+            "cast_error": self.cast_error,
             "scheduler_rate_avg_fps": round(Metrics._avg(self.metrics.scheduler_rate_samples), 3),
             "scheduler_rate_stddev_fps": round(Metrics._stddev(self.metrics.scheduler_rate_samples), 3),
             "stability_score": self.metrics.stability_score(
@@ -1231,6 +1400,9 @@ class OverlayCaptureRunner:
             "interpolated_submits": self.metrics.interpolated_submits,
             "adaptive_rate_changes": self.metrics.adaptive_rate_changes,
             "capture_error": self.source.capture_error,
+            "webgl_readpixels_warning_count": sum(
+                1 for item in self.source.browser_console if "ReadPixels" in item.get("text", "")
+            ),
             "browser_console_tail": self.source.browser_console[-10:],
             "page_errors": self.source.page_errors[-10:],
         }
@@ -1833,8 +2005,15 @@ async def run_overlay_capture_benchmark(args: argparse.Namespace) -> dict[str, A
     for strategy in strategies:
         runner = OverlayCaptureRunner(args, strategy)
         runner.start()
-        await asyncio.sleep(args.seconds)
-        await runner.stop()
+        try:
+            if args.cast_control_url:
+                await asyncio.sleep(args.prime_seconds)
+                await runner.start_cast()
+                await asyncio.sleep(max(0.0, args.seconds - args.prime_seconds))
+            else:
+                await asyncio.sleep(args.seconds)
+        finally:
+            await runner.stop()
         results.append(runner.result())
         await asyncio.sleep(0.5)
     return {
@@ -1869,6 +2048,9 @@ def apply_service_config_preset(args: argparse.Namespace, preset_name: str) -> a
     next_args.ffmpeg_input_mode = preset.ffmpeg_input_mode
     next_args.stdin_flush_mode = preset.stdin_flush_mode
     next_args.muxrate_policy = preset.muxrate_policy
+    next_args.browser_channel = preset.browser_channel
+    next_args.gpu_mode = preset.gpu_mode
+    next_args.low_latency_ffmpeg = True
     return next_args
 
 
@@ -1956,6 +2138,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--prime-seconds", type=float, default=1.0)
     parser.add_argument("--clients", type=int, default=2)
     parser.add_argument("--stream-port", type=int)
+    parser.add_argument("--cast-control-url")
+    parser.add_argument("--cast-friendly-name", default="WallMapperHarness")
+    parser.add_argument("--cast-play-delay-seconds", type=float, default=3.0)
+    parser.add_argument("--cast-stop-on-exit", action="store_true")
+    parser.add_argument("--cast-to-sideprojector", action="store_true")
     parser.add_argument("--encoder", choices=["auto", "libx264", "h264_videotoolbox"], default="libx264")
     parser.add_argument("--ffmpeg-mode", choices=["service", "service_low_latency", "tuned"], default="tuned")
     parser.add_argument("--source-mode", choices=["overlay", "synthetic_sparse"], default="overlay")
@@ -1993,6 +2180,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--quality", type=int)
     parser.add_argument("--video-bitrate-k", type=int)
     parser.add_argument("--muxrate-policy", choices=["auto", "fixed_4000k", "bitrate", "bitrate_x1_5", "none"], default="auto")
+    parser.add_argument("--low-latency-ffmpeg", action="store_true")
     parser.add_argument("--gop-multiplier", type=float)
     parser.add_argument("--gop-frames", type=int)
     parser.add_argument("--ffmpeg-input-mode", choices=["image2pipe", "mjpeg"], default="image2pipe")
@@ -2001,9 +2189,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--stdin-flush-every", type=int, default=5)
     parser.add_argument("--every-nth-frame", type=int, default=1)
     parser.add_argument("--screencast-quality", type=int, default=24)
+    parser.add_argument("--browser-channel", choices=["chrome", "msedge"])
+    parser.add_argument("--headed", action="store_true")
     parser.add_argument(
         "--gpu-mode",
-        choices=["default", "disable-gpu", "swiftshader", "webgpu"],
+        choices=["default", "disable-gpu", "swiftshader", "webgpu", "chrome-hardware"],
         default="default",
     )
     parser.add_argument("--chromium-arg", action="append", default=[])
@@ -2013,7 +2203,50 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--vt-preset", choices=["auto", "legacy", "current"], default="auto")
     parser.add_argument("--webrtc-capture-fps", type=float, default=15.0)
     parser.add_argument("--webrtc-scenario", action="append", choices=WEBRTC_SCENARIOS)
-    return parser.parse_args()
+    argv = sys.argv[1:]
+    args = parser.parse_args(argv)
+    option_to_dest: dict[str, str] = {}
+    for action in parser._actions:
+        for option in action.option_strings:
+            option_to_dest[option] = action.dest
+    explicitly_set_dests = {
+        option_to_dest[token.split("=", 1)[0]]
+        for token in argv
+        if token.startswith("--") and token.split("=", 1)[0] in option_to_dest
+    }
+    if args.service_config_preset != "custom":
+        original_values = {dest: getattr(args, dest) for dest in explicitly_set_dests}
+        args = apply_service_config_preset(args, args.service_config_preset)
+        for dest, value in original_values.items():
+            setattr(args, dest, value)
+    if args.cast_to_sideprojector:
+        args.cast_control_url = args.cast_control_url or "http://10.0.0.122:49595/upnp/control/rendertransport1"
+        args.cast_friendly_name = "SideProjectorHarness"
+        if "capture_width" not in explicitly_set_dests and args.capture_width is None:
+            args.capture_width = 640
+        if "capture_height" not in explicitly_set_dests and args.capture_height is None:
+            args.capture_height = 360
+        if "screencast_quality" not in explicitly_set_dests and args.screencast_quality == 24:
+            args.screencast_quality = 28
+        if "stream_fps" not in explicitly_set_dests and args.stream_fps is None:
+            args.stream_fps = 8
+        if "encode_fps" not in explicitly_set_dests and args.encode_fps == 8.0:
+            args.encode_fps = 8.0
+        if "video_bitrate_k" not in explicitly_set_dests and args.video_bitrate_k is None:
+            args.video_bitrate_k = 1200
+        if "stdin_flush_mode" not in explicitly_set_dests and args.stdin_flush_mode == "every":
+            args.stdin_flush_mode = "none"
+        if "muxrate_policy" not in explicitly_set_dests and args.muxrate_policy == "auto":
+            args.muxrate_policy = "none"
+        if "ffmpeg_input_mode" not in explicitly_set_dests and args.ffmpeg_input_mode == "image2pipe":
+            args.ffmpeg_input_mode = "mjpeg"
+        if "browser_channel" not in explicitly_set_dests and args.browser_channel is None:
+            args.browser_channel = "chrome"
+        if "gpu_mode" not in explicitly_set_dests and args.gpu_mode == "default":
+            args.gpu_mode = "chrome-hardware"
+        if "low_latency_ffmpeg" not in explicitly_set_dests:
+            args.low_latency_ffmpeg = True
+    return args
 
 
 async def main() -> int:

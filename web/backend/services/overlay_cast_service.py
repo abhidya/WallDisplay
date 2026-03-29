@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import time
+import shutil
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -232,10 +233,10 @@ class OverlayCastService:
         controls_hidden: bool = True,
         viewport_width: int = 1280,
         viewport_height: int = 720,
-        capture_width: int = 854,
-        capture_height: int = 480,
-        quality: int = 50,
-        frame_rate: int = 12,
+        capture_width: int = 640,
+        capture_height: int = 360,
+        quality: int = 28,
+        frame_rate: int = 6,
         stream_port: Optional[int] = None,
     ) -> dict:
         with self._session_lock:
@@ -333,15 +334,25 @@ class OverlayCastService:
 
             playwright_context = await async_playwright().start()
             self._log_step(session, "browser_launch", "Launching headless Chromium")
-            browser = await playwright_context.chromium.launch(
-                headless=True,
-                args=[
+            launch_kwargs = {
+                "headless": True,
+                "args": [
                     "--no-sandbox",
-                    "--use-angle=metal",
-                    "--enable-gpu-rasterization",
-                    "--enable-zero-copy",
+                    "--enable-gpu",
+                    "--ignore-gpu-blocklist",
+                    "--disable-background-timer-throttling",
+                    "--disable-backgrounding-occluded-windows",
+                    "--disable-renderer-backgrounding",
                 ],
-            )
+            }
+            if sys.platform == "darwin":
+                launch_kwargs["args"].append("--use-angle=metal")
+            elif sys.platform.startswith("linux"):
+                launch_kwargs["args"].extend(["--use-angle=egl", "--use-gl=egl"])
+            chrome_path = shutil.which("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome") or shutil.which("google-chrome")
+            if chrome_path:
+                launch_kwargs["channel"] = "chrome"
+            browser = await playwright_context.chromium.launch(**launch_kwargs)
             self._log_step(session, "page_create", "Opening overlay page")
             page = await browser.new_page(
                 viewport={"width": viewport_width, "height": viewport_height}
@@ -746,7 +757,7 @@ class OverlayCastService:
             encoder,
             *encoder_options,
             "-b:v",
-            "2000k",
+            "1000k",
             "-g",
             str(frame_rate),
             "-keyint_min",
@@ -757,9 +768,6 @@ class OverlayCastService:
             "yuv420p",
             "-f",
             "mpegts",
-            "-muxrate",
-            "4000k",
-            "-pcr_period", "20",  # Forces timing headers every 20ms
             "pipe:1",
         ]
         return encoder, ffmpeg_cmd
