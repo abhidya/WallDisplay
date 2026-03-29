@@ -30,6 +30,9 @@ FFMPEG_SPEED_RE = re.compile(r"speed=\s*([0-9.]+)x")
 FFMPEG_FPS_RE = re.compile(r"fps=\s*([0-9.]+)")
 FFMPEG_BITRATE_RE = re.compile(r"bitrate=\s*([0-9.]+)kbits/s")
 FFMPEG_PROGRESS_KEYS = {"speed", "fps", "bitrate"}
+OVERLAY_STREAM_PATH = "/live.mp4"
+OVERLAY_STREAM_CONTENT_TYPE = "video/mp4"
+OVERLAY_DLNA_PROTOCOL_INFO = "http-get:*:video/mp4:*"
 
 
 class ReusableThreadingHTTPServer(ThreadingHTTPServer):
@@ -90,7 +93,7 @@ class OverlayCastRelayHandler(BaseHTTPRequestHandler):
         logger.debug("Overlay cast relay: " + format, *args)
 
     def do_GET(self):
-        if self.path != "/live.ts":
+        if self.path != OVERLAY_STREAM_PATH:
             self.send_error(404)
             return
 
@@ -100,7 +103,7 @@ class OverlayCastRelayHandler(BaseHTTPRequestHandler):
             return
 
         self.send_response(200)
-        self.send_header("Content-Type", "video/mp2t")
+        self.send_header("Content-Type", OVERLAY_STREAM_CONTENT_TYPE)
         self.send_header("Connection", "keep-alive")
         self.end_headers()
 
@@ -235,8 +238,8 @@ class OverlayCastService:
         viewport_height: int = 720,
         capture_width: int = 640,
         capture_height: int = 360,
-        quality: int = 28,
-        frame_rate: int = 6,
+        quality: int = 22,
+        frame_rate: int = 3,
         stream_port: Optional[int] = None,
     ) -> dict:
         with self._session_lock:
@@ -245,7 +248,7 @@ class OverlayCastService:
                 await self._stop_session(existing_session_id)
 
             relay_port = stream_port or self._reserve_free_port()
-            relay_url = f"http://{self._get_local_ip()}:{relay_port}/live.ts"
+            relay_url = f"http://{self._get_local_ip()}:{relay_port}{OVERLAY_STREAM_PATH}"
             overlay_url = self._build_overlay_url(overlay_base_url, config_id, controls_hidden)
             session_id = str(uuid.uuid4())
             session = OverlayCastSession(
@@ -711,7 +714,7 @@ class OverlayCastService:
 
         try:
             while not session.stop_event.is_set():
-                chunk = ffmpeg_proc.stdout.read(32768)
+                chunk = ffmpeg_proc.stdout.read1(32768)
                 if not chunk:
                     break
                 relay_state.publish(chunk)
@@ -721,25 +724,17 @@ class OverlayCastService:
             relay_state.close()
 
     def _build_ffmpeg_command(self, frame_rate: int) -> tuple[str, list[str]]:
-        encoder = "h264_videotoolbox" if sys.platform == "darwin" else "libx264"
-        encoder_options = (
-            [
-                "-realtime",
-                "1",
-                "-prio_speed",
-                "1",
-                "-power_efficient",
-                "0",
-                "-profile:v",
-                "constrained_baseline",
-                "-coder",
-                "cavlc",
-                "-max_ref_frames",
-                "1",
-            ]
-            if encoder == "h264_videotoolbox"
-            else ["-preset", "ultrafast"]
-        )
+        encoder = "libx264"
+        encoder_options = [
+            "-preset",
+            "ultrafast",
+            "-tune",
+            "zerolatency",
+            "-threads",
+            "0",
+            "-profile:v",
+            "baseline",
+        ]
         ffmpeg_cmd = [
             "ffmpeg",
             "-y",
@@ -757,7 +752,7 @@ class OverlayCastService:
             encoder,
             *encoder_options,
             "-b:v",
-            "1000k",
+            "500k",
             "-g",
             str(frame_rate),
             "-keyint_min",
@@ -766,8 +761,12 @@ class OverlayCastService:
             str(frame_rate),
             "-pix_fmt",
             "yuv420p",
+            "-movflags",
+            "+frag_keyframe+empty_moov+default_base_moof",
+            "-frag_duration",
+            "1000000",
             "-f",
-            "mpegts",
+            "mp4",
             "pipe:1",
         ]
         return encoder, ffmpeg_cmd
@@ -784,7 +783,7 @@ class OverlayCastService:
             'xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/">'
             '<item id="0" parentID="-1" restricted="1"><dc:title>WallMapper</dc:title>'
             '<upnp:class>object.item.videoItem</upnp:class>'
-            f'<res protocolInfo="http-get:*:video/mpeg:DLNA.ORG_PN=MPEG_TS_SD_EU_ISO">{stream_url}</res>'
+            f'<res protocolInfo="{OVERLAY_DLNA_PROTOCOL_INFO}">{stream_url}</res>'
             "</item></DIDL-Lite>"
         )
         escaped_meta = html.escape(meta)
@@ -835,7 +834,7 @@ class OverlayCastService:
             id=str(uuid.uuid4()),
             device=device,
             content_url=stream_url,
-            content_type="video/mpeg",
+            content_type=OVERLAY_STREAM_CONTENT_TYPE,
             metadata={
                 "source": "overlay_cast",
                 "config_id": session.config_id,

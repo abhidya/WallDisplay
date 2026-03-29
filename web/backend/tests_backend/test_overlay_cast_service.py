@@ -44,7 +44,7 @@ def test_latest_frame_overwrites_older_frame():
         device_id="dlna-test-device",
         config_id=1,
         overlay_url="http://localhost/overlay",
-        relay_url="http://localhost/live.ts",
+        relay_url="http://localhost/live.mp4",
         stream_port=5000,
     )
     session.latest_frame = b"frame-1"

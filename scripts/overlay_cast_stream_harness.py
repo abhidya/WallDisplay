@@ -179,6 +179,7 @@ class ServiceConfigPreset:
     decode_mode: str
     frame_store_mode: str
     low_latency_ffmpeg: bool
+    output_container: str
 
 
 SERVICE_CONFIG_PRESETS = {
@@ -204,6 +205,7 @@ SERVICE_CONFIG_PRESETS = {
         decode_mode="inline",
         frame_store_mode="latest",
         low_latency_ffmpeg=False,
+        output_container="mpegts",
     ),
     "current": ServiceConfigPreset(
         name="current",
@@ -229,6 +231,7 @@ SERVICE_CONFIG_PRESETS = {
         decode_mode="worker",
         frame_store_mode="latest",
         low_latency_ffmpeg=False,
+        output_container="mp4",
     ),
 }
 
@@ -474,6 +477,20 @@ def capture_dimensions(args: argparse.Namespace, profile: StreamProfile) -> tupl
 
 def build_ffmpeg_output_args(profile: StreamProfile, args: argparse.Namespace, write_to_stdout: bool) -> list[str]:
     ffmpeg_mode = args.ffmpeg_mode
+    if args.output_container == "mp4":
+        output_target = "pipe:1" if write_to_stdout else "-"
+        gop = int(args_ns_gop(profile, args))
+        output_args = [
+            "-b:v", f"{profile.bitrate_k}k",
+            "-g", str(gop),
+            "-keyint_min", str(gop),
+            "-r", str(profile.fps),
+            "-pix_fmt", "yuv420p",
+            "-movflags", "+frag_keyframe+empty_moov+default_base_moof",
+            "-frag_duration", "1000000",
+            "-f", "mp4",
+        ]
+        return [*output_args, output_target]
     muxrate_policy = args.muxrate_policy
     if muxrate_policy == "fixed_4000k":
         muxrate_k = "4000k"
@@ -557,6 +574,8 @@ def build_ffmpeg_cmd(
             encoder_opts = ["-realtime", "1"]
     else:
         encoder_opts = ["-preset", "ultrafast"]
+        if args.x264_threads is not None:
+            encoder_opts += ["-threads", str(args.x264_threads)]
         if args.low_latency_ffmpeg:
             encoder_opts += ["-tune", "zerolatency"]
     cmd = [
@@ -668,7 +687,7 @@ class SharedReadRelayHandler(BaseHTTPRequestHandler):
         return
 
     def do_GET(self) -> None:
-        if self.path != "/live.ts":
+        if self.path != self.server.runner.stream_path:
             self.send_error(404)
             return
         runner = self.server.runner
@@ -677,7 +696,7 @@ class SharedReadRelayHandler(BaseHTTPRequestHandler):
             runner.metrics.relay_clients += 1
             runner.metrics.relay_peak_clients = max(runner.metrics.relay_peak_clients, runner.metrics.relay_clients)
         self.send_response(200)
-        self.send_header("Content-Type", "video/mp2t")
+        self.send_header("Content-Type", runner.stream_http_content_type)
         self.send_header("Connection", "keep-alive")
         self.end_headers()
         try:
@@ -770,13 +789,13 @@ class FanoutRelayHandler(BaseHTTPRequestHandler):
         return
 
     def do_GET(self) -> None:
-        if self.path != "/live.ts":
+        if self.path != self.server.runner.stream_path:
             self.send_error(404)
             return
         fanout: FanoutRelay = self.server.fanout_relay
         sid, q = fanout.register()
         self.send_response(200)
-        self.send_header("Content-Type", "video/mp2t")
+        self.send_header("Content-Type", self.server.runner.stream_http_content_type)
         self.send_header("Connection", "keep-alive")
         self.end_headers()
         try:
@@ -962,6 +981,9 @@ class OverlayCaptureRunner:
         self.fanout: Optional[FanoutRelay] = None
         self.stream_port: Optional[int] = None
         self.stream_url: Optional[str] = None
+        self.stream_path: str = "/live.ts"
+        self.stream_http_content_type: str = "video/mp2t"
+        self.cast_protocol_info: str = "http-get:*:video/mpeg:DLNA.ORG_PN=MPEG_TS_SD_EU_ISO"
         self.cast_set_uri_ok = False
         self.cast_play_ok = False
         self.cast_stop_ok = False
@@ -1029,7 +1051,11 @@ class OverlayCaptureRunner:
         write_to_stdout = bool(self.args.cast_control_url)
         if write_to_stdout:
             self.stream_port = self.args.stream_port or reserve_free_port()
-            self.stream_url = f"http://{local_ip()}:{self.stream_port}/live.ts"
+            if self.args.output_container == "mp4":
+                self.stream_path = "/live.mp4"
+                self.stream_http_content_type = "video/mp4"
+                self.cast_protocol_info = "http-get:*:video/mp4:*"
+            self.stream_url = f"http://{local_ip()}:{self.stream_port}{self.stream_path}"
         self.proc = subprocess.Popen(
             build_ffmpeg_cmd(
                 self.profile,
@@ -1277,7 +1303,7 @@ class OverlayCaptureRunner:
             'xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/">'
             f'<item id="0" parentID="-1" restricted="1"><dc:title>{html.escape(self.args.cast_friendly_name)}</dc:title>'
             '<upnp:class>object.item.videoItem</upnp:class>'
-            f'<res protocolInfo="http-get:*:video/mpeg:DLNA.ORG_PN=MPEG_TS_SD_EU_ISO">{self.stream_url}</res>'
+            f'<res protocolInfo="{self.cast_protocol_info}">{self.stream_url}</res>'
             "</item></DIDL-Lite>"
         )
         set_uri_body = (
@@ -1364,6 +1390,10 @@ class OverlayCaptureRunner:
             "browser_channel": self.args.browser_channel,
             "headed": self.args.headed,
             "ffmpeg_mode": self.args.ffmpeg_mode,
+            "output_container": self.args.output_container,
+            "encoder": self.args.encoder,
+            "vt_preset": self.args.vt_preset,
+            "x264_threads": self.args.x264_threads,
             "target_bitrate_k": self.profile.bitrate_k,
             "every_nth_frame": self.args.every_nth_frame,
             "screencast_quality": self.args.screencast_quality,
@@ -2066,6 +2096,7 @@ def apply_service_config_preset(args: argparse.Namespace, preset_name: str) -> a
     next_args.decode_mode = preset.decode_mode
     next_args.frame_store_mode = preset.frame_store_mode
     next_args.low_latency_ffmpeg = preset.low_latency_ffmpeg
+    next_args.output_container = preset.output_container
     return next_args
 
 
@@ -2160,6 +2191,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cast-to-sideprojector", action="store_true")
     parser.add_argument("--encoder", choices=["auto", "libx264", "h264_videotoolbox"], default="libx264")
     parser.add_argument("--ffmpeg-mode", choices=["service", "service_low_latency", "tuned"], default="tuned")
+    parser.add_argument("--output-container", choices=["mpegts", "mp4"], default="mpegts")
     parser.add_argument("--source-mode", choices=["overlay", "synthetic_sparse"], default="overlay")
     parser.add_argument("--strategy", action="append", choices=[
         "naive_repeat_last",
@@ -2217,6 +2249,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--relay-mode", choices=["shared-read", "fanout"], default="fanout")
     parser.add_argument("--fanout-queue-chunks", type=int, default=32)
     parser.add_argument("--vt-preset", choices=["auto", "legacy", "current"], default="auto")
+    parser.add_argument("--x264-threads", type=int)
     parser.add_argument("--webrtc-capture-fps", type=float, default=15.0)
     parser.add_argument("--webrtc-scenario", action="append", choices=WEBRTC_SCENARIOS)
     argv = sys.argv[1:]
