@@ -106,8 +106,8 @@ class OverlayCastStartRequest(BaseModel):
     viewport_height: int = 720
     capture_width: int = 640
     capture_height: int = 360
-    quality: int = 28
-    frame_rate: int = 6
+    quality: int = 22
+    frame_rate: int = 3
     stream_port: Optional[int] = None
 
 
