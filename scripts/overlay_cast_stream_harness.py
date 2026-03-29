@@ -176,6 +176,9 @@ class ServiceConfigPreset:
     muxrate_policy: str
     browser_channel: Optional[str]
     gpu_mode: str
+    decode_mode: str
+    frame_store_mode: str
+    low_latency_ffmpeg: bool
 
 
 SERVICE_CONFIG_PRESETS = {
@@ -187,7 +190,7 @@ SERVICE_CONFIG_PRESETS = {
         capture_height=720,
         frame_rate=20,
         quality=30,
-        every_nth_frame=5,
+        every_nth_frame=1,
         relay_mode="shared-read",
         chromium_args=["--no-sandbox"],
         include_default_chromium_args=False,
@@ -198,6 +201,9 @@ SERVICE_CONFIG_PRESETS = {
         muxrate_policy="fixed_4000k",
         browser_channel=None,
         gpu_mode="default",
+        decode_mode="inline",
+        frame_store_mode="latest",
+        low_latency_ffmpeg=False,
     ),
     "current": ServiceConfigPreset(
         name="current",
@@ -216,10 +222,13 @@ SERVICE_CONFIG_PRESETS = {
         vt_preset="current",
         bitrate_k=1000,
         ffmpeg_input_mode="mjpeg",
-        stdin_flush_mode="none",
+        stdin_flush_mode="every",
         muxrate_policy="none",
         browser_channel="chrome",
         gpu_mode="chrome-hardware",
+        decode_mode="worker",
+        frame_store_mode="latest",
+        low_latency_ffmpeg=False,
     ),
 }
 
@@ -266,7 +275,10 @@ class FrameStore:
         with self.lock:
             return self.latest, self.previous
 
-    def pop(self) -> Optional[FrameSnapshot]:
+    def pop(self, mode: str = "queue") -> Optional[FrameSnapshot]:
+        if mode == "latest":
+            with self.lock:
+                return self.latest
         try:
             return self.frames.get_nowait()
         except queue.Empty:
@@ -1117,7 +1129,7 @@ class OverlayCaptureRunner:
             else:
                 next_tick = now()
 
-            next_frame = self.frame_store.pop()
+            next_frame = self.frame_store.pop(self.args.frame_store_mode)
             if next_frame is not None:
                 previous_frame = latest_frame
                 latest_frame = next_frame
@@ -1356,6 +1368,7 @@ class OverlayCaptureRunner:
             "every_nth_frame": self.args.every_nth_frame,
             "screencast_quality": self.args.screencast_quality,
             "decode_mode": self.args.decode_mode,
+            "frame_store_mode": self.args.frame_store_mode,
             "viewport_width": self.profile.width,
             "viewport_height": self.profile.height,
             "capture_width": self.source.capture_width,
@@ -2050,7 +2063,9 @@ def apply_service_config_preset(args: argparse.Namespace, preset_name: str) -> a
     next_args.muxrate_policy = preset.muxrate_policy
     next_args.browser_channel = preset.browser_channel
     next_args.gpu_mode = preset.gpu_mode
-    next_args.low_latency_ffmpeg = True
+    next_args.decode_mode = preset.decode_mode
+    next_args.frame_store_mode = preset.frame_store_mode
+    next_args.low_latency_ffmpeg = preset.low_latency_ffmpeg
     return next_args
 
 
@@ -2185,6 +2200,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gop-frames", type=int)
     parser.add_argument("--ffmpeg-input-mode", choices=["image2pipe", "mjpeg"], default="image2pipe")
     parser.add_argument("--decode-mode", choices=["inline", "worker"], default="inline")
+    parser.add_argument("--frame-store-mode", choices=["queue", "latest"], default="queue")
     parser.add_argument("--stdin-flush-mode", choices=["every", "batched", "none"], default="every")
     parser.add_argument("--stdin-flush-every", type=int, default=5)
     parser.add_argument("--every-nth-frame", type=int, default=1)
