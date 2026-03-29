@@ -361,18 +361,29 @@ class VideoService:
             if db_video.has_subtitle and db_video.subtitle_path:
                 files["file_subtitle"] = db_video.subtitle_path
 
-            # Make sure we have absolute paths
+            # Make sure we only hand existing absolute paths to the streaming server.
+            normalized_files: Dict[str, str] = {}
             for key, path in files.items():
-                files[key] = os.path.abspath(path)
-                if not os.path.exists(files[key]):
-                    logger.error(f"File not found: {files[key]}")
-                    files.pop(key)
+                abs_path = os.path.abspath(path)
+                if not os.path.exists(abs_path):
+                    logger.error(f"File not found: {abs_path}")
+                    continue
+                normalized_files[key] = abs_path
+
+            if "file_video" not in normalized_files:
+                logger.error(f"Primary video file missing for video {video_id}: {db_video.path}")
+                return None
 
             logger.info(f"Starting twisted streaming server for {db_video.path} on {serve_ip}")
 
             # Explicitly use port 8001 to avoid conflicts
             try:
-                files_urls, server = self.streaming_service.start_server(files, serve_ip, serve_port=8001, device_name=db_video.name)
+                files_urls, server = self.streaming_service.start_server(
+                    normalized_files,
+                    serve_ip,
+                    port=8001,
+                    device_name=db_video.name,
+                )
 
                 # Return the video URL
                 video_url = files_urls.get("file_video")

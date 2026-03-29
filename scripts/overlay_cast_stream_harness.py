@@ -22,6 +22,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.request
 from collections import deque
 from contextlib import suppress
 from dataclasses import asdict, dataclass, field, replace
@@ -213,8 +214,8 @@ SERVICE_CONFIG_PRESETS = {
         viewport_height=720,
         capture_width=640,
         capture_height=360,
-        frame_rate=6,
-        quality=28,
+        frame_rate=3,
+        quality=22,
         every_nth_frame=1,
         relay_mode="fanout",
         chromium_args=[
@@ -222,7 +223,7 @@ SERVICE_CONFIG_PRESETS = {
         ],
         include_default_chromium_args=False,
         vt_preset="current",
-        bitrate_k=1000,
+        bitrate_k=500,
         ffmpeg_input_mode="mjpeg",
         stdin_flush_mode="every",
         muxrate_policy="none",
@@ -451,6 +452,107 @@ def chromium_args_for_mode(gpu_mode: str, extra_args: list[str], include_default
     return args
 
 
+async def apply_overlay_page_patches(page, args: argparse.Namespace) -> None:
+    if not (
+        args.page_disable_widgets
+        or args.page_mapping_fps
+        or args.page_skip_dynamic_groups
+        or args.page_disable_dynamic_continuous
+        or args.page_animation_time_scale is not None
+    ):
+        return
+    await page.evaluate(
+        """
+        ({ disableWidgets, mappingFps, skipDynamicGroups, disableDynamicContinuous, animationTimeScale }) => {
+            const dynamicTypes = new Set(['video', 'animation', 'animation_list']);
+            if (animationTimeScale && Number.isFinite(animationTimeScale) && animationTimeScale > 0 && animationTimeScale < 1) {
+                const realNow = performance.now.bind(performance);
+                const baseReal = realNow();
+                const baseScaled = baseReal;
+                const scaledNow = () => baseScaled + ((realNow() - baseReal) * animationTimeScale);
+                try {
+                    Object.defineProperty(performance, 'now', {
+                        configurable: true,
+                        value: scaledNow,
+                    });
+                } catch (error) {
+                    window.__harnessAnimationScalePatchError = String(error);
+                }
+                const origRAF = window.requestAnimationFrame.bind(window);
+                window.requestAnimationFrame = (callback) => origRAF((ts) => callback(baseScaled + ((ts - baseReal) * animationTimeScale)));
+                const patchEngine = () => {
+                    if (!window.mappingAnimationEngine || window.__harnessAnimationEngineScaled) {
+                        return;
+                    }
+                    const origRenderFrame = window.mappingAnimationEngine.renderFrame?.bind(window.mappingAnimationEngine);
+                    if (origRenderFrame) {
+                        window.mappingAnimationEngine.renderFrame = (ts) => origRenderFrame(baseScaled + ((ts - baseReal) * animationTimeScale));
+                        window.__harnessAnimationEngineScaled = true;
+                    }
+                };
+                patchEngine();
+                const patchTimer = window.setInterval(() => {
+                    patchEngine();
+                    if (window.__harnessAnimationEngineScaled) {
+                        window.clearInterval(patchTimer);
+                    }
+                }, 100);
+            }
+            if (disableWidgets) {
+                window.__harnessWidgetsDisabled = true;
+                window.createWidgets = () => {
+                    const container = document.getElementById('widgets-container');
+                    if (container) {
+                        container.innerHTML = '';
+                    }
+                };
+                if (typeof widgets !== 'undefined' && Array.isArray(widgets)) {
+                    widgets.length = 0;
+                }
+                window.createWidgets();
+            }
+            if (mappingFps && Number.isFinite(mappingFps) && mappingFps > 0) {
+                const targetFrameMs = Math.round(1000 / mappingFps);
+                window.__harnessMappingTargetFrameMs = targetFrameMs;
+                window.getMappingTargetFrameMs = () => targetFrameMs;
+            }
+            if (skipDynamicGroups && typeof window.drawMappingGroup === 'function') {
+                const origDrawMappingGroup = window.drawMappingGroup;
+                window.drawMappingGroup = function(ctx, group, canvasWidth, canvasHeight) {
+                    const mediaState = typeof mappingMediaState !== 'undefined' ? mappingMediaState.get(group.id) : null;
+                    const mediaType = mediaState?.type || null;
+                    if (mediaType && dynamicTypes.has(mediaType)) {
+                        return;
+                    }
+                    return origDrawMappingGroup.call(this, ctx, group, canvasWidth, canvasHeight);
+                };
+            }
+            if (disableDynamicContinuous && typeof window.mappingSceneNeedsContinuousRender === 'function') {
+                window.mappingSceneNeedsContinuousRender = function() {
+                    if (typeof mappingRenderableGroups === 'undefined' || typeof mappingMediaState === 'undefined') {
+                        return false;
+                    }
+                    return mappingRenderableGroups.some((group) => {
+                        const mediaState = mappingMediaState.get(group.id);
+                        if (!mediaState) {
+                            return false;
+                        }
+                        return mediaState.type === 'image' && Boolean(mediaState.previousElement || mediaState.transitionStart);
+                    });
+                };
+            }
+        }
+        """,
+        {
+            "disableWidgets": args.page_disable_widgets,
+            "mappingFps": args.page_mapping_fps,
+            "skipDynamicGroups": args.page_skip_dynamic_groups,
+            "disableDynamicContinuous": args.page_disable_dynamic_continuous,
+            "animationTimeScale": args.page_animation_time_scale,
+        },
+    )
+
+
 def effective_profile(args: argparse.Namespace) -> StreamProfile:
     profile = PROFILES[args.profile]
     width = args.viewport_width or profile.width
@@ -621,6 +723,7 @@ def build_rawvideo_ffmpeg_cmd(
     ffmpeg_mode: str,
     bitrate_k: int,
     write_to_stdout: bool,
+    output_container: str,
 ) -> list[str]:
     encoder = resolve_encoder(encoder_name)
     encoder_opts = (
@@ -629,7 +732,20 @@ def build_rawvideo_ffmpeg_cmd(
         else ["-preset", "ultrafast", "-tune", "zerolatency"]
     )
     output_target = "pipe:1" if write_to_stdout else "-"
-    if ffmpeg_mode == "service":
+    if output_container == "mp4":
+        rate_args = [
+            "-b:v", f"{bitrate_k}k",
+            "-g", str(frame_rate),
+            "-keyint_min", str(frame_rate),
+            "-r", str(frame_rate),
+        ]
+        mux_args = [
+            "-pix_fmt", "yuv420p",
+            "-movflags", "+frag_keyframe+empty_moov+default_base_moof",
+            "-frag_duration", "1000000",
+            "-f", "mp4",
+        ]
+    elif ffmpeg_mode == "service":
         rate_args = [
             "-b:v", "2500k",
             "-r", str(frame_rate),
@@ -926,6 +1042,7 @@ class SourceAdapter:
                 )
                 page.on("pageerror", lambda error: self.page_errors.append(str(error)))
                 await page.goto(self.args.overlay_url, wait_until="domcontentloaded", timeout=20000)
+                await apply_overlay_page_patches(page, self.args)
                 cdp = await page.context.new_cdp_session(page)
 
                 async def on_frame(event: dict[str, Any]) -> None:
@@ -962,7 +1079,6 @@ class SourceAdapter:
         except Exception as exc:
             self.capture_error = f"playwright_capture_failed:{type(exc).__name__}:{exc}"
 
-
 class OverlayCaptureRunner:
     def __init__(self, args: argparse.Namespace, strategy: str):
         self.args = args
@@ -979,6 +1095,9 @@ class OverlayCaptureRunner:
         self.relay_thread: Optional[threading.Thread] = None
         self.relay_lock = threading.Lock()
         self.fanout: Optional[FanoutRelay] = None
+        self.go_relay_proc: Optional[subprocess.Popen] = None
+        self.go_relay_stats_url: Optional[str] = None
+        self.go_worker_proc: Optional[subprocess.Popen] = None
         self.stream_port: Optional[int] = None
         self.stream_url: Optional[str] = None
         self.stream_path: str = "/live.ts"
@@ -1056,24 +1175,33 @@ class OverlayCaptureRunner:
                 self.stream_http_content_type = "video/mp4"
                 self.cast_protocol_info = "http-get:*:video/mp4:*"
             self.stream_url = f"http://{local_ip()}:{self.stream_port}{self.stream_path}"
-        self.proc = subprocess.Popen(
-            build_ffmpeg_cmd(
-                self.profile,
-                self.args,
-                self.args.encoder,
-                "synthetic",
-                write_to_stdout=write_to_stdout,
-                vt_preset=self.args.vt_preset,
-            ),
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE if write_to_stdout else subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            bufsize=0,
+        ffmpeg_cmd = build_ffmpeg_cmd(
+            self.profile,
+            self.args,
+            self.args.encoder,
+            "synthetic",
+            write_to_stdout=write_to_stdout,
+            vt_preset=self.args.vt_preset,
         )
+        if write_to_stdout and self.args.transport_impl == "go-worker":
+            self._start_go_worker(ffmpeg_cmd)
+        else:
+            self.proc = subprocess.Popen(
+                ffmpeg_cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE if write_to_stdout else subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                bufsize=0,
+            )
         self.progress_thread = threading.Thread(target=self._pump_ffmpeg_logs, daemon=True)
         self.progress_thread.start()
         if write_to_stdout:
-            self._start_relay()
+            if self.args.transport_impl == "go-worker":
+                pass
+            elif self.args.relay_impl == "go-sidecar":
+                self._start_go_relay()
+            else:
+                self._start_relay()
         self.source.start()
         self.scheduler_thread = threading.Thread(target=self._scheduler_loop, daemon=True)
         self.scheduler_thread.start()
@@ -1090,6 +1218,75 @@ class OverlayCaptureRunner:
             self.relay_server.fanout_relay = self.fanout
         self.relay_thread = threading.Thread(target=self.relay_server.serve_forever, daemon=True)
         self.relay_thread.start()
+
+    def _start_go_relay(self) -> None:
+        assert self.proc is not None and self.proc.stdout is not None and self.stream_port is not None
+        relay_bin = self.args.go_relay_bin
+        if not relay_bin or not os.path.exists(relay_bin):
+            raise RuntimeError(f"go relay binary not found: {relay_bin}")
+        self.go_relay_stats_url = f"http://127.0.0.1:{self.stream_port}/stats"
+        self.go_relay_proc = subprocess.Popen(
+            [
+                relay_bin,
+                "-listen", f":{self.stream_port}",
+                "-stream-path", self.stream_path,
+                "-content-type", self.stream_http_content_type,
+                "-stats-path", "/stats",
+            ],
+            stdin=self.proc.stdout,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            bufsize=0,
+        )
+        time.sleep(0.2)
+        if self.go_relay_proc.poll() is not None:
+            stderr = b""
+            if self.go_relay_proc.stderr is not None:
+                stderr = self.go_relay_proc.stderr.read() or b""
+            raise RuntimeError(f"go relay exited immediately: {stderr.decode('utf-8', errors='replace').strip()}")
+
+    def _start_go_worker(self, ffmpeg_cmd: list[str]) -> None:
+        worker_bin = self.args.go_worker_bin
+        if not worker_bin or not os.path.exists(worker_bin):
+            raise RuntimeError(f"go worker binary not found: {worker_bin}")
+        self.go_relay_stats_url = f"http://127.0.0.1:{self.stream_port}/stats"
+        ffmpeg_bin = ffmpeg_cmd[0]
+        ffmpeg_args = json.dumps(ffmpeg_cmd[1:])
+        self.proc = subprocess.Popen(
+            [
+                worker_bin,
+                "-listen", f":{self.stream_port}",
+                "-stream-path", self.stream_path,
+                "-content-type", self.stream_http_content_type,
+                "-stats-path", "/stats",
+                "-frame-rate", str(float(self.args.encode_fps or self.profile.fps)),
+                "-ffmpeg-bin", ffmpeg_bin,
+                "-ffmpeg-args-json", ffmpeg_args,
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            bufsize=0,
+        )
+        self.go_worker_proc = self.proc
+        time.sleep(0.3)
+        if self.proc.poll() is not None:
+            stderr = b""
+            if self.proc.stderr is not None:
+                stderr = self.proc.stderr.read() or b""
+            raise RuntimeError(f"go worker exited immediately: {stderr.decode('utf-8', errors='replace').strip()}")
+
+    def _collect_go_relay_stats(self) -> None:
+        if not self.go_relay_stats_url:
+            return
+        try:
+            with urllib.request.urlopen(self.go_relay_stats_url, timeout=1.0) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            self.metrics.relay_peak_clients = int(payload.get("peak_clients", self.metrics.relay_peak_clients or 0))
+            self.metrics.relay_clients = int(payload.get("active_clients", self.metrics.relay_clients or 0))
+            self.metrics.relay_bytes_out = int(payload.get("bytes_out", self.metrics.relay_bytes_out or 0))
+        except Exception:
+            return
 
     def _pump_ffmpeg_logs(self) -> None:
         assert self.proc is not None and self.proc.stderr is not None
@@ -1257,15 +1454,20 @@ class OverlayCaptureRunner:
 
             try:
                 write_started = time.perf_counter()
-                self.proc.stdin.write(chosen.data)
-                self.flush_counter += 1
-                should_flush = True
-                if self.args.stdin_flush_mode == "none":
-                    should_flush = False
-                elif self.args.stdin_flush_mode == "batched":
-                    should_flush = (self.flush_counter % max(1, self.args.stdin_flush_every)) == 0
-                if should_flush:
+                if self.args.transport_impl == "go-worker":
+                    packet = len(chosen.data).to_bytes(4, byteorder="big") + chosen.data
+                    self.proc.stdin.write(packet)
                     self.proc.stdin.flush()
+                else:
+                    self.proc.stdin.write(chosen.data)
+                    self.flush_counter += 1
+                    should_flush = True
+                    if self.args.stdin_flush_mode == "none":
+                        should_flush = False
+                    elif self.args.stdin_flush_mode == "batched":
+                        should_flush = (self.flush_counter % max(1, self.args.stdin_flush_every)) == 0
+                    if should_flush:
+                        self.proc.stdin.flush()
                 block_ms = (time.perf_counter() - write_started) * 1000.0
                 submitted_at = now()
                 self.metrics.record_submit(submitted_at, block_ms, submit_rate)
@@ -1281,12 +1483,20 @@ class OverlayCaptureRunner:
         self.ended_at = now()
         if self.args.cast_control_url and self.args.cast_stop_on_exit:
             await self._send_stop()
+        if self.args.relay_impl == "go-sidecar":
+            self._collect_go_relay_stats()
         if self.fanout is not None:
             self.fanout.close()
         if self.relay_server is not None:
             with suppress(Exception):
                 self.relay_server.shutdown()
                 self.relay_server.server_close()
+        if self.go_relay_proc is not None:
+            with suppress(Exception):
+                self.go_relay_proc.kill()
+            self.go_relay_proc = None
+        if self.args.transport_impl == "go-worker":
+            self._collect_go_relay_stats()
         if self.proc is not None:
             with suppress(Exception):
                 if self.proc.stdin is not None:
@@ -1390,10 +1600,17 @@ class OverlayCaptureRunner:
             "browser_channel": self.args.browser_channel,
             "headed": self.args.headed,
             "ffmpeg_mode": self.args.ffmpeg_mode,
+            "relay_impl": self.args.relay_impl,
+            "transport_impl": self.args.transport_impl,
             "output_container": self.args.output_container,
             "encoder": self.args.encoder,
             "vt_preset": self.args.vt_preset,
             "x264_threads": self.args.x264_threads,
+            "page_disable_widgets": self.args.page_disable_widgets,
+            "page_mapping_fps": self.args.page_mapping_fps,
+            "page_skip_dynamic_groups": self.args.page_skip_dynamic_groups,
+            "page_disable_dynamic_continuous": self.args.page_disable_dynamic_continuous,
+            "page_animation_time_scale": self.args.page_animation_time_scale,
             "target_bitrate_k": self.profile.bitrate_k,
             "every_nth_frame": self.args.every_nth_frame,
             "screencast_quality": self.args.screencast_quality,
@@ -1463,6 +1680,18 @@ class WebRTCCaptureRunner:
         self.proc: Optional[subprocess.Popen] = None
         self.progress_thread: Optional[threading.Thread] = None
         self.stdout_thread: Optional[threading.Thread] = None
+        self.relay_server: Optional[ReusableThreadingHTTPServer] = None
+        self.relay_thread: Optional[threading.Thread] = None
+        self.fanout: Optional[FanoutRelay] = None
+        self.stream_port: Optional[int] = None
+        self.stream_path: str = "/live.ts"
+        self.stream_url: Optional[str] = None
+        self.stream_http_content_type: str = "video/mp2t"
+        self.cast_protocol_info: str = "http-get:*:video/mpeg:DLNA.ORG_PN=MPEG_TS_SD_EU_ISO"
+        self.cast_set_uri_ok = False
+        self.cast_play_ok = False
+        self.cast_stop_ok = False
+        self.cast_error: Optional[str] = None
         self.ts_bytes_out = 0
         self.ts_chunks = 0
         self.started_at = 0.0
@@ -1473,6 +1702,13 @@ class WebRTCCaptureRunner:
 
     async def run(self) -> dict[str, Any]:
         self.started_at = now()
+        if self.args.cast_control_url:
+            self.stream_port = self.args.stream_port or reserve_free_port()
+            if self.args.output_container == "mp4":
+                self.stream_path = "/live.mp4"
+                self.stream_http_content_type = "video/mp4"
+                self.cast_protocol_info = "http-get:*:video/mp4:*"
+            self.stream_url = f"http://{local_ip()}:{self.stream_port}{self.stream_path}"
         try:
             from aiortc import RTCPeerConnection, RTCSessionDescription
         except ImportError as exc:
@@ -1563,6 +1799,9 @@ class WebRTCCaptureRunner:
                     {"sdp": backend_pc.localDescription.sdp, "type": backend_pc.localDescription.type},
                 )
                 browser_pc_started.set()
+                if self.args.cast_control_url:
+                    await asyncio.sleep(self.args.prime_seconds)
+                    await self.start_cast()
                 await asyncio.sleep(self.args.seconds)
                 await page.evaluate(
                     """
@@ -1589,12 +1828,15 @@ class WebRTCCaptureRunner:
                     await task
             await backend_pc.close()
             self.ended_at = now()
+            if self.args.cast_control_url and self.args.cast_stop_on_exit:
+                await self._send_stop()
             await self._stop_ffmpeg()
         return self.result()
 
     async def _prepare_scenario_page(self, page) -> None:
         if self.scenario == "overlay_canvas":
             await page.goto(self.args.overlay_url, wait_until="domcontentloaded", timeout=20000)
+            await apply_overlay_page_patches(page, self.args)
             await asyncio.sleep(3.0)
             return
         if self.scenario == "synthetic_canvas":
@@ -1631,6 +1873,14 @@ class WebRTCCaptureRunner:
                     width: canvas.width,
                     height: canvas.height,
                 }));
+                const renderableGroups = typeof mappingRenderableGroups !== 'undefined' ? mappingRenderableGroups : [];
+                const mediaStates = typeof mappingMediaState !== 'undefined' ? mappingMediaState : null;
+                const mediaTypeCounts = {};
+                renderableGroups.forEach((group) => {
+                    const mediaState = mediaStates ? mediaStates.get(group.id) : null;
+                    const mediaType = mediaState?.type || 'none';
+                    mediaTypeCounts[mediaType] = (mediaTypeCounts[mediaType] || 0) + 1;
+                });
                 return {
                     document_location_href: href,
                     config_id: params.get('config_id'),
@@ -1644,6 +1894,8 @@ class WebRTCCaptureRunner:
                     widget_candidate_count: widgetCandidates.length,
                     canvas_count: canvases.length,
                     canvases,
+                    mapping_renderable_group_count: renderableGroups.length,
+                    mapping_media_type_counts: mediaTypeCounts,
                 };
             }
             """
@@ -1694,6 +1946,7 @@ class WebRTCCaptureRunner:
                 ffmpeg_mode=self.args.ffmpeg_mode,
                 bitrate_k=self.profile.bitrate_k,
                 write_to_stdout=True,
+                output_container=self.args.output_container,
             ),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -1702,8 +1955,84 @@ class WebRTCCaptureRunner:
         )
         self.progress_thread = threading.Thread(target=self._pump_ffmpeg_logs, daemon=True)
         self.progress_thread.start()
-        self.stdout_thread = threading.Thread(target=self._pump_ffmpeg_stdout, daemon=True)
-        self.stdout_thread.start()
+        if self.args.cast_control_url and self.stream_port is not None:
+            self.fanout = FanoutRelay(self.proc, self.metrics, threading.Event(), self.args.fanout_queue_chunks)
+            self.relay_server = ReusableThreadingHTTPServer(("", self.stream_port), FanoutRelayHandler)
+            self.relay_server.runner = self
+            self.relay_server.fanout_relay = self.fanout
+            self.relay_thread = threading.Thread(target=self.relay_server.serve_forever, daemon=True)
+            self.relay_thread.start()
+        else:
+            self.stdout_thread = threading.Thread(target=self._pump_ffmpeg_stdout, daemon=True)
+            self.stdout_thread.start()
+
+    async def start_cast(self) -> None:
+        if not self.args.cast_control_url or not self.stream_url:
+            return
+        metadata = (
+            '<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" '
+            'xmlns:dc="http://purl.org/dc/elements/1.1/" '
+            'xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/">'
+            f'<item id="0" parentID="-1" restricted="1"><dc:title>{html.escape(self.args.cast_friendly_name)}</dc:title>'
+            '<upnp:class>object.item.videoItem</upnp:class>'
+            f'<res protocolInfo="{self.cast_protocol_info}">{self.stream_url}</res>'
+            "</item></DIDL-Lite>"
+        )
+        set_uri_body = (
+            '<?xml version="1.0" encoding="utf-8"?>'
+            '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">'
+            '<s:Body><u:SetAVTransportURI xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">'
+            "<InstanceID>0</InstanceID>"
+            f"<CurrentURI>{self.stream_url}</CurrentURI>"
+            f"<CurrentURIMetaData>{html.escape(metadata)}</CurrentURIMetaData>"
+            "</u:SetAVTransportURI></s:Body></s:Envelope>"
+        )
+        play_body = (
+            '<?xml version="1.0" encoding="utf-8"?>'
+            '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">'
+            '<s:Body><u:Play xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">'
+            "<InstanceID>0</InstanceID><Speed>1</Speed>"
+            "</u:Play></s:Body></s:Envelope>"
+        )
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                self.args.cast_control_url,
+                data=set_uri_body,
+                headers={"Content-Type": "text/xml", "SOAPACTION": '"urn:schemas-upnp-org:service:AVTransport:1#SetAVTransportURI"'},
+            ) as response:
+                self.cast_set_uri_ok = response.status == 200
+                if response.status != 200:
+                    raise RuntimeError(f"SetAVTransportURI failed with {response.status}")
+            await asyncio.sleep(self.args.cast_play_delay_seconds)
+            async with session.post(
+                self.args.cast_control_url,
+                data=play_body,
+                headers={"Content-Type": "text/xml", "SOAPACTION": '"urn:schemas-upnp-org:service:AVTransport:1#Play"'},
+            ) as response:
+                self.cast_play_ok = response.status == 200
+                if response.status != 200:
+                    raise RuntimeError(f"Play failed with {response.status}")
+
+    async def _send_stop(self) -> None:
+        if not self.args.cast_control_url:
+            return
+        stop_body = (
+            '<?xml version="1.0" encoding="utf-8"?>'
+            '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">'
+            '<s:Body><u:Stop xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">'
+            "<InstanceID>0</InstanceID>"
+            "</u:Stop></s:Body></s:Envelope>"
+        )
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    self.args.cast_control_url,
+                    data=stop_body,
+                    headers={"Content-Type": "text/xml", "SOAPACTION": '"urn:schemas-upnp-org:service:AVTransport:1#Stop"'},
+                ) as response:
+                    self.cast_stop_ok = response.status == 200
+        except Exception as exc:
+            self.cast_error = f"{type(exc).__name__}:{exc}"
 
     def _pump_ffmpeg_logs(self) -> None:
         assert self.proc is not None and self.proc.stderr is not None
@@ -1756,6 +2085,12 @@ class WebRTCCaptureRunner:
             await asyncio.wait_for(completed.wait(), timeout=5)
 
     async def _stop_ffmpeg(self) -> None:
+        if self.fanout is not None:
+            self.fanout.close()
+        if self.relay_server is not None:
+            with suppress(Exception):
+                self.relay_server.shutdown()
+                self.relay_server.server_close()
         if self.proc is None:
             return
         with suppress(Exception):
@@ -1780,6 +2115,13 @@ class WebRTCCaptureRunner:
         return {
             "benchmark_mode": "webrtc_capture_benchmark",
             "scenario": self.scenario,
+            "output_container": self.args.output_container,
+            "stream_url": self.stream_url,
+            "cast_set_uri_ok": self.cast_set_uri_ok,
+            "cast_play_ok": self.cast_play_ok,
+            "cast_stop_ok": self.cast_stop_ok,
+            "cast_error": self.cast_error,
+            "relay_peak_clients": self.metrics.relay_peak_clients,
             "page_verification": self.page_verification,
             "source_fps": round(self.metrics.source_fps(seconds), 3),
             "source_frame_count": self.metrics.source_frame_count,
@@ -2083,7 +2425,7 @@ def apply_service_config_preset(args: argparse.Namespace, preset_name: str) -> a
     next_args.chromium_arg = list(preset.chromium_args)
     next_args.disable_default_chromium_args = not preset.include_default_chromium_args
     next_args.vt_preset = preset.vt_preset
-    next_args.encoder = "h264_videotoolbox" if sys.platform == "darwin" else "libx264"
+    next_args.encoder = "libx264" if preset.name == "current" else ("h264_videotoolbox" if sys.platform == "darwin" else "libx264")
     next_args.ffmpeg_mode = "service"
     next_args.profile = "high"
     next_args.source_mode = "overlay"
@@ -2239,6 +2581,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--screencast-quality", type=int, default=24)
     parser.add_argument("--browser-channel", choices=["chrome", "msedge"])
     parser.add_argument("--headed", action="store_true")
+    parser.add_argument("--page-disable-widgets", action="store_true")
+    parser.add_argument("--page-mapping-fps", type=float)
+    parser.add_argument("--page-skip-dynamic-groups", action="store_true")
+    parser.add_argument("--page-disable-dynamic-continuous", action="store_true")
+    parser.add_argument("--page-animation-time-scale", type=float)
     parser.add_argument(
         "--gpu-mode",
         choices=["default", "disable-gpu", "swiftshader", "webgpu", "chrome-hardware"],
@@ -2247,6 +2594,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--chromium-arg", action="append", default=[])
     parser.add_argument("--disable-default-chromium-args", action="store_true")
     parser.add_argument("--relay-mode", choices=["shared-read", "fanout"], default="fanout")
+    parser.add_argument("--relay-impl", choices=["python", "go-sidecar"], default="python")
+    parser.add_argument("--go-relay-bin")
+    parser.add_argument("--transport-impl", choices=["python", "go-worker"], default="python")
+    parser.add_argument("--go-worker-bin")
     parser.add_argument("--fanout-queue-chunks", type=int, default=32)
     parser.add_argument("--vt-preset", choices=["auto", "legacy", "current"], default="auto")
     parser.add_argument("--x264-threads", type=int)
