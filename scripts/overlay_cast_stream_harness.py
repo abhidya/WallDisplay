@@ -169,6 +169,10 @@ class ServiceConfigPreset:
     chromium_args: list[str]
     include_default_chromium_args: bool
     vt_preset: str
+    bitrate_k: int
+    ffmpeg_input_mode: str
+    stdin_flush_mode: str
+    muxrate_policy: str
 
 
 SERVICE_CONFIG_PRESETS = {
@@ -185,14 +189,18 @@ SERVICE_CONFIG_PRESETS = {
         chromium_args=["--no-sandbox"],
         include_default_chromium_args=False,
         vt_preset="legacy",
+        bitrate_k=2500,
+        ffmpeg_input_mode="image2pipe",
+        stdin_flush_mode="every",
+        muxrate_policy="fixed_4000k",
     ),
     "current": ServiceConfigPreset(
         name="current",
         viewport_width=1280,
         viewport_height=720,
-        capture_width=960,
-        capture_height=540,
-        frame_rate=20,
+        capture_width=854,
+        capture_height=480,
+        frame_rate=12,
         quality=50,
         every_nth_frame=1,
         relay_mode="fanout",
@@ -204,6 +212,10 @@ SERVICE_CONFIG_PRESETS = {
         ],
         include_default_chromium_args=False,
         vt_preset="current",
+        bitrate_k=2000,
+        ffmpeg_input_mode="mjpeg",
+        stdin_flush_mode="every",
+        muxrate_policy="fixed_4000k",
     ),
 }
 
@@ -273,6 +285,7 @@ class Metrics:
     ffmpeg_fps_samples: list[float] = field(default_factory=list)
     scheduler_rate_samples: list[float] = field(default_factory=list)
     ffmpeg_progress_times: list[float] = field(default_factory=list)
+    decode_samples_ms: list[float] = field(default_factory=list)
 
     def record_source_arrival(self, ts: float) -> None:
         self.source_frame_count += 1
@@ -403,7 +416,15 @@ def effective_profile(args: argparse.Namespace) -> StreamProfile:
     height = args.viewport_height or profile.height
     fps = args.stream_fps or profile.fps
     quality = args.screencast_quality or profile.jpeg_quality
-    return replace(profile, width=width, height=height, fps=int(fps), jpeg_quality=int(quality))
+    bitrate_k = args.video_bitrate_k or profile.bitrate_k
+    return replace(
+        profile,
+        width=width,
+        height=height,
+        fps=int(fps),
+        jpeg_quality=int(quality),
+        bitrate_k=int(bitrate_k),
+    )
 
 
 def capture_dimensions(args: argparse.Namespace, profile: StreamProfile) -> tuple[int, int]:
@@ -413,28 +434,46 @@ def capture_dimensions(args: argparse.Namespace, profile: StreamProfile) -> tupl
     )
 
 
-def build_ffmpeg_output_args(profile: StreamProfile, ffmpeg_mode: str, write_to_stdout: bool) -> list[str]:
-    muxrate_k = "4000k" if ffmpeg_mode == "service" else f"{max(4000, profile.bitrate_k * 3)}k"
+def build_ffmpeg_output_args(profile: StreamProfile, args: argparse.Namespace, write_to_stdout: bool) -> list[str]:
+    ffmpeg_mode = args.ffmpeg_mode
+    muxrate_policy = args.muxrate_policy
+    if muxrate_policy == "fixed_4000k":
+        muxrate_k = "4000k"
+    elif muxrate_policy == "bitrate":
+        muxrate_k = f"{profile.bitrate_k}k"
+    elif muxrate_policy == "bitrate_x1_5":
+        muxrate_k = f"{int(profile.bitrate_k * 1.5)}k"
+    elif muxrate_policy == "none":
+        muxrate_k = None
+    else:
+        muxrate_k = f"{max(4000, profile.bitrate_k * 3)}k" if ffmpeg_mode == "service_low_latency" else (
+            "4000k" if ffmpeg_mode == "service" else f"{max(4000, profile.bitrate_k * 3)}k"
+        )
     output_target = "pipe:1" if write_to_stdout else "-"
-    args = [
+    output_args = [
         "-pix_fmt", "yuv420p",
         "-f", "mpegts",
-        "-muxrate", muxrate_k,
         "-pcr_period", "20",
     ]
+    if muxrate_k is not None:
+        output_args[2:2] = ["-muxrate", muxrate_k]
     if ffmpeg_mode == "service":
-        args = [
-            "-b:v", "2500k",
+        gop = int(args_ns_gop(profile, args))
+        output_args = [
+            "-b:v", f"{profile.bitrate_k}k",
+            "-g", str(gop),
+            "-keyint_min", str(gop),
             "-r", str(profile.fps),
-            *args,
+            *output_args,
         ]
     else:
-        args = [
+        gop = int(args_ns_gop(profile, args))
+        output_args = [
             "-b:v", f"{profile.bitrate_k}k",
             "-maxrate", f"{profile.bitrate_k}k",
             "-bufsize", f"{profile.bitrate_k * 2}k",
-            "-g", str(profile.fps),
-            "-keyint_min", str(profile.fps),
+            "-g", str(gop),
+            "-keyint_min", str(gop),
             "-r", str(profile.fps),
             "-fflags", "nobuffer",
             "-flags", "low_delay",
@@ -442,14 +481,22 @@ def build_ffmpeg_output_args(profile: StreamProfile, ffmpeg_mode: str, write_to_
             "-muxdelay", "0",
             "-muxpreload", "0",
             "-mpegts_flags", "+resend_headers",
-            *args,
+            *output_args,
         ]
-    return [*args, output_target]
+    return [*output_args, output_target]
+
+
+def args_ns_gop(profile: StreamProfile, args: argparse.Namespace) -> int:
+    if args.gop_frames is not None:
+        return max(1, int(args.gop_frames))
+    if args.gop_multiplier is not None:
+        return max(1, int(round(profile.fps * args.gop_multiplier)))
+    return max(1, int(profile.fps))
 
 
 def build_ffmpeg_cmd(
     profile: StreamProfile,
-    ffmpeg_mode: str,
+    args: argparse.Namespace,
     encoder_name: str,
     source_mode: str,
     write_to_stdout: bool,
@@ -487,14 +534,21 @@ def build_ffmpeg_cmd(
             "-i", f"testsrc=size={profile.width}x{profile.height}:rate={profile.fps}",
         ]
     else:
-        cmd += [
-            "-f", "image2pipe",
-            "-framerate", str(profile.fps),
-            "-vcodec", "mjpeg",
-            "-i", "-",
-        ]
+        if args.ffmpeg_input_mode == "mjpeg":
+            cmd += [
+                "-f", "mjpeg",
+                "-framerate", str(profile.fps),
+                "-i", "-",
+            ]
+        else:
+            cmd += [
+                "-f", "image2pipe",
+                "-framerate", str(profile.fps),
+                "-vcodec", "mjpeg",
+                "-i", "-",
+            ]
     cmd += ["-c:v", encoder, *encoder_opts]
-    cmd += build_ffmpeg_output_args(profile, ffmpeg_mode, write_to_stdout)
+    cmd += build_ffmpeg_output_args(profile, args, write_to_stdout)
     return cmd
 
 
@@ -711,10 +765,17 @@ class SourceAdapter:
         self.page_errors: list[str] = []
         self._task: Optional[asyncio.Task] = None
         self._thread: Optional[threading.Thread] = None
+        self._decode_thread: Optional[threading.Thread] = None
+        self._decode_lock = threading.Lock()
+        self._pending_b64: Optional[str] = None
+        self._decode_event = threading.Event()
         self.frame_counter = 0
 
     def start(self) -> None:
         if self.args.source_mode == "overlay":
+            if self.args.decode_mode == "worker":
+                self._decode_thread = threading.Thread(target=self._decode_loop, daemon=True)
+                self._decode_thread.start()
             self._task = asyncio.create_task(self._playwright_capture())
         else:
             self._thread = threading.Thread(target=self._synthetic_source_loop, daemon=True)
@@ -723,6 +784,7 @@ class SourceAdapter:
     async def stop(self) -> None:
         self.stop_event.set()
         self.frame_store.event.set()
+        self._decode_event.set()
         if self._task is not None:
             if not self._task.done():
                 self._task.cancel()
@@ -735,6 +797,30 @@ class SourceAdapter:
         self.frame_counter += 1
         self.frame_store.push(frame)
         self.metrics.record_source_arrival(ts)
+
+    def _decode_and_emit(self, payload_b64: str) -> None:
+        started = time.perf_counter()
+        payload = base64.b64decode(payload_b64)
+        self.metrics.decode_samples_ms.append((time.perf_counter() - started) * 1000.0)
+        self._emit_frame(payload)
+
+    def _decode_loop(self) -> None:
+        while not self.stop_event.is_set():
+            self._decode_event.wait(0.25)
+            if self.stop_event.is_set():
+                break
+            self._decode_event.clear()
+            payload_b64 = None
+            with self._decode_lock:
+                payload_b64 = self._pending_b64
+                self._pending_b64 = None
+            if not payload_b64:
+                continue
+            try:
+                self._decode_and_emit(payload_b64)
+            except Exception as exc:
+                self.capture_error = f"decode_failed:{type(exc).__name__}:{exc}"
+                return
 
     def _synthetic_source_loop(self) -> None:
         if Image is None or ImageDraw is None:
@@ -781,7 +867,12 @@ class SourceAdapter:
                 async def on_frame(event: dict[str, Any]) -> None:
                     if self.stop_event.is_set():
                         return
-                    self._emit_frame(base64.b64decode(event["data"]))
+                    if self.args.decode_mode == "worker":
+                        with self._decode_lock:
+                            self._pending_b64 = event["data"]
+                        self._decode_event.set()
+                    else:
+                        self._decode_and_emit(event["data"])
                     with suppress(Exception):
                         await cdp.send("Page.screencastFrameAck", {"sessionId": event["sessionId"]})
 
@@ -828,6 +919,7 @@ class OverlayCaptureRunner:
         self.speed_ema: Optional[float] = None
         self.zero_speed_streak = 0
         self.last_control_progress_time = 0.0
+        self.flush_counter = 0
 
     def _update_speed_ema(self) -> Optional[float]:
         sample = self.metrics.ffmpeg_speed
@@ -882,7 +974,7 @@ class OverlayCaptureRunner:
         self.proc = subprocess.Popen(
             build_ffmpeg_cmd(
                 self.profile,
-                self.args.ffmpeg_mode,
+                self.args,
                 self.args.encoder,
                 "synthetic",
                 write_to_stdout=False,
@@ -1058,7 +1150,14 @@ class OverlayCaptureRunner:
             try:
                 write_started = time.perf_counter()
                 self.proc.stdin.write(chosen.data)
-                self.proc.stdin.flush()
+                self.flush_counter += 1
+                should_flush = True
+                if self.args.stdin_flush_mode == "none":
+                    should_flush = False
+                elif self.args.stdin_flush_mode == "batched":
+                    should_flush = (self.flush_counter % max(1, self.args.stdin_flush_every)) == 0
+                if should_flush:
+                    self.proc.stdin.flush()
                 block_ms = (time.perf_counter() - write_started) * 1000.0
                 submitted_at = now()
                 self.metrics.record_submit(submitted_at, block_ms, submit_rate)
@@ -1091,8 +1190,11 @@ class OverlayCaptureRunner:
             "service_config_preset": self.args.service_config_preset,
             "source_mode": self.args.source_mode,
             "gpu_mode": self.args.gpu_mode,
+            "ffmpeg_mode": self.args.ffmpeg_mode,
+            "target_bitrate_k": self.profile.bitrate_k,
             "every_nth_frame": self.args.every_nth_frame,
             "screencast_quality": self.args.screencast_quality,
+            "decode_mode": self.args.decode_mode,
             "viewport_width": self.profile.width,
             "viewport_height": self.profile.height,
             "capture_width": self.source.capture_width,
@@ -1107,6 +1209,8 @@ class OverlayCaptureRunner:
             "source_idle_repeats": self.metrics.source_idle_repeats,
             "stdin_block_avg_ms": round(Metrics._avg(self.metrics.stdin_block_samples_ms), 3),
             "stdin_block_max_ms": round(Metrics._max(self.metrics.stdin_block_samples_ms), 3),
+            "decode_avg_ms": round(Metrics._avg(self.metrics.decode_samples_ms), 3),
+            "decode_max_ms": round(Metrics._max(self.metrics.decode_samples_ms), 3),
             "trailing_idle_gap_ms": round(effective_gaps[-1], 3) if effective_gaps else 0.0,
             "ffmpeg_speed_avg": round(Metrics._avg(self.metrics.ffmpeg_speed_samples), 3),
             "ffmpeg_speed_max": round(Metrics._max(self.metrics.ffmpeg_speed_samples), 3),
@@ -1504,7 +1608,7 @@ class RelayBroadcastRunner:
         self.proc = subprocess.Popen(
             build_ffmpeg_cmd(
                 self.profile,
-                self.args.ffmpeg_mode,
+                self.args,
                 self.args.encoder,
                 "testsrc",
                 write_to_stdout=True,
@@ -1761,6 +1865,10 @@ def apply_service_config_preset(args: argparse.Namespace, preset_name: str) -> a
     next_args.ffmpeg_mode = "service"
     next_args.profile = "high"
     next_args.source_mode = "overlay"
+    next_args.video_bitrate_k = preset.bitrate_k
+    next_args.ffmpeg_input_mode = preset.ffmpeg_input_mode
+    next_args.stdin_flush_mode = preset.stdin_flush_mode
+    next_args.muxrate_policy = preset.muxrate_policy
     return next_args
 
 
@@ -1849,7 +1957,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--clients", type=int, default=2)
     parser.add_argument("--stream-port", type=int)
     parser.add_argument("--encoder", choices=["auto", "libx264", "h264_videotoolbox"], default="libx264")
-    parser.add_argument("--ffmpeg-mode", choices=["service", "tuned"], default="tuned")
+    parser.add_argument("--ffmpeg-mode", choices=["service", "service_low_latency", "tuned"], default="tuned")
     parser.add_argument("--source-mode", choices=["overlay", "synthetic_sparse"], default="overlay")
     parser.add_argument("--strategy", action="append", choices=[
         "naive_repeat_last",
@@ -1883,6 +1991,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--capture-height", type=int)
     parser.add_argument("--stream-fps", type=int)
     parser.add_argument("--quality", type=int)
+    parser.add_argument("--video-bitrate-k", type=int)
+    parser.add_argument("--muxrate-policy", choices=["auto", "fixed_4000k", "bitrate", "bitrate_x1_5", "none"], default="auto")
+    parser.add_argument("--gop-multiplier", type=float)
+    parser.add_argument("--gop-frames", type=int)
+    parser.add_argument("--ffmpeg-input-mode", choices=["image2pipe", "mjpeg"], default="image2pipe")
+    parser.add_argument("--decode-mode", choices=["inline", "worker"], default="inline")
+    parser.add_argument("--stdin-flush-mode", choices=["every", "batched", "none"], default="every")
+    parser.add_argument("--stdin-flush-every", type=int, default=5)
     parser.add_argument("--every-nth-frame", type=int, default=1)
     parser.add_argument("--screencast-quality", type=int, default=24)
     parser.add_argument(

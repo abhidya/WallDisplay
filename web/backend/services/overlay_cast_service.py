@@ -28,6 +28,7 @@ DEFAULT_PRIMING_SECONDS = 6
 FFMPEG_SPEED_RE = re.compile(r"speed=\s*([0-9.]+)x")
 FFMPEG_FPS_RE = re.compile(r"fps=\s*([0-9.]+)")
 FFMPEG_BITRATE_RE = re.compile(r"bitrate=\s*([0-9.]+)kbits/s")
+FFMPEG_PROGRESS_KEYS = {"speed", "fps", "bitrate"}
 
 
 class ReusableThreadingHTTPServer(ThreadingHTTPServer):
@@ -169,8 +170,12 @@ class OverlayCastSession:
     relay_thread: Optional[threading.Thread] = None
     ffmpeg_log_thread: Optional[threading.Thread] = None
     ffmpeg_stdout_thread: Optional[threading.Thread] = None
+    frame_decode_thread: Optional[threading.Thread] = None
     frame_writer_thread: Optional[threading.Thread] = None
     latest_frame: Optional[bytes] = None
+    pending_frame_b64: Optional[str] = None
+    frame_decode_lock: threading.Lock = field(default_factory=threading.Lock)
+    frame_decode_event: threading.Event = field(default_factory=threading.Event)
     frame_interval_seconds: float = 1 / 20
 
     def to_dict(self) -> dict:
@@ -227,10 +232,10 @@ class OverlayCastService:
         controls_hidden: bool = True,
         viewport_width: int = 1280,
         viewport_height: int = 720,
-        capture_width: int = 960,
-        capture_height: int = 540,
-        quality: int = 30,
-        frame_rate: int = 20,
+        capture_width: int = 854,
+        capture_height: int = 480,
+        quality: int = 50,
+        frame_rate: int = 12,
         stream_port: Optional[int] = None,
     ) -> dict:
         with self._session_lock:
@@ -371,6 +376,13 @@ class OverlayCastService:
             )
             ffmpeg_stdout_thread.start()
 
+            frame_decode_thread = threading.Thread(
+                target=self._pump_latest_frame_decode,
+                args=(session,),
+                daemon=True,
+            )
+            frame_decode_thread.start()
+
             frame_writer_thread = threading.Thread(
                 target=self._pump_latest_frame_to_ffmpeg,
                 args=(session, ffmpeg_proc),
@@ -392,7 +404,9 @@ class OverlayCastService:
                 if session.stop_event.is_set():
                     return
                 try:
-                    session.latest_frame = base64.b64decode(event["data"])
+                    with session.frame_decode_lock:
+                        session.pending_frame_b64 = event["data"]
+                    session.frame_decode_event.set()
                     await cdp.send("Page.screencastFrameAck", {"sessionId": event["sessionId"]})
                 except Exception as exc:
                     logger.debug("Overlay cast frame handling stopped: %s", exc)
@@ -418,6 +432,7 @@ class OverlayCastService:
             session.relay_thread = relay_thread
             session.ffmpeg_log_thread = ffmpeg_log_thread
             session.ffmpeg_stdout_thread = ffmpeg_stdout_thread
+            session.frame_decode_thread = frame_decode_thread
             session.frame_writer_thread = frame_writer_thread
             session.ready_event.set()
 
@@ -553,8 +568,11 @@ class OverlayCastService:
         session.relay_thread = None
         session.ffmpeg_log_thread = None
         session.ffmpeg_stdout_thread = None
+        session.frame_decode_thread = None
         session.frame_writer_thread = None
         session.latest_frame = None
+        session.pending_frame_b64 = None
+        session.frame_decode_event.set()
 
     def _build_overlay_url(self, overlay_base_url: str, config_id: int, controls_hidden: bool) -> str:
         base = overlay_base_url.rstrip("/")
@@ -605,6 +623,23 @@ class OverlayCastService:
                 line = raw_line.decode("utf-8", errors="replace").strip()
                 if not line:
                     continue
+                key, sep, value = line.partition("=")
+                if sep and key in FFMPEG_PROGRESS_KEYS:
+                    if key == "speed":
+                        try:
+                            session.ffmpeg_speed = float(value.replace("x", "").strip())
+                        except ValueError:
+                            pass
+                    elif key == "fps":
+                        try:
+                            session.ffmpeg_fps = float(value.strip())
+                        except ValueError:
+                            pass
+                    elif key == "bitrate":
+                        try:
+                            session.ffmpeg_bitrate_kbps = float(value.replace("kbits/s", "").strip())
+                        except ValueError:
+                            pass
                 speed_match = FFMPEG_SPEED_RE.search(line)
                 if speed_match:
                     session.ffmpeg_speed = float(speed_match.group(1))
@@ -632,6 +667,26 @@ class OverlayCastService:
                 session.stop_event.set()
                 break
             time.sleep(session.frame_interval_seconds)
+
+    def _pump_latest_frame_decode(self, session: OverlayCastSession):
+        while not session.stop_event.is_set():
+            session.frame_decode_event.wait(timeout=0.25)
+            if session.stop_event.is_set():
+                break
+            session.frame_decode_event.clear()
+            pending_frame_b64 = None
+            with session.frame_decode_lock:
+                pending_frame_b64 = session.pending_frame_b64
+                session.pending_frame_b64 = None
+            if not pending_frame_b64:
+                continue
+            try:
+                session.latest_frame = base64.b64decode(pending_frame_b64)
+            except Exception as exc:
+                logger.warning("Overlay cast frame decode stopped for session %s: %s", session.session_id, exc)
+                session.error = str(exc)
+                session.stop_event.set()
+                break
 
     def _pump_ffmpeg_stdout(
         self,
@@ -677,17 +732,25 @@ class OverlayCastService:
         ffmpeg_cmd = [
             "ffmpeg",
             "-y",
+            "-hide_banner",
+            "-nostats",
+            "-progress",
+            "pipe:2",
             "-f",
-            "image2pipe",
-            "-vcodec",
             "mjpeg",
+            "-framerate",
+            str(frame_rate),
             "-i",
             "-",
             "-c:v",
             encoder,
             *encoder_options,
             "-b:v",
-            "2500k",
+            "2000k",
+            "-g",
+            str(frame_rate),
+            "-keyint_min",
+            str(frame_rate),
             "-r",
             str(frame_rate),
             "-pix_fmt",

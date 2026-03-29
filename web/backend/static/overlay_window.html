@@ -3751,11 +3751,52 @@
         
         // Removed addLightsWidget function - lights widget is now added through React frontend
         
+        function applyOverlayBrightness(brightness) {
+            const overlay = document.getElementById('brightness-overlay');
+            if (!overlay || typeof brightness !== 'number') {
+                return;
+            }
+            const opacity = Math.max(0, Math.min(1, (100 - brightness) / 100));
+            overlay.style.opacity = opacity;
+        }
+
         // Combined status polling for brightness and sync
         function startOverlayStatusPolling() {
             let lastSyncEventId = null;
             let eventSource = null;
             let reconnectTimeout = null;
+            let pollIntervalId = null;
+
+            async function updateOverlayStatus() {
+                try {
+                    const response = await fetch('/api/overlay/status');
+                    const status = await response.json();
+
+                    applyOverlayBrightness(status.brightness);
+
+                    if (status.sync && status.sync.event_id && status.sync.event_id !== lastSyncEventId) {
+                        lastSyncEventId = status.sync.event_id;
+                        console.log(`Sync event detected: ${status.sync.triggered_by} at ${status.sync.timestamp}`);
+
+                        if (backgroundType === 'mapping') {
+                            mappingMediaCache.forEach((media) => {
+                                if (media instanceof HTMLVideoElement) {
+                                    media.currentTime = 0;
+                                    media.play().catch(err => console.error('Failed to sync mapping media:', err));
+                                }
+                            });
+                        } else {
+                            const video = document.getElementById('bg-video');
+                            video.currentTime = 0;
+                            video.play().catch(err => {
+                                console.error('Failed to sync video:', err);
+                            });
+                        }
+                    }
+                } catch (error) {
+                    console.error('Status update error:', error);
+                }
+            }
             
             function connectEventSource() {
                 if (eventSource) {
@@ -3779,9 +3820,8 @@
                         
                         // Handle initialization or brightness updates
                         if (data.type === 'init' || data.type === 'brightness') {
-                            const brightness = data.type === 'init' ? data.data.brightness : data.data.brightness;
-                            const opacity = (100 - brightness) / 100;
-                            document.getElementById('brightness-overlay').style.opacity = opacity;
+                            const brightness = data.data.brightness;
+                            applyOverlayBrightness(brightness);
                             
                             // Initialize sync state from init event
                             if (data.type === 'init' && data.data.sync && data.data.sync.event_id) {
@@ -3848,44 +3888,16 @@
             
             // Start connection
             connectEventSource();
+            updateOverlayStatus();
+            pollIntervalId = setInterval(updateOverlayStatus, 5000);
             
             // Fallback polling (only if EventSource is not supported)
             if (!window.EventSource) {
                 console.warn('EventSource not supported, falling back to polling');
-                // Original polling code here as fallback
-                async function updateOverlayStatus() {
-                    try {
-                        const response = await fetch('/api/overlay/status');
-                        const status = await response.json();
-                        
-                        const opacity = (100 - status.brightness) / 100;
-                        document.getElementById('brightness-overlay').style.opacity = opacity;
-                        
-                        if (status.sync && status.sync.event_id && status.sync.event_id !== lastSyncEventId) {
-                            lastSyncEventId = status.sync.event_id;
-                            console.log(`Sync event detected: ${status.sync.triggered_by} at ${status.sync.timestamp}`);
-                            
-                            if (backgroundType === 'mapping') {
-                                mappingMediaCache.forEach((media) => {
-                                    if (media instanceof HTMLVideoElement) {
-                                        media.currentTime = 0;
-                                        media.play().catch(err => console.error('Failed to sync mapping media:', err));
-                                    }
-                                });
-                            } else {
-                                const video = document.getElementById('bg-video');
-                                video.currentTime = 0;
-                                video.play().catch(err => {
-                                    console.error('Failed to sync video:', err);
-                                });
-                            }
-                        }
-                    } catch (error) {
-                        console.error('Status update error:', error);
-                    }
+                if (pollIntervalId) {
+                    clearInterval(pollIntervalId);
                 }
-                
-                setInterval(updateOverlayStatus, 5000); // Reduced frequency for fallback
+                pollIntervalId = setInterval(updateOverlayStatus, 5000);
             }
         }
         
