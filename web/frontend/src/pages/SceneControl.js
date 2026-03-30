@@ -27,6 +27,8 @@ import {
 
 import { mappingsApi, mediaLibraryApi, photoApi, photoListApi, projectionApi, videoApi } from '../services/api';
 
+const SCENE_CONTROL_PRESET_KEY = 'nanoDlnaSceneControlPresetId';
+
 function normalizeNumericIdList(values) {
   return (Array.isArray(values) ? values : [])
     .map((value) => Number(value))
@@ -217,6 +219,7 @@ function createSmartGroupAssignments(hydratedScenes) {
 function SceneControl() {
   const [scenes, setScenes] = useState([]);
   const [sceneRanks, setSceneRanks] = useState([]);
+  const [sceneControlPresets, setSceneControlPresets] = useState([]);
   const [selectedSceneIds, setSelectedSceneIds] = useState([]);
   const [selectedScenes, setSelectedScenes] = useState([]);
   const [videos, setVideos] = useState([]);
@@ -233,16 +236,23 @@ function SceneControl() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [rankSaving, setRankSaving] = useState(false);
+  const [presetSaving, setPresetSaving] = useState(false);
+  const [presetLoading, setPresetLoading] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [rankName, setRankName] = useState('');
   const [rankGapPx, setRankGapPx] = useState(0);
+  const [presetName, setPresetName] = useState('');
+  const [selectedPresetId, setSelectedPresetId] = useState('');
+  const [pendingPresetPayload, setPendingPresetPayload] = useState(null);
+  const [initialPresetHydrated, setInitialPresetHydrated] = useState(false);
 
   useEffect(() => {
     let active = true;
     Promise.all([
       mappingsApi.listScenes(),
       mappingsApi.listRanks(),
+      mappingsApi.listSceneControlPresets(),
       videoApi.getVideos(),
       photoApi.getPhotos(),
       mediaLibraryApi.listDirectories(),
@@ -251,14 +261,20 @@ function SceneControl() {
       mediaLibraryApi.listMediaChannels(),
       projectionApi.listAnimations(),
       projectionApi.listAnimationLists(),
-    ]).then(([sceneRes, rankRes, videoRes, photoRes, mediaDirectoryRes, mediaListRes, photoListRes, mediaChannelRes, animationRes, animationListRes]) => {
+    ]).then(([sceneRes, rankRes, presetRes, videoRes, photoRes, mediaDirectoryRes, mediaListRes, photoListRes, mediaChannelRes, animationRes, animationListRes]) => {
       if (!active) {
         return;
       }
       const nextScenes = sceneRes.data || [];
       setSceneRanks(rankRes.data || []);
+      const nextPresets = presetRes.data || [];
+      setSceneControlPresets(nextPresets);
       setScenes(nextScenes);
       setSelectedSceneIds(nextScenes.slice(0, 2).map((scene) => scene.id));
+      const storedPresetId = window.localStorage.getItem(SCENE_CONTROL_PRESET_KEY) || '';
+      if (storedPresetId && nextPresets.some((preset) => String(preset.id) === storedPresetId)) {
+        setSelectedPresetId(storedPresetId);
+      }
       setVideos(videoRes.data.videos || []);
       setPhotos(photoRes.data.photos || []);
       setMediaDirectories(mediaDirectoryRes.data || []);
@@ -294,19 +310,29 @@ function SceneControl() {
           return;
         }
         setSelectedScenes(hydratedScenes);
-        const nextAssignments = createSmartGroupAssignments(hydratedScenes);
+        const shouldApplyPreset = pendingPresetPayload
+          && Array.isArray(pendingPresetPayload.scene_ids)
+          && pendingPresetPayload.scene_ids.length === selectedSceneIds.length
+          && pendingPresetPayload.scene_ids.every((sceneId, index) => Number(sceneId) === Number(selectedSceneIds[index]));
+        const nextAssignments = shouldApplyPreset
+          ? pendingPresetPayload.group_assignments || {}
+          : createSmartGroupAssignments(hydratedScenes);
         setGroupAssignments(nextAssignments);
         setRowEdits((current) => {
           const next = {};
           const rowCount = Math.max(0, ...Object.values(nextAssignments).map((assignments) => assignments?.length || 0));
           for (let index = 0; index < rowCount; index += 1) {
+            const presetEdit = shouldApplyPreset ? pendingPresetPayload.row_edits?.[String(index)] : null;
             const seedGroup = hydratedScenes
               .flatMap((scene) => (nextAssignments[scene.id]?.[index] || []).map((groupId) => scene._groupsById?.[groupId]))
               .find(Boolean);
-            next[index] = current[index] || createRowEdit(seedGroup);
+            next[index] = presetEdit ? createRowEdit(presetEdit) : (current[index] || createRowEdit(seedGroup));
           }
           return next;
         });
+        if (shouldApplyPreset) {
+          setPendingPresetPayload(null);
+        }
       })
       .catch((err) => {
         console.error(err);
@@ -344,6 +370,34 @@ function SceneControl() {
       setRankGapPx(0);
     }
   }, [selectedRank, selectedSceneIds]);
+
+  const selectedPreset = useMemo(() => (
+    sceneControlPresets.find((preset) => String(preset.id) === String(selectedPresetId)) || null
+  ), [sceneControlPresets, selectedPresetId]);
+
+  useEffect(() => {
+    if (selectedPreset) {
+      setPresetName(selectedPreset.name || '');
+      window.localStorage.setItem(SCENE_CONTROL_PRESET_KEY, String(selectedPreset.id));
+    } else {
+      if (selectedPresetId) {
+        window.localStorage.setItem(SCENE_CONTROL_PRESET_KEY, String(selectedPresetId));
+      } else {
+        window.localStorage.removeItem(SCENE_CONTROL_PRESET_KEY);
+      }
+      if (!presetName && selectedSceneIds.length) {
+        setPresetName(`Preset ${selectedSceneIds.join('-')}`);
+      }
+    }
+  }, [selectedPreset, selectedPresetId, presetName, selectedSceneIds]);
+
+  useEffect(() => {
+    if (initialPresetHydrated || !selectedPresetId || !sceneControlPresets.length) {
+      return;
+    }
+    setInitialPresetHydrated(true);
+    applyPreset(selectedPresetId);
+  }, [initialPresetHydrated, selectedPresetId, sceneControlPresets.length]);
 
   const alignedRows = useMemo(() => {
     const rowCount = Math.max(0, ...Object.values(groupAssignments).map((assignments) => assignments?.length || 0));
@@ -407,6 +461,102 @@ function SceneControl() {
       setError('Failed to save scene rank.');
     } finally {
       setRankSaving(false);
+    }
+  };
+
+  const applyPreset = async (presetId) => {
+    if (!presetId) {
+      setSelectedPresetId('');
+      setPresetName('');
+      window.localStorage.removeItem(SCENE_CONTROL_PRESET_KEY);
+      return;
+    }
+    try {
+      setPresetLoading(true);
+      setError('');
+      setMessage('');
+      const response = await mappingsApi.getSceneControlPreset(presetId);
+      const preset = response.data;
+      setSelectedPresetId(String(preset.id));
+      setPresetName(preset.name || '');
+      setPendingPresetPayload({
+        scene_ids: (preset.scene_ids || []).map(Number),
+        group_assignments: preset.group_assignments || {},
+        row_edits: preset.row_edits || {},
+      });
+      setSelectedSceneIds((preset.scene_ids || []).map(Number));
+      const linkedRank = preset.rank_id
+        ? sceneRanks.find((rank) => Number(rank.id) === Number(preset.rank_id))
+        : null;
+      if (linkedRank) {
+        setRankName(linkedRank.name || '');
+        setRankGapPx(linkedRank.gap_px || 0);
+      }
+      setMessage(`Loaded preset "${preset.name}".`);
+    } catch (err) {
+      console.error(err);
+      setError('Failed to load scene control preset.');
+    } finally {
+      setPresetLoading(false);
+    }
+  };
+
+  const persistPreset = async () => {
+    try {
+      setPresetSaving(true);
+      setError('');
+      setMessage('');
+      const payload = {
+        name: presetName || `Preset ${selectedSceneIds.join('-')}`,
+        scene_ids: selectedSceneIds.map(Number),
+        group_assignments: Object.fromEntries(
+          Object.entries(groupAssignments || {}).map(([sceneId, buckets]) => [String(sceneId), buckets || []]),
+        ),
+        row_edits: Object.fromEntries(
+          Object.entries(rowEdits || {}).map(([rowIndex, rowEdit]) => [String(rowIndex), rowEdit || {}]),
+        ),
+        rank_id: selectedRank?.id || null,
+        preset_metadata: {},
+      };
+      const response = selectedPreset
+        ? await mappingsApi.updateSceneControlPreset(selectedPreset.id, payload)
+        : await mappingsApi.createSceneControlPreset(payload);
+      const savedPreset = response.data;
+      setSceneControlPresets((current) => (
+        selectedPreset
+          ? current.map((preset) => (preset.id === savedPreset.id ? savedPreset : preset))
+          : [savedPreset, ...current]
+      ));
+      setSelectedPresetId(String(savedPreset.id));
+      setPresetName(savedPreset.name || '');
+      setMessage(`Saved preset "${savedPreset.name}".`);
+    } catch (err) {
+      console.error(err);
+      setError('Failed to save scene control preset.');
+    } finally {
+      setPresetSaving(false);
+    }
+  };
+
+  const deletePreset = async () => {
+    if (!selectedPreset) {
+      return;
+    }
+    try {
+      setPresetSaving(true);
+      setError('');
+      setMessage('');
+      await mappingsApi.deleteSceneControlPreset(selectedPreset.id);
+      setSceneControlPresets((current) => current.filter((preset) => preset.id !== selectedPreset.id));
+      setSelectedPresetId('');
+      setPresetName('');
+      window.localStorage.removeItem(SCENE_CONTROL_PRESET_KEY);
+      setMessage(`Deleted preset "${selectedPreset.name}".`);
+    } catch (err) {
+      console.error(err);
+      setError('Failed to delete scene control preset.');
+    } finally {
+      setPresetSaving(false);
     }
   };
 
@@ -560,6 +710,55 @@ function SceneControl() {
               Select the mapping scenes you want to align and batch-edit.
             </Typography>
             <Stack spacing={1.25} sx={{ mb: 2 }}>
+              <Typography variant="subtitle2">Workspace Preset</Typography>
+              <FormControl fullWidth size="small">
+                <InputLabel>Saved Preset</InputLabel>
+                <Select
+                  value={selectedPresetId}
+                  label="Saved Preset"
+                  onChange={(event) => {
+                    const nextPresetId = event.target.value;
+                    if (!nextPresetId) {
+                      setSelectedPresetId('');
+                      setPresetName('');
+                      window.localStorage.removeItem(SCENE_CONTROL_PRESET_KEY);
+                      return;
+                    }
+                    applyPreset(nextPresetId);
+                  }}
+                >
+                  <MenuItem value="">None</MenuItem>
+                  {sceneControlPresets.map((preset) => (
+                    <MenuItem key={preset.id} value={String(preset.id)}>
+                      {preset.name}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <TextField
+                label="Preset Name"
+                size="small"
+                value={presetName}
+                onChange={(event) => setPresetName(event.target.value)}
+              />
+              <Stack direction="row" spacing={1}>
+                <Button variant="outlined" onClick={persistPreset} disabled={presetSaving || !selectedSceneIds.length}>
+                  {selectedPreset ? 'Update Preset' : 'Save Preset'}
+                </Button>
+                <Button
+                  variant="text"
+                  onClick={() => {
+                    setSelectedPresetId('');
+                    setPresetName(`Preset ${selectedSceneIds.join('-')}`);
+                    window.localStorage.removeItem(SCENE_CONTROL_PRESET_KEY);
+                  }}
+                >
+                  New
+                </Button>
+                <Button variant="text" color="error" onClick={deletePreset} disabled={presetSaving || !selectedPreset}>
+                  Delete
+                </Button>
+              </Stack>
               <Typography variant="subtitle2">Horizontal Rank</Typography>
               <TextField
                 label="Rank Name"
@@ -635,6 +834,11 @@ function SceneControl() {
                   </Button>
                 </Stack>
               </Stack>
+              {presetLoading ? (
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                  Loading preset...
+                </Typography>
+              ) : null}
             </Paper>
 
             {!alignedRows.length ? (

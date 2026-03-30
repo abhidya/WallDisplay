@@ -215,6 +215,11 @@ const mappingsApi = {
   createRank: (data) => api.post('/mappings/ranks', data),
   updateRank: (id, data) => api.put(`/mappings/ranks/${id}`, data),
   deleteRank: (id) => api.delete(`/mappings/ranks/${id}`),
+  listSceneControlPresets: () => api.get('/mappings/scene-control-presets'),
+  getSceneControlPreset: (id) => api.get(`/mappings/scene-control-presets/${id}`),
+  createSceneControlPreset: (data) => api.post('/mappings/scene-control-presets', data),
+  updateSceneControlPreset: (id, data) => api.put(`/mappings/scene-control-presets/${id}`, data),
+  deleteSceneControlPreset: (id) => api.delete(`/mappings/scene-control-presets/${id}`),
   importScene: (formData) => api.post('/mappings/scenes/import', formData, {
     headers: {
       'Content-Type': 'multipart/form-data',

@@ -101,6 +101,21 @@ def create_media_tables(cursor):
     )
     cursor.execute(
         """
+        CREATE TABLE IF NOT EXISTS scene_control_presets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name VARCHAR NOT NULL UNIQUE,
+            scene_ids JSON NOT NULL DEFAULT '[]',
+            group_assignments JSON NOT NULL DEFAULT '{}',
+            row_edits JSON NOT NULL DEFAULT '{}',
+            rank_id INTEGER,
+            preset_metadata JSON NOT NULL DEFAULT '{}',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS media_directories (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name VARCHAR NOT NULL UNIQUE,

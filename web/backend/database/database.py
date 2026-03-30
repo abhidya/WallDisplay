@@ -144,6 +144,21 @@ def ensure_sqlite_schema_compatibility():
         )
         connection.exec_driver_sql(
             """
+            CREATE TABLE IF NOT EXISTS scene_control_presets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name VARCHAR NOT NULL UNIQUE,
+                scene_ids JSON NOT NULL DEFAULT '[]',
+                group_assignments JSON NOT NULL DEFAULT '{}',
+                row_edits JSON NOT NULL DEFAULT '{}',
+                rank_id INTEGER,
+                preset_metadata JSON NOT NULL DEFAULT '{}',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.exec_driver_sql(
+            """
             CREATE TABLE IF NOT EXISTS media_directories (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name VARCHAR NOT NULL UNIQUE,
@@ -245,6 +260,7 @@ def init_db():
     from models.projection import ProjectionConfig
     from models.mapping_scene import MappingScene
     from models.scene_rank import SceneRank
+    from models.scene_control_preset import SceneControlPreset
     from models.media_directory import MediaDirectory
     from models.media_list import MediaList
     from models.media_channel import MediaChannel

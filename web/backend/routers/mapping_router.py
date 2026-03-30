@@ -16,6 +16,12 @@ from schemas.mapping_scene import (
 from services.mapping_scene_service import MappingSceneService
 from schemas.scene_rank import SceneRankCreate, SceneRankResponse, SceneRankUpdate
 from services.scene_rank_service import SceneRankService
+from schemas.scene_control_preset import (
+    SceneControlPresetCreate,
+    SceneControlPresetResponse,
+    SceneControlPresetUpdate,
+)
+from services.scene_control_preset_service import SceneControlPresetService
 from services.overlay_event_bus import notify_overlay_config_update
 from models.overlay import OverlayConfig
 
@@ -39,6 +45,46 @@ def list_mapping_scenes(db: Session = Depends(get_db)):
 @router.get("/ranks", response_model=List[SceneRankResponse])
 def list_scene_ranks(db: Session = Depends(get_db)):
     return SceneRankService(db).list_ranks()
+
+
+@router.get("/scene-control-presets", response_model=List[SceneControlPresetResponse])
+def list_scene_control_presets(db: Session = Depends(get_db)):
+    return SceneControlPresetService(db).list_presets()
+
+
+@router.post("/scene-control-presets", response_model=SceneControlPresetResponse)
+def create_scene_control_preset(payload: SceneControlPresetCreate, db: Session = Depends(get_db)):
+    try:
+        return SceneControlPresetService(db).create_preset(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/scene-control-presets/{preset_id}", response_model=SceneControlPresetResponse)
+def get_scene_control_preset(preset_id: int, db: Session = Depends(get_db)):
+    preset = SceneControlPresetService(db).get_preset(preset_id)
+    if not preset:
+        raise HTTPException(status_code=404, detail="Scene control preset not found")
+    return preset
+
+
+@router.put("/scene-control-presets/{preset_id}", response_model=SceneControlPresetResponse)
+def update_scene_control_preset(preset_id: int, payload: SceneControlPresetUpdate, db: Session = Depends(get_db)):
+    try:
+        preset = SceneControlPresetService(db).update_preset(preset_id, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not preset:
+        raise HTTPException(status_code=404, detail="Scene control preset not found")
+    return preset
+
+
+@router.delete("/scene-control-presets/{preset_id}")
+def delete_scene_control_preset(preset_id: int, db: Session = Depends(get_db)):
+    deleted = SceneControlPresetService(db).delete_preset(preset_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Scene control preset not found")
+    return {"success": True}
 
 
 @router.post("/ranks", response_model=SceneRankResponse)
