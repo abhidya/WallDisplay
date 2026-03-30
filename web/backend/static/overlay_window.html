@@ -1045,6 +1045,8 @@
         let config = null;
         let backgroundType = 'video';
         let mappingScene = null;
+        let mappingRankLayout = null;
+        let mappingSceneViewport = null;
         let videoTransform = { x: 0, y: 0, scale: 1, rotation: 0 };
         let widgets = [];
         let widgetsById = new Map();
@@ -1979,6 +1981,24 @@
             }
         }
 
+        function drawMediaRect(ctx, media, rect) {
+            ctx.drawImage(media, rect.x, rect.y, rect.width, rect.height);
+        }
+
+        function computeMediaCoverRect(media, bounds, transform) {
+            const sourceWidth = media.videoWidth || media.naturalWidth || media.width || bounds.width;
+            const sourceHeight = media.videoHeight || media.naturalHeight || media.height || bounds.height;
+            const scale = Math.max(bounds.width / sourceWidth, bounds.height / sourceHeight) * (transform.scale || 1);
+            const width = sourceWidth * scale;
+            const height = sourceHeight * scale;
+            return {
+                x: bounds.x + ((bounds.width - width) / 2) + (transform.offset_x || 0),
+                y: bounds.y + ((bounds.height - height) / 2) + (transform.offset_y || 0),
+                width,
+                height,
+            };
+        }
+
         function getNextMappingSourceIndex(state, group) {
             if (!state?.sources?.length) {
                 return 0;
@@ -2231,6 +2251,13 @@
             document.getElementById('video-container').style.display = 'none';
             document.getElementById('mapping-container').style.display = 'block';
             const canvas = document.getElementById('mapping-canvas');
+            mappingRankLayout = scene.rank_layout || scene.rankLayout || null;
+            mappingSceneViewport = scene.scene_viewport || scene.sceneViewport || {
+                x: 0,
+                y: 0,
+                width: scene.canvas_width || 1280,
+                height: scene.canvas_height || 720,
+            };
             canvas.width = scene.canvas_width || 1280;
             canvas.height = scene.canvas_height || 720;
             resetMappingPlaybackState();
@@ -2268,19 +2295,22 @@
 
         function getGroupSharedSourceKey(group) {
             const bindingType = (group.media_binding_type || '').toLowerCase();
+            const sourcePrefix = (group.layout_scope || 'scene') === 'rank' && mappingRankLayout?.rank_id
+                ? `rank:${mappingRankLayout.rank_id}:`
+                : '';
             if (bindingType === 'animation' && group.animation_id) {
-                return `animation:${group.animation_id}`;
+                return `${sourcePrefix}animation:${group.animation_id}`;
             }
             if (bindingType === 'animation_list' && group.animation_list_id) {
-                return `animation_list:${group.animation_list_id}`;
+                return `${sourcePrefix}animation_list:${group.animation_list_id}`;
             }
             const mediaSources = Array.isArray(group.media_urls) && group.media_urls.length
                 ? group.media_urls
                 : (group.media_url ? [group.media_url] : []);
             if (mediaSources.length) {
-                return `${bindingType}:${mediaSources.join('|')}`;
+                return `${sourcePrefix}${bindingType}:${mediaSources.join('|')}`;
             }
-            return `${bindingType}:group:${group.id}`;
+            return `${sourcePrefix}${bindingType}:group:${group.id}`;
         }
 
         function getPreparedSceneCacheKey(scene, canvasWidth, canvasHeight) {
@@ -3151,6 +3181,7 @@
 
             const media = mappingMediaCache.get(group.id);
             const mediaState = mappingMediaState.get(group.id);
+            const rankScopedRect = media ? getRankScopedLocalMediaRect(maskBounds, group, media) : null;
             const isStableImageGroup = Boolean(
                 renderCache
                 && mediaState?.type === 'image'
@@ -3182,17 +3213,22 @@
                 if (renderCache.staticLayerKey !== staticLayerKey) {
                     const staticCtx = renderCache.staticLayerCtx;
                     staticCtx.clearRect(0, 0, localWidth, localHeight);
-                    drawMediaCover(
-                        staticCtx,
-                        mediaState.element,
-                        {
-                            x: sourceBounds.x - maskBounds.x,
-                            y: sourceBounds.y - maskBounds.y,
-                            width: sourceBounds.width,
-                            height: sourceBounds.height,
-                        },
-                        group.transform || {}
-                    );
+                    const staticRankScopedRect = getRankScopedLocalMediaRect(maskBounds, group, mediaState.element);
+                    if (staticRankScopedRect) {
+                        drawMediaRect(staticCtx, mediaState.element, staticRankScopedRect);
+                    } else {
+                        drawMediaCover(
+                            staticCtx,
+                            mediaState.element,
+                            {
+                                x: sourceBounds.x - maskBounds.x,
+                                y: sourceBounds.y - maskBounds.y,
+                                width: sourceBounds.width,
+                                height: sourceBounds.height,
+                            },
+                            group.transform || {}
+                        );
+                    }
                     applyLuminanceMasks(staticCtx, maskImages, localWidth, localHeight, renderCache.maskCanvas || null);
                     renderCache.staticLayerKey = staticLayerKey;
                     markMappingDirty();
@@ -3217,6 +3253,27 @@
                         Math.round(sourceBounds.x - maskBounds.x),
                         Math.round(sourceBounds.y - maskBounds.y)
                     );
+                } else if (rankScopedRect) {
+                    if (mediaState?.previousElement || mediaState?.type === 'image') {
+                        const transitionStart = Number(mediaState.transitionStart || 0);
+                        const transitionDuration = Math.max(1, Number(mediaState.transitionDuration || MAPPING_IMAGE_CROSSFADE_MS));
+                        if (!mediaState.previousElement || !transitionStart) {
+                            drawMediaRect(groupCtx, mediaState.element, rankScopedRect);
+                        } else {
+                            const elapsed = performance.now() - transitionStart;
+                            const progress = Math.max(0, Math.min(1, elapsed / transitionDuration));
+                            groupCtx.save();
+                            groupCtx.globalAlpha = 1 - progress;
+                            drawMediaRect(groupCtx, mediaState.previousElement, rankScopedRect);
+                            groupCtx.restore();
+                            groupCtx.save();
+                            groupCtx.globalAlpha = progress;
+                            drawMediaRect(groupCtx, mediaState.element, rankScopedRect);
+                            groupCtx.restore();
+                        }
+                    } else {
+                        drawMediaRect(groupCtx, media, rankScopedRect);
+                    }
                 } else if (mediaState?.previousElement || mediaState?.type === 'image') {
                     drawMediaWithTransition(
                         groupCtx,
@@ -3315,14 +3372,29 @@
         }
 
         function drawMediaCover(ctx, media, bounds, transform) {
-            const sourceWidth = media.videoWidth || media.naturalWidth || media.width || bounds.width;
-            const sourceHeight = media.videoHeight || media.naturalHeight || media.height || bounds.height;
-            const scale = Math.max(bounds.width / sourceWidth, bounds.height / sourceHeight) * (transform.scale || 1);
-            const width = sourceWidth * scale;
-            const height = sourceHeight * scale;
-            const x = bounds.x + ((bounds.width - width) / 2) + (transform.offset_x || 0);
-            const y = bounds.y + ((bounds.height - height) / 2) + (transform.offset_y || 0);
-            ctx.drawImage(media, x, y, width, height);
+            drawMediaRect(ctx, media, computeMediaCoverRect(media, bounds, transform));
+        }
+
+        function getRankScopedLocalMediaRect(maskBounds, group, media) {
+            if ((group.layout_scope || 'scene') !== 'rank' || !mappingRankLayout || !mappingSceneViewport) {
+                return null;
+            }
+            const rankRect = computeMediaCoverRect(
+                media,
+                {
+                    x: 0,
+                    y: 0,
+                    width: mappingRankLayout.canvas_width || mappingSceneViewport.width,
+                    height: mappingRankLayout.canvas_height || mappingSceneViewport.height,
+                },
+                group.transform || {}
+            );
+            return {
+                x: rankRect.x - (mappingSceneViewport.x || 0) - maskBounds.x,
+                y: rankRect.y - (mappingSceneViewport.y || 0) - maskBounds.y,
+                width: rankRect.width,
+                height: rankRect.height,
+            };
         }
 
         function drawFallbackFill(ctx, group, bounds) {

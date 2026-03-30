@@ -35,6 +35,7 @@ function normalizeNumericIdList(values) {
 
 function createRowEdit(group = {}) {
   return {
+    layout_scope: group.layout_scope || 'scene',
     media_binding_type: group.media_binding_type || 'video',
     animation_id: group.animation_id || '',
     animation_list_id: group.animation_list_id || '',
@@ -215,6 +216,7 @@ function createSmartGroupAssignments(hydratedScenes) {
 
 function SceneControl() {
   const [scenes, setScenes] = useState([]);
+  const [sceneRanks, setSceneRanks] = useState([]);
   const [selectedSceneIds, setSelectedSceneIds] = useState([]);
   const [selectedScenes, setSelectedScenes] = useState([]);
   const [videos, setVideos] = useState([]);
@@ -230,13 +232,17 @@ function SceneControl() {
   const [dragState, setDragState] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [rankSaving, setRankSaving] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [rankName, setRankName] = useState('');
+  const [rankGapPx, setRankGapPx] = useState(0);
 
   useEffect(() => {
     let active = true;
     Promise.all([
       mappingsApi.listScenes(),
+      mappingsApi.listRanks(),
       videoApi.getVideos(),
       photoApi.getPhotos(),
       mediaLibraryApi.listDirectories(),
@@ -245,11 +251,12 @@ function SceneControl() {
       mediaLibraryApi.listMediaChannels(),
       projectionApi.listAnimations(),
       projectionApi.listAnimationLists(),
-    ]).then(([sceneRes, videoRes, photoRes, mediaDirectoryRes, mediaListRes, photoListRes, mediaChannelRes, animationRes, animationListRes]) => {
+    ]).then(([sceneRes, rankRes, videoRes, photoRes, mediaDirectoryRes, mediaListRes, photoListRes, mediaChannelRes, animationRes, animationListRes]) => {
       if (!active) {
         return;
       }
       const nextScenes = sceneRes.data || [];
+      setSceneRanks(rankRes.data || []);
       setScenes(nextScenes);
       setSelectedSceneIds(nextScenes.slice(0, 2).map((scene) => scene.id));
       setVideos(videoRes.data.videos || []);
@@ -312,6 +319,32 @@ function SceneControl() {
     };
   }, [selectedSceneIds]);
 
+  const selectedRank = useMemo(() => {
+    if (!selectedSceneIds.length) {
+      return null;
+    }
+    return sceneRanks.find((rank) => {
+      const rankSceneIds = Array.isArray(rank.scene_ids) ? rank.scene_ids.map(Number) : [];
+      return (
+        rankSceneIds.length === selectedSceneIds.length
+        && rankSceneIds.every((sceneId, index) => sceneId === Number(selectedSceneIds[index]))
+      );
+    }) || null;
+  }, [sceneRanks, selectedSceneIds]);
+
+  useEffect(() => {
+    if (selectedRank) {
+      setRankName(selectedRank.name || '');
+      setRankGapPx(selectedRank.gap_px || 0);
+    } else if (selectedSceneIds.length) {
+      setRankName(`Rank ${selectedSceneIds.join('-')}`);
+      setRankGapPx(0);
+    } else {
+      setRankName('');
+      setRankGapPx(0);
+    }
+  }, [selectedRank, selectedSceneIds]);
+
   const alignedRows = useMemo(() => {
     const rowCount = Math.max(0, ...Object.values(groupAssignments).map((assignments) => assignments?.length || 0));
     return Array.from({ length: rowCount }, (_, index) => ({
@@ -332,6 +365,49 @@ function SceneControl() {
         ...patch,
       },
     }));
+  };
+
+  const moveSelectedScene = (sceneId, direction) => {
+    setSelectedSceneIds((current) => {
+      const index = current.indexOf(sceneId);
+      const targetIndex = index + direction;
+      if (index < 0 || targetIndex < 0 || targetIndex >= current.length) {
+        return current;
+      }
+      const next = [...current];
+      [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
+      return next;
+    });
+  };
+
+  const persistRank = async () => {
+    try {
+      setRankSaving(true);
+      setError('');
+      setMessage('');
+      const payload = {
+        name: rankName || `Rank ${selectedSceneIds.join('-')}`,
+        orientation: 'horizontal',
+        scene_ids: selectedSceneIds.map(Number),
+        gap_px: Number(rankGapPx) || 0,
+        rank_metadata: {},
+      };
+      const response = selectedRank
+        ? await mappingsApi.updateRank(selectedRank.id, payload)
+        : await mappingsApi.createRank(payload);
+      const savedRank = response.data;
+      setSceneRanks((current) => (
+        selectedRank
+          ? current.map((rank) => (rank.id === savedRank.id ? savedRank : rank))
+          : [savedRank, ...current]
+      ));
+      setMessage(`Saved rank "${savedRank.name}".`);
+    } catch (err) {
+      console.error(err);
+      setError('Failed to save scene rank.');
+    } finally {
+      setRankSaving(false);
+    }
   };
 
   const persistAll = async () => {
@@ -357,6 +433,7 @@ function SceneControl() {
             }
             groupsById[target.id] = {
               ...groupsById[target.id],
+              layout_scope: edit.layout_scope || 'scene',
               media_binding_type: edit.media_binding_type,
               animation_id: edit.animation_id || null,
               animation_list_id: edit.animation_list_id || null,
@@ -482,6 +559,41 @@ function SceneControl() {
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
               Select the mapping scenes you want to align and batch-edit.
             </Typography>
+            <Stack spacing={1.25} sx={{ mb: 2 }}>
+              <Typography variant="subtitle2">Horizontal Rank</Typography>
+              <TextField
+                label="Rank Name"
+                size="small"
+                value={rankName}
+                onChange={(event) => setRankName(event.target.value)}
+              />
+              <TextField
+                label="Gap (px)"
+                size="small"
+                type="number"
+                value={rankGapPx}
+                onChange={(event) => setRankGapPx(event.target.value)}
+              />
+              <Stack spacing={0.75}>
+                {selectedSceneIds.map((sceneId, index) => {
+                  const scene = scenes.find((item) => item.id === sceneId);
+                  if (!scene) {
+                    return null;
+                  }
+                  return (
+                    <Stack key={sceneId} direction="row" spacing={1} alignItems="center">
+                      <Chip label={`${index + 1}`} size="small" />
+                      <Typography variant="body2" sx={{ flex: 1 }}>{scene.name}</Typography>
+                      <Button size="small" onClick={() => moveSelectedScene(sceneId, -1)} disabled={index === 0}>Left</Button>
+                      <Button size="small" onClick={() => moveSelectedScene(sceneId, 1)} disabled={index === selectedSceneIds.length - 1}>Right</Button>
+                    </Stack>
+                  );
+                })}
+              </Stack>
+              <Button variant="outlined" onClick={persistRank} disabled={rankSaving || selectedSceneIds.length < 2}>
+                {selectedRank ? 'Update Rank' : 'Create Rank'}
+              </Button>
+            </Stack>
             <List dense>
               {scenes.map((scene) => (
                 <ListItem key={scene.id} disablePadding>
@@ -493,7 +605,10 @@ function SceneControl() {
                     ));
                   }}>
                     <Checkbox edge="start" checked={selectedSceneIds.includes(scene.id)} tabIndex={-1} disableRipple />
-                    <ListItemText primary={scene.name} secondary={`${scene.masks?.length || 0} masks • ${scene.groups?.length || 0} groups`} />
+                    <ListItemText
+                      primary={scene.name}
+                      secondary={`${scene.masks?.length || 0} masks • ${scene.groups?.length || 0} groups${sceneRanks.find((rank) => (rank.scene_ids || []).map(Number).includes(scene.id)) ? ' • ranked' : ''}`}
+                    />
                   </ListItemButton>
                 </ListItem>
               ))}
@@ -600,6 +715,19 @@ function SceneControl() {
                         </Box>
 
                         <Grid container spacing={2}>
+                          <Grid item xs={12} md={4}>
+                            <FormControl fullWidth>
+                              <InputLabel>Layout Scope</InputLabel>
+                              <Select
+                                value={edit.layout_scope}
+                                label="Layout Scope"
+                                onChange={(event) => updateRowEdit(row.index, { layout_scope: event.target.value })}
+                              >
+                                <MenuItem value="scene">Scene</MenuItem>
+                                <MenuItem value="rank">Rank</MenuItem>
+                              </Select>
+                            </FormControl>
+                          </Grid>
                           <Grid item xs={12} md={4}>
                             <FormControl fullWidth>
                               <InputLabel>Media Binding</InputLabel>

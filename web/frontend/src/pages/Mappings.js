@@ -55,6 +55,7 @@ const emptyGroup = () => ({
   id: `group_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`,
   name: 'New Group',
   mask_ids: [],
+  layout_scope: 'scene',
   media_binding_type: 'video',
   animation_id: '',
   animation_list_id: '',
@@ -1031,6 +1032,18 @@ function Mappings() {
                             sx={darkFieldSx}
                           />
                         </Stack>
+
+                        <FormControl fullWidth sx={darkSelectSx}>
+                          <InputLabel>Layout Scope</InputLabel>
+                          <Select
+                            value={selectedGroup.layout_scope || 'scene'}
+                            label="Layout Scope"
+                            onChange={(event) => updateGroup(selectedGroup.id, { layout_scope: event.target.value })}
+                          >
+                            <MenuItem value="scene">Scene</MenuItem>
+                            <MenuItem value="rank">Rank</MenuItem>
+                          </Select>
+                        </FormControl>
 
                         <FormControl fullWidth sx={darkSelectSx}>
                           <InputLabel>Media Binding</InputLabel>

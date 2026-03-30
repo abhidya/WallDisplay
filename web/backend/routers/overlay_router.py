@@ -6,6 +6,7 @@ import json
 import uuid
 from datetime import datetime
 import asyncio
+from pydantic import BaseModel
 
 from database.database import get_db
 from schemas.overlay import (
@@ -25,6 +26,12 @@ from services.overlay_event_bus import overlay_events, notify_overlay_config_upd
 from models.overlay import OverlayConfig
 
 router = APIRouter(prefix="/api/overlay", tags=["overlay"])
+
+
+class ProjectorRedirectConfigPayload(BaseModel):
+    enabled: bool = False
+    client_ip: str = ""
+    target_path: str = "/backend-static/overlay_window.html?config_id=5&controls=hidden"
 
 @router.post("/configs", response_model=OverlayConfigResponse)
 async def create_overlay_config(
@@ -206,6 +213,29 @@ async def update_global_api_configs(
         config_ids = [config_id for (config_id,) in db.query(OverlayConfig.id).all()]
         notify_overlay_config_update(config_ids, "overlay_global_api_configs_updated")
         return updated
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/projector-redirect")
+async def get_projector_redirect_config(
+    db: Session = Depends(get_db)
+):
+    try:
+        service = OverlayService(db)
+        return service.get_projector_redirect_config()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/projector-redirect")
+async def update_projector_redirect_config(
+    payload: ProjectorRedirectConfigPayload,
+    db: Session = Depends(get_db)
+):
+    try:
+        service = OverlayService(db)
+        return service.update_projector_redirect_config(payload.model_dump())
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

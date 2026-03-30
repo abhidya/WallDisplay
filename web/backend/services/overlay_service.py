@@ -15,6 +15,7 @@ from datetime import datetime
 
 from models.overlay import OverlayConfig
 from models.mapping_scene import MappingScene
+from models.scene_rank import SceneRank
 from models.media_channel import MediaChannel
 from models.media_directory import MediaDirectory
 from models.media_list import MediaList
@@ -44,6 +45,11 @@ class OverlayService:
             "uploads",
             "env.overlay_global_api_configs.json",
         )
+        self._projector_redirect_config_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "uploads",
+            "env.overlay_projector_redirect.json",
+        )
 
     def get_global_api_configs(self) -> Dict[str, Any]:
         defaults = OverlayConfigCreate(
@@ -68,6 +74,39 @@ class OverlayService:
         merged = {**self.get_global_api_configs(), **(api_configs or {})}
         os.makedirs(os.path.dirname(self._global_api_config_path), exist_ok=True)
         with open(self._global_api_config_path, "w", encoding="utf-8") as handle:
+            json.dump(merged, handle, indent=2, sort_keys=True)
+        return merged
+
+    def get_projector_redirect_config(self) -> Dict[str, Any]:
+        defaults = {
+            "enabled": False,
+            "client_ip": "",
+            "target_path": "/backend-static/overlay_window.html?config_id=5&controls=hidden",
+        }
+        if not os.path.exists(self._projector_redirect_config_path):
+            return defaults
+        try:
+            with open(self._projector_redirect_config_path, "r", encoding="utf-8") as handle:
+                stored = json.load(handle) or {}
+        except Exception:
+            stored = {}
+        merged = {**defaults, **stored}
+        merged["enabled"] = bool(merged.get("enabled"))
+        merged["client_ip"] = str(merged.get("client_ip") or "").strip()
+        merged["target_path"] = str(merged.get("target_path") or defaults["target_path"]).strip() or defaults["target_path"]
+        return merged
+
+    def update_projector_redirect_config(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        current = self.get_projector_redirect_config()
+        merged = {
+            **current,
+            **(payload or {}),
+        }
+        merged["enabled"] = bool(merged.get("enabled"))
+        merged["client_ip"] = str(merged.get("client_ip") or "").strip()
+        merged["target_path"] = str(merged.get("target_path") or current["target_path"]).strip() or current["target_path"]
+        os.makedirs(os.path.dirname(self._projector_redirect_config_path), exist_ok=True)
+        with open(self._projector_redirect_config_path, "w", encoding="utf-8") as handle:
             json.dump(merged, handle, indent=2, sort_keys=True)
         return merged
 
@@ -812,18 +851,24 @@ class OverlayService:
                 **mask,
                 "url": f"/api/mappings/scenes/{scene.id}/masks/{mask['id']}/file",
             })
+        rank_layout = self._resolve_scene_rank_layout(scene.id)
         groups = []
         for group in scene.groups or []:
             media_items = self._resolve_group_media_items(group)
             media_urls = [item["url"] for item in media_items if item.get("url")]
             animation_list_payload = self._resolve_animation_list_payload(group.get("animation_list_id"))
-            groups.append({
+            normalized_group = {
                 **group,
+                "layout_scope": group.get("layout_scope") or "scene",
+                "rank_id": rank_layout.get("rank_id") if rank_layout else None,
+            }
+            groups.append({
+                **normalized_group,
                 "media_url": media_urls[0] if media_urls else None,
                 "media_urls": media_urls,
                 "media_items": media_items,
                 "animation_list_payload": animation_list_payload,
-                "playback_sync_key": self._resolve_group_source_key(group, media_urls),
+                "playback_sync_key": self._resolve_group_source_key(normalized_group, media_urls),
             })
         playback_sync_snapshot = get_overlay_playback_sync_service().get_scene_snapshot(scene.id, groups)
         source_snapshots = playback_sync_snapshot.get("sources") or {}
@@ -844,6 +889,8 @@ class OverlayService:
             "groups": groups,
             "render_settings": scene.render_settings or {},
             "playback_sync": playback_sync_snapshot,
+            "rank_layout": rank_layout,
+            "scene_viewport": self._resolve_scene_viewport(scene.id, scene.canvas_width, scene.canvas_height, rank_layout),
         }
 
     def _resolve_animation_list_payload(self, animation_list_id: Optional[str]) -> Optional[Dict[str, Any]]:
@@ -864,13 +911,18 @@ class OverlayService:
 
     def _resolve_group_source_key(self, group: dict, media_urls: List[str]) -> str:
         binding_type = str(group.get("media_binding_type") or "").lower()
+        source_prefix = ""
+        if str(group.get("layout_scope") or "scene").lower() == "rank":
+            rank_id = group.get("rank_id")
+            if rank_id:
+                source_prefix = f"rank:{rank_id}:"
         if binding_type == "animation" and group.get("animation_id"):
-            return f"animation:{group['animation_id']}"
+            return f"{source_prefix}animation:{group['animation_id']}"
         if binding_type == "animation_list" and group.get("animation_list_id"):
-            return f"animation_list:{group['animation_list_id']}"
+            return f"{source_prefix}animation_list:{group['animation_list_id']}"
         if media_urls:
-            return f"{binding_type}:{'|'.join(media_urls)}"
-        return f"{binding_type}:group:{group.get('id')}"
+            return f"{source_prefix}{binding_type}:{'|'.join(media_urls)}"
+        return f"{source_prefix}{binding_type}:group:{group.get('id')}"
 
     def _resolve_group_media_items(self, group: dict) -> List[Dict[str, Any]]:
         if group.get("media_binding_type") == "direct_url" and group.get("direct_url"):
@@ -1025,3 +1077,93 @@ class OverlayService:
         if len(parts) != 2:
             return streaming_url
         return f"{parts[0]}/uploads/{parts[1]}"
+
+    def _find_rank_for_scene(self, scene_id: int) -> Optional[SceneRank]:
+        for rank in self.db.query(SceneRank).all():
+            scene_ids = [int(value) for value in (rank.scene_ids or []) if value is not None]
+            if scene_id in scene_ids:
+                return rank
+        return None
+
+    def _resolve_scene_rank_layout(self, scene_id: int) -> Optional[Dict[str, Any]]:
+        rank = self._find_rank_for_scene(scene_id)
+        if not rank:
+            return None
+
+        orientation = (rank.orientation or "horizontal").lower()
+        ordered_scene_ids = [int(value) for value in (rank.scene_ids or []) if value is not None]
+        if not ordered_scene_ids:
+            return None
+
+        scenes = {
+            item.id: item
+            for item in self.db.query(MappingScene).filter(MappingScene.id.in_(ordered_scene_ids)).all()
+        }
+        gap_px = max(0, int(rank.gap_px or 0))
+        layout_scenes: List[Dict[str, Any]] = []
+        cursor_x = 0
+        cursor_y = 0
+        max_width = 0
+        max_height = 0
+
+        for index, ordered_scene_id in enumerate(ordered_scene_ids):
+            scene = scenes.get(ordered_scene_id)
+            if not scene:
+                continue
+            scene_width = int(scene.canvas_width or 1280)
+            scene_height = int(scene.canvas_height or 720)
+            layout_scenes.append(
+                {
+                    "scene_id": scene.id,
+                    "index": index,
+                    "x": cursor_x,
+                    "y": cursor_y,
+                    "width": scene_width,
+                    "height": scene_height,
+                }
+            )
+            if orientation == "horizontal":
+                cursor_x += scene_width + gap_px
+                max_width = max(max_width, cursor_x - gap_px)
+                max_height = max(max_height, scene_height)
+            else:
+                cursor_y += scene_height + gap_px
+                max_width = max(max_width, scene_width)
+                max_height = max(max_height, cursor_y - gap_px)
+
+        if not layout_scenes:
+            return None
+
+        return {
+            "rank_id": rank.id,
+            "name": rank.name,
+            "orientation": orientation,
+            "canvas_width": max_width,
+            "canvas_height": max_height,
+            "gap_px": gap_px,
+            "scenes": layout_scenes,
+            "rank_metadata": rank.rank_metadata or {},
+        }
+
+    def _resolve_scene_viewport(
+        self,
+        scene_id: int,
+        canvas_width: int,
+        canvas_height: int,
+        rank_layout: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        if rank_layout:
+            for item in rank_layout.get("scenes") or []:
+                if int(item.get("scene_id") or 0) == int(scene_id):
+                    return {
+                        "x": int(item.get("x") or 0),
+                        "y": int(item.get("y") or 0),
+                        "width": int(item.get("width") or canvas_width),
+                        "height": int(item.get("height") or canvas_height),
+                    }
+        return {
+            "x": 0,
+            "y": 0,
+            "width": int(canvas_width or 1280),
+            "height": int(canvas_height or 720),
+        }

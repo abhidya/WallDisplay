@@ -87,6 +87,20 @@ def create_media_tables(cursor):
     )
     cursor.execute(
         """
+        CREATE TABLE IF NOT EXISTS scene_ranks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name VARCHAR NOT NULL UNIQUE,
+            orientation VARCHAR NOT NULL DEFAULT 'horizontal',
+            scene_ids JSON NOT NULL DEFAULT '[]',
+            gap_px INTEGER NOT NULL DEFAULT 0,
+            rank_metadata JSON NOT NULL DEFAULT '{}',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS media_directories (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name VARCHAR NOT NULL UNIQUE,

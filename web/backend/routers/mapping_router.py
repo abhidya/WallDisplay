@@ -14,6 +14,8 @@ from schemas.mapping_scene import (
     PolygonMaskCreateRequest,
 )
 from services.mapping_scene_service import MappingSceneService
+from schemas.scene_rank import SceneRankCreate, SceneRankResponse, SceneRankUpdate
+from services.scene_rank_service import SceneRankService
 from services.overlay_event_bus import notify_overlay_config_update
 from models.overlay import OverlayConfig
 
@@ -32,6 +34,46 @@ def _notify_mapping_scene_dependents(db: Session, scene_id: int, reason: str) ->
 @router.get("/scenes", response_model=List[MappingSceneResponse])
 def list_mapping_scenes(db: Session = Depends(get_db)):
     return MappingSceneService(db).list_scenes()
+
+
+@router.get("/ranks", response_model=List[SceneRankResponse])
+def list_scene_ranks(db: Session = Depends(get_db)):
+    return SceneRankService(db).list_ranks()
+
+
+@router.post("/ranks", response_model=SceneRankResponse)
+def create_scene_rank(payload: SceneRankCreate, db: Session = Depends(get_db)):
+    try:
+        return SceneRankService(db).create_rank(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/ranks/{rank_id}", response_model=SceneRankResponse)
+def get_scene_rank(rank_id: int, db: Session = Depends(get_db)):
+    rank = SceneRankService(db).get_rank(rank_id)
+    if not rank:
+        raise HTTPException(status_code=404, detail="Scene rank not found")
+    return rank
+
+
+@router.put("/ranks/{rank_id}", response_model=SceneRankResponse)
+def update_scene_rank(rank_id: int, payload: SceneRankUpdate, db: Session = Depends(get_db)):
+    try:
+        rank = SceneRankService(db).update_rank(rank_id, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not rank:
+        raise HTTPException(status_code=404, detail="Scene rank not found")
+    return rank
+
+
+@router.delete("/ranks/{rank_id}")
+def delete_scene_rank(rank_id: int, db: Session = Depends(get_db)):
+    deleted = SceneRankService(db).delete_rank(rank_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Scene rank not found")
+    return {"success": True}
 
 
 @router.post("/scenes", response_model=MappingSceneResponse)

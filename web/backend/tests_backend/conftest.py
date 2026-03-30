@@ -39,8 +39,17 @@ try:
     clear_mappers()
     
     # Re-import models after clearing to ensure clean registration
-    from web.backend.database.database import init_db
-    init_db()
+    from web.backend.models.device import DeviceModel as _DeviceModel
+    from web.backend.models.video import VideoModel as _VideoModel
+    from web.backend.models.overlay import OverlayConfig as _OverlayConfig
+    from web.backend.models.projection import ProjectionConfig as _ProjectionConfig
+    from web.backend.models.mapping_scene import MappingScene as _MappingScene
+    from web.backend.models.scene_rank import SceneRank as _SceneRank
+    from web.backend.models.media_directory import MediaDirectory as _MediaDirectory
+    from web.backend.models.media_list import MediaList as _MediaList
+    from web.backend.models.media_channel import MediaChannel as _MediaChannel
+    from web.backend.models.photo import PhotoModel as _PhotoModel
+    from web.backend.models.photo_list import PhotoList as _PhotoList
     
     print(f"INFO: web/backend/tests_backend/conftest.py: Models re-registered successfully")
 except Exception as e:

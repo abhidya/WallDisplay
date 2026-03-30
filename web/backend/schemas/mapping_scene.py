@@ -35,6 +35,7 @@ class MappingGroup(BaseModel):
     id: str
     name: str
     mask_ids: List[str] = Field(default_factory=list)
+    layout_scope: str = "scene"
     media_binding_type: str = "video"
     animation_id: Optional[str] = None
     animation_list_id: Optional[str] = None

@@ -4,7 +4,7 @@ import sys
 import traceback
 import time
 
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -12,7 +12,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 
-from database.database import init_db, get_db
+from database.database import init_db, get_db, SessionLocal
 from routers import device_router, video_router, streaming_router, renderer_router, overlay_router, projection_router, log_router, mapping_router, media_library_router, structured_lighting_router, widget_router
 from routers.photo_router import router as photo_router
 from routers.photo_list_router import router as photo_list_router
@@ -23,6 +23,7 @@ from services.overlay_cast_service import get_overlay_cast_service
 from services.app_runtime import get_app_runtime
 from services.mask_preprocessing_service import get_mask_preprocessing_service
 from services.video_preprocessing_service import get_video_preprocessing_service
+from services.overlay_service import OverlayService
 
 # Configure logging - check if already configured by run.py
 import logging.handlers
@@ -142,7 +143,24 @@ except ImportError as e:
 
 # Root endpoint
 @app.get("/")
-async def root():
+async def root(request: Request):
+    db = SessionLocal()
+    try:
+        redirect_config = OverlayService(db).get_projector_redirect_config()
+    except Exception:
+        redirect_config = None
+    finally:
+        db.close()
+
+    client_ip = request.client.host if request.client else ""
+    if (
+        redirect_config
+        and redirect_config.get("enabled")
+        and redirect_config.get("client_ip")
+        and client_ip == redirect_config.get("client_ip")
+    ):
+        return RedirectResponse(url=redirect_config.get("target_path") or "/docs", status_code=307)
+
     return RedirectResponse(url="/docs")
 
 # Health check endpoint

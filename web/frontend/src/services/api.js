@@ -130,6 +130,8 @@ const discoveryV2Api = {
 const overlayApi = {
   getGlobalApiConfigs: () => api.get('/overlay/global-api-configs'),
   updateGlobalApiConfigs: (payload) => api.put('/overlay/global-api-configs', payload),
+  getProjectorRedirectConfig: () => api.get('/overlay/projector-redirect'),
+  updateProjectorRedirectConfig: (payload) => api.put('/overlay/projector-redirect', payload),
   startCast: (payload) => api.post('/overlay/cast', payload),
   listCastSessions: () => api.get('/overlay/cast/sessions'),
   stopCastSession: (sessionId) => api.delete(`/overlay/cast/sessions/${sessionId}`),
@@ -208,6 +210,11 @@ const mappingsApi = {
   createScene: (data) => api.post('/mappings/scenes', data),
   updateScene: (id, data) => api.put(`/mappings/scenes/${id}`, data),
   deleteScene: (id) => api.delete(`/mappings/scenes/${id}`),
+  listRanks: () => api.get('/mappings/ranks'),
+  getRank: (id) => api.get(`/mappings/ranks/${id}`),
+  createRank: (data) => api.post('/mappings/ranks', data),
+  updateRank: (id, data) => api.put(`/mappings/ranks/${id}`, data),
+  deleteRank: (id) => api.delete(`/mappings/ranks/${id}`),
   importScene: (formData) => api.post('/mappings/scenes/import', formData, {
     headers: {
       'Content-Type': 'multipart/form-data',

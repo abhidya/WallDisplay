@@ -130,6 +130,20 @@ def ensure_sqlite_schema_compatibility():
         )
         connection.exec_driver_sql(
             """
+            CREATE TABLE IF NOT EXISTS scene_ranks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name VARCHAR NOT NULL UNIQUE,
+                orientation VARCHAR NOT NULL DEFAULT 'horizontal',
+                scene_ids JSON NOT NULL DEFAULT '[]',
+                gap_px INTEGER NOT NULL DEFAULT 0,
+                rank_metadata JSON NOT NULL DEFAULT '{}',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.exec_driver_sql(
+            """
             CREATE TABLE IF NOT EXISTS media_directories (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name VARCHAR NOT NULL UNIQUE,
@@ -230,6 +244,7 @@ def init_db():
     from models.overlay import OverlayConfig
     from models.projection import ProjectionConfig
     from models.mapping_scene import MappingScene
+    from models.scene_rank import SceneRank
     from models.media_directory import MediaDirectory
     from models.media_list import MediaList
     from models.media_channel import MediaChannel

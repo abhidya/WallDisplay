@@ -101,6 +101,11 @@ function Settings() {
     tuya_device_id: '',
     tuya_api_base_url: 'https://openapi.tuyaus.com',
   });
+  const [projectorRedirect, setProjectorRedirect] = useState({
+    enabled: false,
+    client_ip: '',
+    target_path: '/backend-static/overlay_window.html?config_id=5&controls=hidden',
+  });
 
   const apiFieldHelp = {
     weather_api_key: 'Get your API key from openweathermap.org/api.',
@@ -141,6 +146,16 @@ function Settings() {
       })
       .catch((error) => {
         console.error('Error loading global API configs:', error);
+      });
+    overlayApi.getProjectorRedirectConfig()
+      .then((response) => {
+        setProjectorRedirect((current) => ({
+          ...current,
+          ...(response.data || {}),
+        }));
+      })
+      .catch((error) => {
+        console.error('Error loading projector redirect config:', error);
       });
   }, []);
 
@@ -212,6 +227,7 @@ function Settings() {
       );
       window.dispatchEvent(new Event('nanoDlnaUiPrefsChanged'));
       await overlayApi.updateGlobalApiConfigs(globalApiConfigs);
+      await overlayApi.updateProjectorRedirectConfig(projectorRedirect);
       setSnackbar({
         open: true,
         message: 'Settings saved successfully',
@@ -406,6 +422,51 @@ function Settings() {
             {renderApiConfigField('tuya_access_secret', 'Tuya Access Secret')}
             {renderApiConfigField('tuya_device_id', 'Tuya Device ID')}
             {renderApiConfigField('tuya_api_base_url', 'Tuya API Base URL')}
+          </Stack>
+        </Paper>
+      </Grid>
+
+      <Grid item xs={12} md={6}>
+        <Paper sx={{ p: 2, mb: 3 }}>
+          <Typography variant="h6" gutterBottom>
+            <SettingsIcon sx={{ verticalAlign: 'middle', mr: 1 }} />
+            Projector Redirect
+          </Typography>
+          <Divider sx={{ my: 1 }} />
+          <Stack spacing={2}>
+            <FormControlLabel
+              control={(
+                <Switch
+                  checked={projectorRedirect.enabled}
+                  onChange={(e) => setProjectorRedirect((current) => ({
+                    ...current,
+                    enabled: e.target.checked,
+                  }))}
+                  color="primary"
+                />
+              )}
+              label="Enable projector auto-redirect"
+            />
+            <TextField
+              label="Projector Client IP"
+              value={projectorRedirect.client_ip}
+              onChange={(event) => setProjectorRedirect((current) => ({
+                ...current,
+                client_ip: event.target.value,
+              }))}
+              fullWidth
+              helperText="Only requests from this client IP to / will be redirected."
+            />
+            <TextField
+              label="Redirect Target Path"
+              value={projectorRedirect.target_path}
+              onChange={(event) => setProjectorRedirect((current) => ({
+                ...current,
+                target_path: event.target.value,
+              }))}
+              fullWidth
+              helperText="Example: /backend-static/overlay_window.html?config_id=5&controls=hidden"
+            />
           </Stack>
         </Paper>
       </Grid>
