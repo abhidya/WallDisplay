@@ -187,7 +187,7 @@ class MedusesAnimation extends BaseAnimation {
             vec3 shade(vec3 p, vec3 origin, vec3 n, float st) {
                 float f = fog ? 0.1 : 0.05;
                 vec3 color = vec3(1.0) * exp(-distance(p, origin) * f) * (1.0 + st);
-                color *= vec3(0.3 + 0.1 * st, 0.7 * (0.8 + 0.3 * st), 0.7 - 0.1 * st);
+                color *= vec3(0.18 + 0.06 * st, 0.28 + 0.08 * st, 0.35 - 0.04 * st);
                 float noise = texture(iChannel0, vec2((p.x + p.y + p.z) * 0.1, 0.25)).x;
                 color *= mix(vec3(1.0), hsv_to_rgb((p.x + p.y + p.z) * 0.2 + iTime).rgb, 0.5 * noise);
                 return color;
@@ -239,7 +239,7 @@ class MedusesAnimation extends BaseAnimation {
                 }
 
                 if (fog) {
-                    color += vec3(0.0, 0.25, 0.5) * 0.7;
+                    color += vec3(0.0, 0.0, 0.0);
                 }
 
                 fragColor = vec4(color, 1.0);

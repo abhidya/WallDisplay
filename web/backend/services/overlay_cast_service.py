@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import html
+import os
 import logging
 import queue
 import re
@@ -10,6 +11,7 @@ import sys
 import threading
 import time
 import shutil
+import tempfile
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -227,6 +229,183 @@ class OverlayCastService:
         self.device_sessions: Dict[str, str] = {}
         self.session_history: list[dict] = []
         self._session_lock = threading.RLock()
+
+    async def export_mp4(
+        self,
+        config_id: int,
+        overlay_base_url: str,
+        controls_hidden: bool = True,
+        hide_widgets: bool = True,
+        viewport_width: int = 1280,
+        viewport_height: int = 720,
+        capture_width: int = 1280,
+        capture_height: int = 720,
+        quality: int = 80,
+        frame_rate: int = 24,
+        duration_seconds: int = 30,
+        bitrate_kbps: int = 2500,
+    ) -> dict:
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError as exc:
+            raise RuntimeError(
+                "Playwright is required for overlay export. Install it in the backend environment."
+            ) from exc
+
+        duration_seconds = max(1, min(int(duration_seconds or 30), 900))
+        bitrate_kbps = max(250, int(bitrate_kbps or 2500))
+        frame_interval = 1 / max(frame_rate, 1)
+        export_dir = tempfile.mkdtemp(prefix="overlay_export_")
+        export_path = os.path.join(export_dir, f"overlay_config_{config_id}_{int(time.time())}.mp4")
+        session = OverlayCastSession(
+            session_id=str(uuid.uuid4()),
+            device_id="export",
+            config_id=config_id,
+            overlay_url=self._build_overlay_url(overlay_base_url, config_id, controls_hidden, hide_widgets),
+            relay_url="",
+            stream_port=0,
+            frame_interval_seconds=frame_interval,
+        )
+        playwright_context = None
+        browser = None
+        page = None
+        ffmpeg_proc = None
+
+        try:
+            playwright_context = await async_playwright().start()
+            launch_kwargs = {
+                "headless": True,
+                "args": [
+                    "--no-sandbox",
+                    "--enable-gpu",
+                    "--ignore-gpu-blocklist",
+                    "--disable-background-timer-throttling",
+                    "--disable-backgrounding-occluded-windows",
+                    "--disable-renderer-backgrounding",
+                ],
+            }
+            if sys.platform == "darwin":
+                launch_kwargs["args"].append("--use-angle=metal")
+            elif sys.platform.startswith("linux"):
+                launch_kwargs["args"].extend(["--use-angle=egl", "--use-gl=egl"])
+            chrome_path = shutil.which("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome") or shutil.which("google-chrome")
+            if chrome_path:
+                launch_kwargs["channel"] = "chrome"
+
+            browser = await playwright_context.chromium.launch(**launch_kwargs)
+            page = await browser.new_page(viewport={"width": viewport_width, "height": viewport_height})
+            await page.goto(session.overlay_url)
+
+            ffmpeg_proc = subprocess.Popen(
+                self._build_export_ffmpeg_command(frame_rate, bitrate_kbps, export_path),
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+            )
+            if ffmpeg_proc.poll() is not None:
+                raise RuntimeError("FFmpeg export process exited immediately during startup")
+
+            frame_decode_thread = threading.Thread(
+                target=self._pump_latest_frame_decode,
+                args=(session,),
+                daemon=True,
+            )
+            frame_decode_thread.start()
+
+            frame_writer_thread = threading.Thread(
+                target=self._pump_latest_frame_to_ffmpeg,
+                args=(session, ffmpeg_proc),
+                daemon=True,
+            )
+            frame_writer_thread.start()
+
+            cdp = await page.context.new_cdp_session(page)
+
+            async def on_frame(event):
+                if session.stop_event.is_set():
+                    return
+                try:
+                    with session.frame_decode_lock:
+                        session.pending_frame_b64 = event["data"]
+                    session.frame_decode_event.set()
+                    await cdp.send("Page.screencastFrameAck", {"sessionId": event["sessionId"]})
+                except Exception:
+                    return
+
+            cdp.on("Page.screencastFrame", lambda event: asyncio.create_task(on_frame(event)))
+            await cdp.send(
+                "Page.startScreencast",
+                {
+                    "format": "jpeg",
+                    "quality": quality,
+                    "maxWidth": capture_width,
+                    "maxHeight": capture_height,
+                    "everyNthFrame": 1,
+                },
+            )
+
+            await asyncio.sleep(duration_seconds)
+            session.stop_event.set()
+            session.frame_decode_event.set()
+            if ffmpeg_proc.stdin is not None:
+                ffmpeg_proc.stdin.close()
+            ffmpeg_proc.wait(timeout=30)
+            if ffmpeg_proc.returncode not in (0, None):
+                stderr_output = ""
+                if ffmpeg_proc.stderr is not None:
+                    stderr_output = ffmpeg_proc.stderr.read().decode("utf-8", errors="replace").strip()
+                raise RuntimeError(stderr_output or f"FFmpeg export failed with code {ffmpeg_proc.returncode}")
+
+            def iter_file_chunks(path: str):
+                try:
+                    with open(path, "rb") as handle:
+                        while True:
+                            chunk = handle.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            yield chunk
+                finally:
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
+                    try:
+                        os.rmdir(os.path.dirname(path))
+                    except OSError:
+                        pass
+
+            return {
+                "file_name": os.path.basename(export_path),
+                "file_iterator": iter_file_chunks(export_path),
+            }
+        finally:
+            session.stop_event.set()
+            session.frame_decode_event.set()
+            if ffmpeg_proc is not None and ffmpeg_proc.poll() is None:
+                try:
+                    if ffmpeg_proc.stdin is not None:
+                        ffmpeg_proc.stdin.close()
+                except Exception:
+                    pass
+                try:
+                    ffmpeg_proc.kill()
+                except Exception:
+                    pass
+            if page is not None:
+                try:
+                    await page.close()
+                except Exception:
+                    pass
+            if browser is not None:
+                try:
+                    await browser.close()
+                except Exception:
+                    pass
+            if playwright_context is not None:
+                try:
+                    await playwright_context.stop()
+                except Exception:
+                    pass
 
     async def start_cast(
         self,
@@ -588,11 +767,13 @@ class OverlayCastService:
         session.pending_frame_b64 = None
         session.frame_decode_event.set()
 
-    def _build_overlay_url(self, overlay_base_url: str, config_id: int, controls_hidden: bool) -> str:
+    def _build_overlay_url(self, overlay_base_url: str, config_id: int, controls_hidden: bool, hide_widgets: bool = False) -> str:
         base = overlay_base_url.rstrip("/")
         params = {"config_id": config_id}
         if controls_hidden:
             params["controls"] = "hidden"
+        if hide_widgets:
+            params["widgets"] = "hidden"
         return f"{base}/backend-static/overlay_window.html?{urlencode(params)}"
 
     def _get_local_ip(self) -> str:
@@ -770,6 +951,40 @@ class OverlayCastService:
             "pipe:1",
         ]
         return encoder, ffmpeg_cmd
+
+    def _build_export_ffmpeg_command(self, frame_rate: int, bitrate_kbps: int, output_path: str) -> list[str]:
+        return [
+            "ffmpeg",
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "mjpeg",
+            "-framerate",
+            str(frame_rate),
+            "-i",
+            "-",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-profile:v",
+            "high",
+            "-pix_fmt",
+            "yuv420p",
+            "-b:v",
+            f"{bitrate_kbps}k",
+            "-maxrate",
+            f"{bitrate_kbps}k",
+            "-bufsize",
+            f"{bitrate_kbps * 2}k",
+            "-movflags",
+            "+faststart",
+            "-r",
+            str(frame_rate),
+            output_path,
+        ]
 
     async def _direct_dlna_handshake(self, session: OverlayCastSession) -> CastingSession:
         device = self.discovery_manager.get_device_by_id(session.device_id)

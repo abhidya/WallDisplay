@@ -132,6 +132,7 @@ const overlayApi = {
   updateGlobalApiConfigs: (payload) => api.put('/overlay/global-api-configs', payload),
   getProjectorRedirectConfig: () => api.get('/overlay/projector-redirect'),
   updateProjectorRedirectConfig: (payload) => api.put('/overlay/projector-redirect', payload),
+  exportMp4: (payload) => api.post('/overlay/export', payload, { responseType: 'blob', timeout: 0 }),
   startCast: (payload) => api.post('/overlay/cast', payload),
   listCastSessions: () => api.get('/overlay/cast/sessions'),
   stopCastSession: (sessionId) => api.delete(`/overlay/cast/sessions/${sessionId}`),

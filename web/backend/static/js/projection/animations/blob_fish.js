@@ -2,8 +2,8 @@
 class BlobFishAnimation extends BaseAnimation {
     setup() {
         this.time = 0;
-        this.waterTop = '#0d0a42';
-        this.waterBottom = '#030032';
+        this.waterTop = '#050505';
+        this.waterBottom = '#000000';
         this.baseScale = 1;
     }
 

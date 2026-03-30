@@ -19,6 +19,7 @@ from schemas.overlay import (
     OverlayWindowInitResponse,
     OverlayCastStartRequest,
     OverlayCastSessionResponse,
+    OverlayExportRequest,
 )
 from services.overlay_service import OverlayService
 from services.overlay_cast_service import get_overlay_cast_service
@@ -263,6 +264,41 @@ async def start_overlay_cast(
             stream_port=cast_request.stream_port,
         )
         return OverlayCastSessionResponse(**session)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/export")
+async def export_overlay_mp4(
+    export_request: OverlayExportRequest,
+    request: Request,
+):
+    try:
+        service = get_overlay_cast_service()
+        overlay_base_url = export_request.overlay_base_url or str(request.base_url).rstrip("/")
+        export_result = await service.export_mp4(
+            config_id=export_request.config_id,
+            overlay_base_url=overlay_base_url,
+            controls_hidden=export_request.controls_hidden,
+            hide_widgets=export_request.hide_widgets,
+            viewport_width=export_request.viewport_width,
+            viewport_height=export_request.viewport_height,
+            capture_width=export_request.capture_width,
+            capture_height=export_request.capture_height,
+            quality=export_request.quality,
+            frame_rate=export_request.frame_rate,
+            duration_seconds=export_request.duration_seconds,
+            bitrate_kbps=export_request.bitrate_kbps,
+        )
+        return StreamingResponse(
+            export_result["file_iterator"],
+            media_type="video/mp4",
+            headers={
+                "Content-Disposition": f"attachment; filename=\"{export_result['file_name']}\"",
+            },
+        )
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:

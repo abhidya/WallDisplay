@@ -178,7 +178,7 @@ class KelpForestAnimation extends BaseAnimation {
             vec3 background(vec3 r) {
                 float x = atan(r.x, r.z);
                 float y = pi*0.5-acos(r.y);
-                vec3 upCol = vec3(.15, .25, .6)*7.;
+                vec3 upCol = vec3(.015, .02, .03)*2.;
                 float u = dot(r, up)*.5+.5;
                 vec3 col = mix(upCol*.05, upCol, u*u);
                 float t = iTime*4.;
@@ -188,7 +188,7 @@ class KelpForestAnimation extends BaseAnimation {
                 float beam2 = sat(sin(42.*x+a*y*21.-t));
                 beam2 *= sat(sin(34.*x+a*y*17.+t));
                 beam += beam2;
-                col *= 1.+beam*.03;
+                col *= 1.+beam*.01;
                 return col;
             }
 
@@ -479,7 +479,7 @@ class KelpForestAnimation extends BaseAnimation {
                 col *= ambient;
                 col = mix(col, bg*finCol, translucency);
                 float dif = clamp(dot(nor, up), 0., 1.0);
-                col += Caustics(pos)*dif*S(-20., 1., pos.y);
+                col += Caustics(pos)*dif*S(-20., 1., pos.y)*0.25;
                 return col;
             }
 
@@ -513,7 +513,7 @@ class KelpForestAnimation extends BaseAnimation {
                 float backContrast = max(S(.9, .70, lookUp), S(30., 25., o.d));
                 col *= backContrast;
                 float fogAmt = S(0., 60., o.d);
-                col = mix(col, bg, fogAmt);
+                col = mix(col, bg, fogAmt*0.35);
                 return vec4(col, o.m);
             }
 

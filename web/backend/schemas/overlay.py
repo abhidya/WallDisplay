@@ -111,6 +111,21 @@ class OverlayCastStartRequest(BaseModel):
     stream_port: Optional[int] = None
 
 
+class OverlayExportRequest(BaseModel):
+    config_id: int
+    overlay_base_url: Optional[str] = None
+    controls_hidden: bool = True
+    hide_widgets: bool = True
+    viewport_width: int = 1280
+    viewport_height: int = 720
+    capture_width: int = 1280
+    capture_height: int = 720
+    quality: int = 80
+    frame_rate: int = 24
+    duration_seconds: int = 30
+    bitrate_kbps: int = 2500
+
+
 class OverlayCastSessionResponse(BaseModel):
     session_id: str
     device_id: str

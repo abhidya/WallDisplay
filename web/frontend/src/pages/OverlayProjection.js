@@ -75,6 +75,8 @@ function OverlayProjection() {
     const [castSessions, setCastSessions] = useState([]);
     const [castLoading, setCastLoading] = useState(false);
     const [castDebugOpen, setCastDebugOpen] = useState(true);
+    const [exportLoading, setExportLoading] = useState(false);
+    const [exportDurationSeconds, setExportDurationSeconds] = useState(30);
     const navigate = useNavigate();
     const [globalApiConfigs, setGlobalApiConfigs] = useState({
         weather_api_key: '',
@@ -561,6 +563,45 @@ function OverlayProjection() {
             setCastLoading(false);
         }
     };
+
+    const exportProjectionMp4 = async () => {
+        if (!selectedConfig) {
+            return;
+        }
+
+        setExportLoading(true);
+        setError('');
+        try {
+            const response = await overlayApi.exportMp4({
+                config_id: selectedConfig.id,
+                overlay_base_url: `${window.location.protocol}//${window.location.host}`,
+                controls_hidden: true,
+                hide_widgets: true,
+                viewport_width: 1280,
+                viewport_height: 720,
+                capture_width: 1280,
+                capture_height: 720,
+                quality: 80,
+                frame_rate: 24,
+                duration_seconds: exportDurationSeconds,
+                bitrate_kbps: 2500,
+            });
+            const blob = new Blob([response.data], { type: 'video/mp4' });
+            const downloadUrl = window.URL.createObjectURL(blob);
+            const anchor = document.createElement('a');
+            anchor.href = downloadUrl;
+            anchor.download = `overlay_config_${selectedConfig.id}_${exportDurationSeconds}s.mp4`;
+            document.body.appendChild(anchor);
+            anchor.click();
+            anchor.remove();
+            window.URL.revokeObjectURL(downloadUrl);
+        } catch (error) {
+            console.error('Error exporting projection mp4:', error);
+            setError(error.response?.data?.detail || 'Failed to export projection mp4');
+        } finally {
+            setExportLoading(false);
+        }
+    };
     
     // Listen for updates from projection window
     useEffect(() => {
@@ -997,6 +1038,26 @@ function OverlayProjection() {
                         <Typography variant="body2" color="text.secondary">
                             Render the selected overlay config in a headless browser and cast the live relay stream to a discovered DLNA renderer.
                         </Typography>
+
+                        <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+                            <TextField
+                                label="Export Seconds"
+                                type="number"
+                                size="small"
+                                value={exportDurationSeconds}
+                                onChange={(e) => setExportDurationSeconds(Math.max(1, Number(e.target.value) || 1))}
+                                inputProps={{ min: 1, max: 900 }}
+                                sx={{ width: 180 }}
+                                disabled={exportLoading}
+                            />
+                            <Button
+                                variant="outlined"
+                                onClick={exportProjectionMp4}
+                                disabled={!selectedConfig || exportLoading}
+                            >
+                                {exportLoading ? 'Exporting MP4...' : 'Export MP4'}
+                            </Button>
+                        </Box>
 
                         <FormControl fullWidth disabled={castLoading}>
                             <InputLabel>Target Projector</InputLabel>

@@ -1102,6 +1102,7 @@
         let lastRenderedDateString = '';
         let initialUrlParams = new URLSearchParams(window.location.search);
         let currentConfigId = initialUrlParams.get('config_id');
+        const widgetsHiddenByUrl = initialUrlParams.get('widgets') === 'hidden';
         let currentConfigRevision = null;
         let refreshStatePollInterval = null;
         let widgetLayoutFrame = null;
@@ -1653,7 +1654,7 @@
             backgroundType = payload.backgroundType || payload.background_type || config.background_type || 'video';
             mappingScene = payload.mappingScene || payload.mapping_scene || null;
             videoTransform = config.video_transform || { x: 0, y: 0, scale: 1, rotation: 0 };
-            widgets = config.widgets || [];
+            widgets = widgetsHiddenByUrl ? [] : (config.widgets || []);
             rebuildWidgetIndex();
             resetMappingPlaybackState();
             normalizePlaybackSyncSnapshot(mappingScene?.playback_sync || {});
