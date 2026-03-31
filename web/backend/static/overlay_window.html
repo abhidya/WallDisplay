@@ -2512,6 +2512,18 @@
             clearMappingAdvanceTimer(groupId);
         }
 
+        function getAnimationRenderBounds(group, renderCache, fallbackBounds = { x: 0, y: 0, width: 1, height: 1 }) {
+            if ((group.layout_scope || 'scene') === 'rank' && mappingRankLayout) {
+                return {
+                    x: 0,
+                    y: 0,
+                    width: Math.max(1, Number(mappingRankLayout.canvas_width || fallbackBounds.width || 1)),
+                    height: Math.max(1, Number(mappingRankLayout.canvas_height || fallbackBounds.height || 1)),
+                };
+            }
+            return renderCache?.sourceBounds || renderCache?.bounds || fallbackBounds;
+        }
+
         function createAnimationMediaState(group, animationId, bounds, sourceKey = null) {
             if (!mappingAnimationEngine || !animationId) {
                 return null;
@@ -2631,7 +2643,7 @@
             const currentCounter = Number(snapshot.global_counter || 0);
             const activeToken = `${snapshot.generation}:${currentCounter}:${currentIndex}`;
             const renderCache = mappingGroupRenderCache.get(group.id);
-            const bounds = renderCache?.bounds || { x: 0, y: 0, width: 1, height: 1 };
+            const bounds = getAnimationRenderBounds(group, renderCache);
 
             if (!state.element || state.activeToken !== activeToken || state.animationId !== orderedAnimationIds[currentIndex]) {
                 const nextState = createAnimationMediaState(group, orderedAnimationIds[currentIndex], bounds, state.sourceKey || null);
@@ -2773,7 +2785,8 @@
                         return;
                     }
 
-                    const bounds = renderCache?.bounds || computeMaskBounds(maskImages, canvas.width, canvas.height);
+                    const fallbackBounds = computeMaskBounds(maskImages, canvas.width, canvas.height);
+                    const bounds = getAnimationRenderBounds(group, renderCache, fallbackBounds);
                     fetchAnimationList(group.animation_list_id).then(async (animationList) => {
                         const animationIds = animationList?.animation_ids || [];
                         if (!animationIds.length) {
@@ -2845,7 +2858,8 @@
                         return;
                     }
 
-                    const bounds = renderCache?.bounds || computeMaskBounds(maskImages, canvas.width, canvas.height);
+                    const fallbackBounds = computeMaskBounds(maskImages, canvas.width, canvas.height);
+                    const bounds = getAnimationRenderBounds(group, renderCache, fallbackBounds);
                     ensureAnimationScriptLoaded(group.animation_id).then(() => {
                     const state = createAnimationMediaState(group, group.animation_id, bounds, sourceKey);
                     if (!state) {
