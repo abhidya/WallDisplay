@@ -1081,9 +1081,13 @@
         const MAPPING_HEAVY_TARGET_FRAME_MS = 1000 / 20;
         const MAPPING_HIDDEN_TARGET_FRAME_MS = 1000 / 5;
         const PLAYBACK_SYNC_POLL_MS = 5000;
+        const OVERLAY_STATUS_FALLBACK_POLL_MS = 15000;
+        const CONFIG_REFRESH_FALLBACK_POLL_MS = 30000;
         let mappingPlaybackSyncBySourceKey = new Map();
         let mappingServerTimeOffsetMs = 0;
         let mappingPlaybackHeartbeatTimer = null;
+        let overlayEventsConnected = false;
+        let lastOverlayStatus = null;
         let isDragging = false;
         let isResizing = false;
         let isRotating = false;
@@ -1653,6 +1657,7 @@
             currentConfigId = String(payload.config?.id || currentConfigId || '');
             backgroundType = payload.backgroundType || payload.background_type || config.background_type || 'video';
             mappingScene = payload.mappingScene || payload.mapping_scene || null;
+            currentConfigRevision = payload.revision || payload.config?.revision || currentConfigRevision || null;
             videoTransform = config.video_transform || { x: 0, y: 0, scale: 1, rotation: 0 };
             widgets = widgetsHiddenByUrl ? [] : (config.widgets || []);
             rebuildWidgetIndex();
@@ -1705,7 +1710,9 @@
                 }
                 const payload = await response.json();
                 applyInitPayload(payload);
-                await refreshCurrentConfigRevision();
+                if (!currentConfigRevision) {
+                    await refreshCurrentConfigRevision();
+                }
                 return true;
             } catch (error) {
                 console.error('Failed to bootstrap overlay window from URL:', error);
@@ -1740,6 +1747,9 @@
                 if (!currentConfigId) {
                     return;
                 }
+                if (overlayEventsConnected) {
+                    return;
+                }
 
                 try {
                     if (!currentConfigRevision) {
@@ -1761,7 +1771,7 @@
                 } catch (error) {
                     console.error('Overlay refresh polling failed:', error);
                 }
-            }, 2000);
+            }, CONFIG_REFRESH_FALLBACK_POLL_MS);
         }
         
         // Initialize from parent window
@@ -1769,9 +1779,11 @@
             if (event.data.type === 'init') {
                 applyUrlOptions(initialUrlParams);
                 applyInitPayload(event.data);
-                refreshCurrentConfigRevision().catch((error) => {
-                    console.error('Failed to update overlay revision after init message:', error);
-                });
+                if (!currentConfigRevision) {
+                    refreshCurrentConfigRevision().catch((error) => {
+                        console.error('Failed to update overlay revision after init message:', error);
+                    });
+                }
             }
         });
 
@@ -3874,11 +3886,27 @@
             let eventSource = null;
             let reconnectTimeout = null;
             let pollIntervalId = null;
+            
+            const startFallbackPoll = () => {
+                if (pollIntervalId) {
+                    return;
+                }
+                pollIntervalId = setInterval(updateOverlayStatus, OVERLAY_STATUS_FALLBACK_POLL_MS);
+            };
+            
+            const stopFallbackPoll = () => {
+                if (!pollIntervalId) {
+                    return;
+                }
+                clearInterval(pollIntervalId);
+                pollIntervalId = null;
+            };
 
             async function updateOverlayStatus() {
                 try {
                     const response = await fetch('/api/overlay/status');
                     const status = await response.json();
+                    lastOverlayStatus = status;
 
                     applyOverlayBrightness(status.brightness);
 
@@ -3907,15 +3935,24 @@
             }
             
             function connectEventSource() {
+                if (!window.EventSource) {
+                    console.warn('EventSource not supported, using polling fallback');
+                    startFallbackPoll();
+                    return;
+                }
+                
                 if (eventSource) {
                     eventSource.close();
                 }
                 
+                overlayEventsConnected = false;
                 console.log('Connecting to overlay events stream...');
                 eventSource = new EventSource('/api/overlay/events');
                 
                 eventSource.onopen = () => {
                     console.log('Connected to overlay events stream');
+                    overlayEventsConnected = true;
+                    stopFallbackPoll();
                     if (reconnectTimeout) {
                         clearTimeout(reconnectTimeout);
                         reconnectTimeout = null;
@@ -3929,6 +3966,7 @@
                         // Handle initialization or brightness updates
                         if (data.type === 'init' || data.type === 'brightness') {
                             const brightness = data.data.brightness;
+                            lastOverlayStatus = { ...(lastOverlayStatus || {}), brightness };
                             applyOverlayBrightness(brightness);
                             
                             // Initialize sync state from init event
@@ -3983,6 +4021,7 @@
                 eventSource.onerror = (error) => {
                     console.error('EventSource error:', error);
                     eventSource.close();
+                    overlayEventsConnected = false;
                     
                     // Reconnect after delay
                     if (!reconnectTimeout) {
@@ -3991,44 +4030,43 @@
                             connectEventSource();
                         }, 5000);
                     }
+                    
+                    startFallbackPoll();
                 };
             }
             
             // Start connection
-            connectEventSource();
             updateOverlayStatus();
-            pollIntervalId = setInterval(updateOverlayStatus, 5000);
-            
-            // Fallback polling (only if EventSource is not supported)
-            if (!window.EventSource) {
-                console.warn('EventSource not supported, falling back to polling');
-                if (pollIntervalId) {
-                    clearInterval(pollIntervalId);
-                }
-                pollIntervalId = setInterval(updateOverlayStatus, 5000);
-            }
+            connectEventSource();
+            startFallbackPoll();
         }
         
         // Lights toggle function - updated to use brightness API
         async function toggleLights() {
             try {
-                // Get current brightness
-                const response = await fetch('/api/overlay/brightness');
-                const data = await response.json();
+                const cachedBrightness = lastOverlayStatus?.brightness;
+                let brightness = cachedBrightness;
+                
+                // Get current brightness if not cached yet
+                if (typeof brightness !== 'number') {
+                    const response = await fetch('/api/overlay/brightness');
+                    const data = await response.json();
+                    brightness = data.brightness;
+                    lastOverlayStatus = { ...(lastOverlayStatus || {}), brightness };
+                }
                 
                 // Toggle between 0 and 100
-                const newBrightness = data.brightness > 50 ? 0 : 100;
+                const newBrightness = brightness > 50 ? 0 : 100;
                 
                 await fetch('/api/overlay/brightness?brightness=' + newBrightness, {
                     method: 'POST'
                 });
+                lastOverlayStatus = { ...(lastOverlayStatus || {}), brightness: newBrightness };
+                applyOverlayBrightness(newBrightness);
                 
-                // Update controls visibility based on brightness
                 const controls = document.getElementById('controls');
-                if (newBrightness === 0) {
-                    controls.style.display = 'none';
-                } else {
-                    controls.style.display = 'block';
+                if (controls) {
+                    controls.style.display = newBrightness === 0 ? 'none' : 'block';
                 }
             } catch (error) {
                 console.error('Toggle lights error:', error);

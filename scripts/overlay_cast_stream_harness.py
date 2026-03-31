@@ -459,11 +459,19 @@ async def apply_overlay_page_patches(page, args: argparse.Namespace) -> None:
         or args.page_skip_dynamic_groups
         or args.page_disable_dynamic_continuous
         or args.page_animation_time_scale is not None
+        or getattr(args, "page_disable_eventsource", False)
     ):
         return
     await page.evaluate(
         """
-        ({ disableWidgets, mappingFps, skipDynamicGroups, disableDynamicContinuous, animationTimeScale }) => {
+        ({ disableWidgets, mappingFps, skipDynamicGroups, disableDynamicContinuous, animationTimeScale, disableEventSource }) => {
+            if (disableEventSource) {
+                try {
+                    Object.defineProperty(window, 'EventSource', { configurable: true, value: undefined });
+                } catch (error) {
+                    window.EventSource = undefined;
+                }
+            }
             const dynamicTypes = new Set(['video', 'animation', 'animation_list']);
             if (animationTimeScale && Number.isFinite(animationTimeScale) && animationTimeScale > 0 && animationTimeScale < 1) {
                 const realNow = performance.now.bind(performance);
@@ -549,6 +557,7 @@ async def apply_overlay_page_patches(page, args: argparse.Namespace) -> None:
             "skipDynamicGroups": args.page_skip_dynamic_groups,
             "disableDynamicContinuous": args.page_disable_dynamic_continuous,
             "animationTimeScale": args.page_animation_time_scale,
+            "disableEventSource": getattr(args, "page_disable_eventsource", False),
         },
     )
 
@@ -2498,6 +2507,164 @@ async def run_relay_broadcast_benchmark(args: argparse.Namespace) -> dict[str, A
     return runner.result(clients)
 
 
+def _metric_value(metrics: dict[str, Any], name: str) -> float:
+    for entry in metrics.get("metrics", []):
+        if entry.get("name") == name:
+            try:
+                return float(entry.get("value", 0.0))
+            except (TypeError, ValueError):
+                return 0.0
+    return 0.0
+
+
+async def run_overlay_profile(args: argparse.Namespace) -> dict[str, Any]:
+    from playwright.async_api import async_playwright
+
+    profile = effective_profile(args)
+    console: list[dict[str, str]] = []
+    page_errors: list[str] = []
+    resource_entries: list[dict[str, Any]] = []
+    start_metrics: dict[str, Any] = {}
+    end_metrics: dict[str, Any] = {}
+    duration_s: float = 0.0
+    stub_api_requests = 0
+    stub_api_bytes = 0
+    stub_api_urls: list[str] = []
+
+    async with async_playwright() as playwright:
+        launch_kwargs: dict[str, Any] = {
+            "headless": not args.headed,
+            "args": chromium_args_for_mode(
+                args.gpu_mode,
+                args.chromium_arg,
+                include_default_args=not args.disable_default_chromium_args,
+            ),
+        }
+        if args.browser_channel:
+            launch_kwargs["channel"] = args.browser_channel
+        browser = await playwright.chromium.launch(**launch_kwargs)
+        page = await browser.new_page(viewport={"width": profile.width, "height": profile.height})
+        page.on("console", lambda msg: console.append({"type": msg.type, "text": msg.text}))
+        page.on("pageerror", lambda error: page_errors.append(str(error)))
+        cdp = await page.context.new_cdp_session(page)
+        await cdp.send("Performance.enable")
+
+        if args.page_disable_eventsource:
+            await page.add_init_script(
+                """
+                () => {
+                    try {
+                        Object.defineProperty(window, 'EventSource', { configurable: true, value: undefined });
+                    } catch (error) {
+                        window.EventSource = undefined;
+                    }
+                }
+                """
+            )
+
+        if args.profile_stub_api:
+            async def handle_api_route(route):
+                nonlocal stub_api_requests, stub_api_bytes
+                url = route.request.url
+                now_ms = int(time.time() * 1000)
+                body = "{}"
+                content_type = "application/json"
+                status = 200
+                if "overlay/events" in url:
+                    content_type = "text/event-stream"
+                    body = (
+                        "data: {\"type\":\"init\",\"data\":{\"brightness\":80,"
+                        "\"sync\":{\"event_id\":\"stub\",\"timestamp\":%d,\"triggered_by\":\"stub\"}}}\n\n" % now_ms
+                    )
+                elif "window-init" in url:
+                    body = json.dumps(
+                        {
+                            "config": {
+                                "id": 1,
+                                "background_type": "video",
+                                "video_transform": {"x": 0, "y": 0, "scale": 1, "rotation": 0},
+                                "widgets": [],
+                            },
+                            "streamingUrl": "about:blank",
+                            "revision": 1,
+                        }
+                    )
+                elif "window-refresh-state" in url:
+                    body = json.dumps({"revision": 1})
+                elif "playback-sync" in url:
+                    body = json.dumps({"server_now_ms": now_ms, "sources": {}})
+                elif "widget-data" in url:
+                    body = json.dumps({"data": {}})
+                elif "status" in url:
+                    body = json.dumps({"brightness": 80, "sync": {"event_id": "stub", "timestamp": now_ms, "triggered_by": "harness"}})
+                elif "brightness" in url and route.request.method == "POST":
+                    body = json.dumps({"ok": True})
+                stub_api_requests += 1
+                stub_api_bytes += len(body.encode("utf-8"))
+                if len(stub_api_urls) < 10:
+                    stub_api_urls.append(url)
+                await route.fulfill(status=status, headers={"Content-Type": content_type}, body=body)
+
+            await page.route("**/api/**", handle_api_route)
+
+        await page.goto(args.overlay_url, wait_until="domcontentloaded", timeout=20000)
+        await apply_overlay_page_patches(page, args)
+        eventsource_type = await page.evaluate("typeof EventSource")
+
+        await asyncio.sleep(args.prime_seconds)
+        await page.evaluate("performance.clearResourceTimings()")
+        start_metrics = await cdp.send("Performance.getMetrics")
+        start_wall = time.perf_counter()
+        await asyncio.sleep(args.seconds)
+        resource_entries = await page.evaluate(
+            """
+            () => performance.getEntriesByType('resource').map((entry) => ({
+                name: entry.name,
+                initiatorType: entry.initiatorType,
+                duration: entry.duration,
+                transferSize: entry.transferSize || 0,
+                encodedBodySize: entry.encodedBodySize || 0,
+                decodedBodySize: entry.decodedBodySize || 0,
+            }))
+            """
+        )
+        end_metrics = await cdp.send("Performance.getMetrics")
+        duration_s = time.perf_counter() - start_wall
+        await browser.close()
+
+    api_resources = [entry for entry in resource_entries if "/api/" in entry.get("name", "")]
+    transfer_bytes = int(sum(entry.get("transferSize", 0) or 0 for entry in resource_entries))
+    api_transfer_bytes = int(sum(entry.get("transferSize", 0) or 0 for entry in api_resources))
+
+    task_ms = (_metric_value(end_metrics, "TaskDuration") - _metric_value(start_metrics, "TaskDuration")) * 1000
+    script_ms = (_metric_value(end_metrics, "ScriptDuration") - _metric_value(start_metrics, "ScriptDuration")) * 1000
+    layout_ms = (_metric_value(end_metrics, "LayoutDuration") - _metric_value(start_metrics, "LayoutDuration")) * 1000
+
+    return {
+        "benchmark_mode": "overlay_profile",
+        "overlay_url": args.overlay_url,
+        "eventsource_type": eventsource_type,
+        "headed": args.headed,
+        "browser_channel": args.browser_channel,
+        "gpu_mode": args.gpu_mode,
+        "eventsource_disabled": getattr(args, "page_disable_eventsource", False),
+        "duration_s": round(duration_s, 3),
+        "cpu_task_ms": round(task_ms, 3),
+        "cpu_script_ms": round(script_ms, 3),
+        "cpu_layout_ms": round(layout_ms, 3),
+        "network_requests_total": len(resource_entries),
+        "network_requests_api": len(api_resources),
+        "network_transfer_kb": round(transfer_bytes / 1024.0, 2),
+        "network_transfer_api_kb": round(api_transfer_bytes / 1024.0, 2),
+        "resource_entries_sample": resource_entries[:10],
+        "console_tail": console[-10:],
+        "page_errors": page_errors[-10:],
+        "stub_api_requests": stub_api_requests if args.profile_stub_api else None,
+        "stub_api_bytes": stub_api_bytes if args.profile_stub_api else None,
+        "stub_api_urls": stub_api_urls if args.profile_stub_api else None,
+    }
+
+
 async def run_webrtc_capture_benchmark(args: argparse.Namespace) -> dict[str, Any]:
     results: list[dict[str, Any]] = []
     for scenario in args.webrtc_scenario or WEBRTC_SCENARIOS:
@@ -2516,7 +2683,13 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--mode",
-        choices=["overlay_capture_benchmark", "relay_broadcast_benchmark", "webrtc_capture_benchmark", "service_config_compare"],
+        choices=[
+            "overlay_capture_benchmark",
+            "relay_broadcast_benchmark",
+            "webrtc_capture_benchmark",
+            "service_config_compare",
+            "overlay_profile",
+        ],
         default="overlay_capture_benchmark",
     )
     parser.add_argument("--overlay-url", default=DEFAULT_OVERLAY_URL)
@@ -2582,6 +2755,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--browser-channel", choices=["chrome", "msedge"])
     parser.add_argument("--headed", action="store_true")
     parser.add_argument("--page-disable-widgets", action="store_true")
+    parser.add_argument("--page-disable-eventsource", action="store_true")
+    parser.add_argument("--profile-stub-api", action="store_true")
     parser.add_argument("--page-mapping-fps", type=float)
     parser.add_argument("--page-skip-dynamic-groups", action="store_true")
     parser.add_argument("--page-disable-dynamic-continuous", action="store_true")
@@ -2653,6 +2828,8 @@ async def main() -> int:
     args = parse_args()
     if args.mode == "overlay_capture_benchmark":
         result = await run_overlay_capture_benchmark(args)
+    elif args.mode == "overlay_profile":
+        result = await run_overlay_profile(args)
     elif args.mode == "service_config_compare":
         result = await run_service_config_compare(args)
     elif args.mode == "webrtc_capture_benchmark":
