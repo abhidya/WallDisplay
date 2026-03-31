@@ -36,14 +36,34 @@ def setup_logging(log_level="INFO", log_file="app.log"):
     )
     error_console_handler.setFormatter(error_formatter)
     
-    # File handler with rotation
-    file_handler = RotatingFileHandler(
-        log_file,
-        maxBytes=10*1024*1024,  # 10MB
-        backupCount=5
-    )
-    file_handler.setLevel(numeric_level)
-    file_handler.setFormatter(file_formatter)
+    # Resolve and create log directory when needed.
+    log_file_path = os.path.abspath(log_file)
+    log_dir = os.path.dirname(log_file_path)
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+
+    file_handler = None
+    try:
+        # File handler with rotation
+        file_handler = RotatingFileHandler(
+            log_file_path,
+            maxBytes=10*1024*1024,  # 10MB
+            backupCount=5
+        )
+        file_handler.setLevel(numeric_level)
+        file_handler.setFormatter(file_formatter)
+    except OSError as exc:
+        console_handler.handle(
+            logging.LogRecord(
+                name=__name__,
+                level=logging.WARNING,
+                pathname=__file__,
+                lineno=0,
+                msg=f"File logging disabled (cannot open {log_file_path}): {exc}",
+                args=(),
+                exc_info=None,
+            )
+        )
     
     # Configure root logger only once
     root_logger = logging.getLogger()
@@ -56,17 +76,32 @@ def setup_logging(log_level="INFO", log_file="app.log"):
     # Add our handlers
     root_logger.addHandler(console_handler)
     root_logger.addHandler(error_console_handler)
-    root_logger.addHandler(file_handler)
+    if file_handler:
+        root_logger.addHandler(file_handler)
     
     # Create a separate error log file
-    error_file_handler = RotatingFileHandler(
-        'errors.log',
-        maxBytes=10*1024*1024,  # 10MB
-        backupCount=10  # Keep more error logs
-    )
-    error_file_handler.setLevel(logging.ERROR)
-    error_file_handler.setFormatter(file_formatter)
-    root_logger.addHandler(error_file_handler)
+    error_log_path = os.path.join(log_dir or ".", "errors.log")
+    try:
+        error_file_handler = RotatingFileHandler(
+            error_log_path,
+            maxBytes=10*1024*1024,  # 10MB
+            backupCount=10  # Keep more error logs
+        )
+        error_file_handler.setLevel(logging.ERROR)
+        error_file_handler.setFormatter(file_formatter)
+        root_logger.addHandler(error_file_handler)
+    except OSError as exc:
+        console_handler.handle(
+            logging.LogRecord(
+                name=__name__,
+                level=logging.WARNING,
+                pathname=__file__,
+                lineno=0,
+                msg=f"Error-file logging disabled (cannot open {error_log_path}): {exc}",
+                args=(),
+                exc_info=None,
+            )
+        )
     
     # Prevent propagation to avoid duplicate logs
     logging.getLogger("uvicorn").propagate = False

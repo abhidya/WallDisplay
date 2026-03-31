@@ -20,9 +20,172 @@ class TestMain:
     
     def test_root_redirect(self, test_client):
         """Test the root endpoint redirects to docs."""
-        response = test_client.get("/")
+        response = test_client.get("/", follow_redirects=False)
+        assert response.status_code == 307
+        assert response.headers["location"] == "/docs"
+
+    @patch("web.backend.main.SessionLocal")
+    @patch("web.backend.main.OverlayService.get_projector_redirect_config")
+    def test_root_redirect_matches_forwarded_client_ip(self, mock_get_redirect_config, mock_session_local, test_client):
+        """Test root redirect uses forwarded client IP when available."""
+        mock_db = MagicMock()
+        mock_session_local.return_value = mock_db
+        mock_get_redirect_config.return_value = {
+            "enabled": True,
+            "client_ip": "10.0.0.210",
+            "target_path": "/backend-static/overlay_window.html?config_id=5&controls=hidden",
+        }
+
+        response = test_client.get(
+            "/",
+            follow_redirects=False,
+            headers={"x-forwarded-for": "10.0.0.210, 127.0.0.1"},
+        )
+
+        assert response.status_code == 307
+        assert response.headers["location"] == "/backend-static/overlay_window.html?config_id=5&controls=hidden"
+        mock_db.close.assert_called_once()
+
+    @patch("web.backend.main.SessionLocal")
+    @patch("web.backend.main.OverlayService.get_projector_redirect_config")
+    def test_root_redirect_falls_back_to_docs_for_non_matching_client_ip(
+        self,
+        mock_get_redirect_config,
+        mock_session_local,
+        test_client,
+    ):
+        """Test root redirect does not trigger for non-matching client IPs."""
+        mock_db = MagicMock()
+        mock_session_local.return_value = mock_db
+        mock_get_redirect_config.return_value = {
+            "enabled": True,
+            "client_ip": "10.0.0.210",
+            "target_path": "/backend-static/overlay_window.html?config_id=5&controls=hidden",
+        }
+
+        response = test_client.get(
+            "/",
+            follow_redirects=False,
+            headers={"x-forwarded-for": "10.0.0.211"},
+        )
+
+        assert response.status_code == 307
+        assert response.headers["location"] == "/docs"
+        mock_db.close.assert_called_once()
+
+    @patch("web.backend.main.SessionLocal")
+    @patch("web.backend.main.OverlayService.get_projector_redirect_config")
+    def test_html_navigation_redirects_matching_client_on_non_root_path(
+        self,
+        mock_get_redirect_config,
+        mock_session_local,
+        test_client,
+    ):
+        mock_db = MagicMock()
+        mock_session_local.return_value = mock_db
+        mock_get_redirect_config.return_value = {
+            "enabled": True,
+            "client_ip": "10.0.0.210",
+            "target_path": "/backend-static/overlay_window.html?config_id=5&controls=hidden",
+        }
+
+        response = test_client.get(
+            "/docs",
+            follow_redirects=False,
+            headers={
+                "x-forwarded-for": "10.0.0.210",
+                "accept": "text/html",
+            },
+        )
+
+        assert response.status_code == 307
+        assert response.headers["location"] == "/backend-static/overlay_window.html?config_id=5&controls=hidden"
+        mock_db.close.assert_called_once()
+
+    @patch("web.backend.main.SessionLocal")
+    @patch("web.backend.main.OverlayService.get_projector_redirect_config")
+    def test_api_requests_do_not_redirect_matching_client(
+        self,
+        mock_get_redirect_config,
+        mock_session_local,
+        test_client,
+    ):
+        mock_db = MagicMock()
+        mock_session_local.return_value = mock_db
+        mock_get_redirect_config.return_value = {
+            "enabled": True,
+            "client_ip": "10.0.0.210",
+            "target_path": "/backend-static/overlay_window.html?config_id=5&controls=hidden",
+        }
+
+        response = test_client.get(
+            "/api/overlay/projector-redirect",
+            follow_redirects=False,
+            headers={
+                "x-forwarded-for": "10.0.0.210",
+                "accept": "application/json",
+            },
+        )
+
         assert response.status_code == 200
-        # Since we're following redirects by default, we should end up at the docs page
+        assert response.json()["client_ip"] == "10.0.0.210"
+        mock_db.close.assert_called_once()
+
+    @patch("web.backend.main.SessionLocal")
+    @patch("web.backend.main.OverlayService.get_projector_redirect_config")
+    def test_target_path_does_not_redirect_in_loop(
+        self,
+        mock_get_redirect_config,
+        mock_session_local,
+        test_client,
+    ):
+        mock_db = MagicMock()
+        mock_session_local.return_value = mock_db
+        mock_get_redirect_config.return_value = {
+            "enabled": True,
+            "client_ip": "10.0.0.210",
+            "target_path": "/backend-static/overlay_window.html?config_id=5&controls=hidden",
+        }
+
+        response = test_client.get(
+            "/backend-static/overlay_window.html?config_id=5&controls=hidden",
+            follow_redirects=False,
+            headers={
+                "x-forwarded-for": "10.0.0.210",
+                "accept": "text/html",
+            },
+        )
+
+        assert response.status_code == 200
+        mock_db.close.assert_called_once()
+
+    @patch("web.backend.main.SessionLocal")
+    @patch("web.backend.main.OverlayService.get_projector_redirect_config")
+    def test_static_alias_of_target_path_does_not_redirect_in_loop(
+        self,
+        mock_get_redirect_config,
+        mock_session_local,
+        test_client,
+    ):
+        mock_db = MagicMock()
+        mock_session_local.return_value = mock_db
+        mock_get_redirect_config.return_value = {
+            "enabled": True,
+            "client_ip": "10.0.0.210",
+            "target_path": "/backend-static/overlay_window.html?config_id=5&controls=hidden",
+        }
+
+        response = test_client.get(
+            "/static/overlay_window.html?config_id=5&controls=hidden",
+            follow_redirects=False,
+            headers={
+                "x-forwarded-for": "10.0.0.210",
+                "accept": "text/html",
+            },
+        )
+
+        assert response.status_code == 200
+        mock_db.close.assert_called_once()
     
     def test_device_manager_initialization(self, test_client):
         """Test that the device manager is initialized."""

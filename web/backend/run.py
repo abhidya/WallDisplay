@@ -9,6 +9,14 @@ import os
 # Add current directory to Python path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+
+def _resolve_backend_log_file() -> str:
+    backend_dir = os.path.dirname(os.path.abspath(__file__))
+    root_dir = os.path.abspath(os.path.join(backend_dir, "..", ".."))
+    log_dir = os.environ.get("NANODLNA_LOG_DIR") or os.path.join(root_dir, "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    return os.path.join(log_dir, "dashboard_run.log")
+
 if __name__ == "__main__":
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="Run the nano-dlna Dashboard API")
@@ -22,7 +30,7 @@ if __name__ == "__main__":
     try:
         from logging_config import setup_logging
         log_level = "DEBUG" if args.debug else "INFO"
-        setup_logging(log_level=log_level, log_file="dashboard_run.log")
+        setup_logging(log_level=log_level, log_file=_resolve_backend_log_file())
     except ImportError:
         # Fallback to basic config if logging_config not available
         log_level = logging.DEBUG if args.debug else logging.INFO

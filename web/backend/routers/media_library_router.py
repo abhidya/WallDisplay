@@ -1,6 +1,7 @@
-from typing import List
+import os
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from database.database import get_db
@@ -18,6 +19,32 @@ router = APIRouter(prefix="/api/media-library", tags=["media-library"])
 @router.get("/directories", response_model=List[MediaDirectoryResponse])
 def list_media_directories(db: Session = Depends(get_db)):
     return MediaDirectoryService(db).list_directories()
+
+
+@router.get("/directories/browse")
+def browse_media_directories(path: Optional[str] = Query(None, description="Directory path to browse")):
+    current_path = os.path.abspath(os.path.expanduser(path)) if path else os.path.expanduser("~")
+    if not os.path.isdir(current_path):
+        raise HTTPException(status_code=404, detail=f"Directory not found: {current_path}")
+
+    directories = []
+    try:
+        for entry in sorted(os.listdir(current_path)):
+            full_path = os.path.join(current_path, entry)
+            if os.path.isdir(full_path):
+                directories.append({"name": entry, "path": full_path})
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=f"Permission denied: {current_path}") from exc
+
+    parent_path = os.path.dirname(current_path)
+    if parent_path == current_path:
+        parent_path = None
+
+    return {
+        "current_path": current_path,
+        "parent_path": parent_path,
+        "directories": directories,
+    }
 
 
 @router.post("/directories", response_model=MediaDirectoryResponse)

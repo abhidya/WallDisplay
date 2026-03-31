@@ -238,6 +238,7 @@ const mappingsApi = {
 
 const mediaLibraryApi = {
   listDirectories: () => api.get('/media-library/directories'),
+  browseDirectories: (path = null) => api.get('/media-library/directories/browse', { params: { path } }),
   createDirectory: (data) => api.post('/media-library/directories', data),
   updateDirectory: (id, data) => api.put(`/media-library/directories/${id}`, data),
   deleteDirectory: (id) => api.delete(`/media-library/directories/${id}`),

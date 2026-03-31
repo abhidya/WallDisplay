@@ -624,6 +624,7 @@ class VideoService:
         
         video_extensions = {'.mp4', '.mkv', '.avi', '.mov', '.mpg', '.mpeg', '.wmv', '.ts', '.m4v', '.webm'}
         videos_added = []
+        discovered_paths = []
         
         try:
             # Walk through directory and subdirectories
@@ -633,29 +634,55 @@ class VideoService:
                     file_ext = os.path.splitext(file)[1].lower()
                     if file_ext in video_extensions:
                         file_path = os.path.abspath(os.path.join(root, file))
+                        discovered_paths.append(file_path)
+
+            discovered_set = set(discovered_paths)
+
+            # Keep directory scans in sync with filesystem contents.
+            if source_directory_id is not None:
+                existing_for_source = self.db.query(VideoModel).filter(
+                    VideoModel.source_directory_id == source_directory_id,
+                    VideoModel.source_type == "directory_scan",
+                ).all()
+                for existing_video in existing_for_source:
+                    if existing_video.path not in discovered_set:
+                        self.db.delete(existing_video)
+                self.db.commit()
+
+            for file_path in discovered_paths:
                         
-                        # Check if video already exists in database
-                        existing = self.get_video_by_path(file_path)
-                        if existing:
-                            logger.info(f"Video already exists in database: {file_path}")
-                            continue
+                # Check if video already exists in database
+                existing = self.get_video_by_path(file_path)
+                if existing:
+                    updated = False
+                    if source_directory_id is not None and existing.source_directory_id != source_directory_id:
+                        existing.source_directory_id = source_directory_id
+                        existing.source_type = "directory_scan"
+                        updated = True
+                    if existing.category != category:
+                        existing.category = category
+                        updated = True
+                    if updated:
+                        self.db.commit()
+                    logger.info(f"Video already exists in database: {file_path}")
+                    continue
                         
-                        # Create video entry
-                        try:
-                            video_name = os.path.splitext(file)[0]
-                            video = VideoCreate(
-                                name=video_name,
-                                path=file_path,
-                                category=category,
-                                source_type="directory_scan",
-                                source_directory_id=source_directory_id,
-                            )
-                            db_video = self.create_video(video)
-                            videos_added.append(db_video)
-                            logger.info(f"Added video: {file_path}")
-                        except Exception as e:
-                            logger.error(f"Error adding video {file_path}: {e}")
-                            continue
+                # Create video entry
+                try:
+                    video_name = os.path.splitext(os.path.basename(file_path))[0]
+                    video = VideoCreate(
+                        name=video_name,
+                        path=file_path,
+                        category=category,
+                        source_type="directory_scan",
+                        source_directory_id=source_directory_id,
+                    )
+                    db_video = self.create_video(video)
+                    videos_added.append(db_video)
+                    logger.info(f"Added video: {file_path}")
+                except Exception as e:
+                    logger.error(f"Error adding video {file_path}: {e}")
+                    continue
             
             return videos_added
             

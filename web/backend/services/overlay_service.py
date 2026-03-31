@@ -110,6 +110,95 @@ class OverlayService:
             json.dump(merged, handle, indent=2, sort_keys=True)
         return merged
 
+    def _stable_revision_hash(self, payload: Dict[str, Any]) -> str:
+        serialized = json.dumps(payload or {}, sort_keys=True, separators=(",", ":"), default=str)
+        return hashlib.sha1(serialized.encode("utf-8")).hexdigest()[:20]
+
+    def _safe_file_signature(self, path_value: Optional[str]) -> Optional[Dict[str, Any]]:
+        if not path_value:
+            return None
+        try:
+            stat_result = os.stat(path_value)
+        except OSError:
+            return {
+                "path": path_value,
+                "exists": False,
+            }
+        return {
+            "path": path_value,
+            "exists": True,
+            "mtime_ns": stat_result.st_mtime_ns,
+            "size": stat_result.st_size,
+        }
+
+    def _build_window_refresh_revision(self, config: OverlayConfig) -> str:
+        revision_payload: Dict[str, Any] = {
+            "config": {
+                "id": config.id,
+                "name": config.name,
+                "background_type": config.background_type,
+                "video_id": config.video_id,
+                "mapping_scene_id": config.mapping_scene_id,
+                "video_transform": config.video_transform or {},
+                "widgets": config.widgets or [],
+                "api_configs": config.api_configs or {},
+                "created_at": config.created_at.isoformat() if config.created_at else None,
+                "updated_at": config.updated_at.isoformat() if config.updated_at else None,
+            },
+            "global_api_configs": self.get_global_api_configs(),
+            "global_api_config_file": self._safe_file_signature(self._global_api_config_path),
+        }
+
+        if config.mapping_scene_id:
+            scene = self.db.query(MappingScene).filter(MappingScene.id == config.mapping_scene_id).first()
+            if scene:
+                revision_payload["scene"] = {
+                    "id": scene.id,
+                    "name": scene.name,
+                    "canvas_width": scene.canvas_width,
+                    "canvas_height": scene.canvas_height,
+                    "mask_mode": scene.mask_mode,
+                    "masks": scene.masks or [],
+                    "groups": scene.groups or [],
+                    "render_settings": scene.render_settings or {},
+                    "created_at": scene.created_at.isoformat() if scene.created_at else None,
+                    "updated_at": scene.updated_at.isoformat() if scene.updated_at else None,
+                    "mask_files": [
+                        self._safe_file_signature(
+                            os.path.join(
+                                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                str(mask.get("stored_path") or ""),
+                            )
+                        )
+                        for mask in (scene.masks or [])
+                        if mask.get("stored_path")
+                    ],
+                }
+
+        if config.video_id:
+            video = self.db.query(VideoModel).filter(VideoModel.id == config.video_id).first()
+            if video:
+                revision_payload["video"] = {
+                    "id": video.id,
+                    "name": video.name,
+                    "path": video.path,
+                    "file_name": video.file_name,
+                    "duration": video.duration,
+                    "format": video.format,
+                    "resolution": video.resolution,
+                    "category": video.category,
+                    "source_type": video.source_type,
+                    "overlay_optimized": video.overlay_optimized,
+                    "has_subtitle": video.has_subtitle,
+                    "subtitle_path": video.subtitle_path,
+                    "created_at": video.created_at.isoformat() if video.created_at else None,
+                    "updated_at": video.updated_at.isoformat() if video.updated_at else None,
+                    "file": self._safe_file_signature(video.path),
+                    "subtitle_file": self._safe_file_signature(video.subtitle_path),
+                }
+
+        return self._stable_revision_hash(revision_payload)
+
     def create_config(self, config_data: OverlayConfigCreate) -> OverlayConfigResponse:
         """Create a new overlay configuration"""
         self._validate_background_source(config_data.background_type, config_data.video_id, config_data.mapping_scene_id)
@@ -293,29 +382,9 @@ class OverlayService:
         if not config:
             raise ValueError("Configuration not found")
 
-        revision_parts = [
-            f"config:{config.updated_at.isoformat() if config.updated_at else config.created_at.isoformat() if config.created_at else 'none'}"
-        ]
-        if os.path.exists(self._global_api_config_path):
-            revision_parts.append(f"global-api:{datetime.utcfromtimestamp(os.path.getmtime(self._global_api_config_path)).isoformat()}")
-
-        if config.mapping_scene_id:
-            scene = self.db.query(MappingScene).filter(MappingScene.id == config.mapping_scene_id).first()
-            if scene:
-                revision_parts.append(
-                    f"scene:{scene.updated_at.isoformat() if scene.updated_at else scene.created_at.isoformat() if scene.created_at else 'none'}"
-                )
-
-        if config.video_id:
-            video = self.db.query(VideoModel).filter(VideoModel.id == config.video_id).first()
-            if video:
-                revision_parts.append(
-                    f"video:{video.updated_at.isoformat() if video.updated_at else video.created_at.isoformat() if video.created_at else 'none'}"
-                )
-
         return {
             "config_id": config.id,
-            "revision": "|".join(revision_parts),
+            "revision": self._build_window_refresh_revision(config),
         }
 
     def get_live_widget_data(self, config_id: int) -> Dict[str, Any]:

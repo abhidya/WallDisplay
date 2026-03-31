@@ -6,6 +6,7 @@ from typing import Optional
 from database.database import SessionLocal
 from models.video import VideoModel
 from core.twisted_streaming import get_instance as get_twisted_streaming
+from services.optimization_limiter import OPTIMIZATION_SEMAPHORE
 from services.video_service import VideoService
 
 logger = logging.getLogger(__name__)
@@ -73,8 +74,8 @@ class VideoPreprocessingService:
     def _process_video(self, video_id: int) -> None:
         db = SessionLocal()
         try:
-            service = VideoService(db, get_twisted_streaming())
-            result = service.process_video_for_overlay(video_id)
+            with OPTIMIZATION_SEMAPHORE:
+                result = self._run_video_optimization(db, video_id)
             if result is None:
                 logger.warning("Queued video %s disappeared before preprocessing", video_id)
                 return
@@ -86,6 +87,10 @@ class VideoPreprocessingService:
             )
         finally:
             db.close()
+
+    def _run_video_optimization(self, db, video_id: int):
+        service = VideoService(db, get_twisted_streaming())
+        return service.process_video_for_overlay(video_id)
 
 
 _service_instance: Optional[VideoPreprocessingService] = None

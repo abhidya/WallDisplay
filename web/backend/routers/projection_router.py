@@ -297,7 +297,8 @@ async def get_mask_image(session_id: str):
                 filepath = os.path.join(upload_dir, mask_file)
                 
                 if os.path.exists(filepath):
-                    img = Image.open(filepath).convert('RGBA')
+                    with Image.open(filepath) as opened:
+                        img = opened.convert('RGBA')
                     if composite is None:
                         composite = Image.new('RGBA', img.size, (0, 0, 0, 255))
                     

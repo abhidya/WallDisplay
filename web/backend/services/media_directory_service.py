@@ -3,6 +3,7 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 
 from models.media_directory import MediaDirectory
+from models.video import VideoModel
 from schemas.media_directory import MediaDirectoryCreate, MediaDirectoryResponse, MediaDirectoryUpdate
 from services.video_service import VideoService
 from core.twisted_streaming import get_instance as get_twisted_streaming
@@ -38,6 +39,11 @@ class MediaDirectoryService:
         directory = self.db.query(MediaDirectory).filter(MediaDirectory.id == directory_id).first()
         if not directory:
             return False
+        # Prevent stale rows from being accidentally reused if directory IDs are reused later.
+        self.db.query(VideoModel).filter(
+            VideoModel.source_directory_id == directory_id,
+            VideoModel.source_type == "directory_scan",
+        ).delete(synchronize_session=False)
         self.db.delete(directory)
         self.db.commit()
         return True

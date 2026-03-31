@@ -48,21 +48,13 @@ class DepthLoader:
     @staticmethod
     def _load_image(file_path: str) -> np.ndarray:
         """Load a depth map from an image file (PNG, JPG)"""
-        image = Image.open(file_path)
-        
-        # Check if grayscale or RGB
-        if image.mode == 'L':
-            # Already grayscale
-            depth_map = np.array(image)
-        elif image.mode == 'RGB':
-            # Convert RGB to grayscale
-            image = image.convert('L')
-            depth_map = np.array(image)
-        else:
-            # Try to convert to grayscale
-            image = image.convert('L')
-            depth_map = np.array(image)
-            
+        with Image.open(file_path) as image:
+            if image.mode == 'L':
+                depth_map = np.array(image)
+            elif image.mode == 'RGB':
+                depth_map = np.array(image.convert('L'))
+            else:
+                depth_map = np.array(image.convert('L'))
         return depth_map
     
     @staticmethod
@@ -70,8 +62,8 @@ class DepthLoader:
         """Load a depth map from a 16-bit TIFF file"""
         try:
             # Try using PIL first
-            image = Image.open(file_path)
-            depth_map = np.array(image)
+            with Image.open(file_path) as image:
+                depth_map = np.array(image)
             
             # Check if it's a 16-bit TIFF
             if depth_map.dtype == np.uint16:

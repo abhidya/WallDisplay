@@ -9,7 +9,19 @@ source "$SCRIPT_DIR/../scripts/common_env.sh"
 cd "$SCRIPT_DIR"
 bash ./stop_direct.sh
 
-if { [ "$NANODLNA_FRONTEND_ENABLED" = "1" ] && lsof -ti:"$NANODLNA_FRONTEND_PORT" > /dev/null; } || lsof -ti:"$NANODLNA_BACKEND_PORT" > /dev/null; then
+if [ "$NANODLNA_FRONTEND_ENABLED" = "1" ] && ! nanodlna_wait_for_port_release "$NANODLNA_FRONTEND_PORT" "frontend"; then
+    echo "Error: Frontend port $NANODLNA_FRONTEND_PORT is still in use. Cannot start application."
+    echo "Try running ./stop_direct.sh again or manually kill the processes."
+    exit 1
+fi
+
+if ! nanodlna_wait_for_port_release "$NANODLNA_BACKEND_PORT" "backend"; then
+    echo "Error: Backend port $NANODLNA_BACKEND_PORT is still in use. Cannot start application."
+    echo "Try running ./stop_direct.sh again or manually kill the processes."
+    exit 1
+fi
+
+if { [ "$NANODLNA_FRONTEND_ENABLED" = "1" ] && [ -n "$(nanodlna_listener_pid_for_port "$NANODLNA_FRONTEND_PORT")" ]; } || [ -n "$(nanodlna_listener_pid_for_port "$NANODLNA_BACKEND_PORT")" ]; then
     echo "Error: Required ports are still in use. Cannot start application."
     echo "Try running ./stop_direct.sh again or manually kill the processes."
     exit 1
@@ -44,20 +56,33 @@ BACKEND_PID=$!
 echo "Waiting for backend to start..."
 MAX_RETRIES="$NANODLNA_BACKEND_START_TIMEOUT"
 RETRY_COUNT=0
-while ! curl -s "http://localhost:${NANODLNA_BACKEND_PORT}/health" > /dev/null && [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-    sleep 1
-    RETRY_COUNT=$((RETRY_COUNT + 1))
-    echo "Waiting for backend... ($RETRY_COUNT/$MAX_RETRIES)"
-
-    if ! ps -p $BACKEND_PID > /dev/null; then
+BACKEND_PORT_OWNER=""
+while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+    if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
         echo "Backend process ($BACKEND_PID) has terminated. Check logs for errors."
         exit 1
     fi
+
+    BACKEND_PORT_OWNER="$(nanodlna_listener_pid_for_port "$NANODLNA_BACKEND_PORT")"
+    if [ -n "$BACKEND_PORT_OWNER" ] && [ "$BACKEND_PORT_OWNER" != "$BACKEND_PID" ]; then
+        echo "Error: Backend port $NANODLNA_BACKEND_PORT is owned by PID $BACKEND_PORT_OWNER instead of the launched backend PID $BACKEND_PID."
+        echo "A stale backend is responding on the expected port. Stop it and retry."
+        kill "$BACKEND_PID" 2>/dev/null || true
+        exit 1
+    fi
+
+    if [ "$BACKEND_PORT_OWNER" = "$BACKEND_PID" ] && curl -fsS "http://localhost:${NANODLNA_BACKEND_PORT}/health" > /dev/null 2>&1; then
+        break
+    fi
+
+    sleep 1
+    RETRY_COUNT=$((RETRY_COUNT + 1))
+    echo "Waiting for backend... ($RETRY_COUNT/$MAX_RETRIES)"
 done
 
 if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
     echo "Error: Backend failed to start within the expected time."
-    kill $BACKEND_PID 2>/dev/null || true
+    kill "$BACKEND_PID" 2>/dev/null || true
     exit 1
 fi
 
@@ -66,6 +91,22 @@ FRONTEND_PID=""
 
 if [ "$NANODLNA_FRONTEND_ENABLED" = "1" ]; then
     cd "$NANODLNA_FRONTEND_DIR"
+
+    # Guard against stale frontend binders when service restarts quickly.
+    if lsof -ti:"$NANODLNA_FRONTEND_PORT" > /dev/null; then
+        echo "Clearing stale frontend listeners on port $NANODLNA_FRONTEND_PORT..."
+        lsof -ti:"$NANODLNA_FRONTEND_PORT" | xargs kill -9 2>/dev/null || true
+        if ! nanodlna_wait_for_port_release "$NANODLNA_FRONTEND_PORT" "frontend"; then
+            echo "Error: Frontend port $NANODLNA_FRONTEND_PORT is still in use after cleanup."
+            exit 1
+        fi
+    fi
+
+    if lsof -ti:"$NANODLNA_FRONTEND_PORT" > /dev/null; then
+        echo "Error: Frontend port $NANODLNA_FRONTEND_PORT is still in use after cleanup."
+        exit 1
+    fi
+
     echo "Installing frontend dependencies..."
     "$NANODLNA_NPM_BIN" install
 

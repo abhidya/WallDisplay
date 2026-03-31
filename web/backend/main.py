@@ -3,6 +3,8 @@ import os
 import sys
 import traceback
 import time
+import ipaddress
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,6 +29,15 @@ from services.overlay_service import OverlayService
 
 # Configure logging - check if already configured by run.py
 import logging.handlers
+
+
+def _resolve_backend_log_file() -> str:
+    backend_dir = os.path.dirname(os.path.abspath(__file__))
+    root_dir = os.path.abspath(os.path.join(backend_dir, "..", ".."))
+    log_dir = os.environ.get("NANODLNA_LOG_DIR") or os.path.join(root_dir, "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    return os.path.join(log_dir, "dashboard_run.log")
+
 
 # Create custom filter to exclude repetitive endpoint logs
 class EndpointFilter(logging.Filter):
@@ -53,7 +64,7 @@ if not root_logger.handlers:
     # Only configure if not already done
     try:
         from logging_config import setup_logging
-        setup_logging(log_level="INFO", log_file="dashboard_run.log")
+        setup_logging(log_level="INFO", log_file=_resolve_backend_log_file())
     except ImportError:
         # Fallback configuration
         logger = logging.getLogger(__name__)
@@ -89,12 +100,128 @@ else:
 # Get logger for this module
 logger = logging.getLogger(__name__)
 
+
+def _normalize_ip_candidate(value: str) -> str:
+    candidate = str(value or "").strip().strip("\"'")
+    if not candidate:
+        return ""
+    if candidate.lower().startswith("for="):
+        candidate = candidate[4:].strip().strip("\"'")
+    if candidate.startswith("[") and "]" in candidate:
+        candidate = candidate[1:candidate.index("]")]
+    elif candidate.count(":") == 1 and "." in candidate:
+        candidate = candidate.rsplit(":", 1)[0]
+    if candidate.startswith("::ffff:"):
+        candidate = candidate[7:]
+    try:
+        return str(ipaddress.ip_address(candidate))
+    except ValueError:
+        return candidate
+
+
+def _get_request_client_ip(request: Request) -> str:
+    x_forwarded_for = request.headers.get("x-forwarded-for", "")
+    if x_forwarded_for:
+        for value in x_forwarded_for.split(","):
+            candidate = _normalize_ip_candidate(value)
+            if candidate and candidate.lower() != "unknown":
+                return candidate
+
+    forwarded = request.headers.get("forwarded", "")
+    if forwarded:
+        for entry in forwarded.split(","):
+            for part in entry.split(";"):
+                part = part.strip()
+                if part.lower().startswith("for="):
+                    candidate = _normalize_ip_candidate(part)
+                    if candidate and candidate.lower() != "unknown":
+                        return candidate
+
+    x_real_ip = _normalize_ip_candidate(request.headers.get("x-real-ip", ""))
+    if x_real_ip:
+        return x_real_ip
+
+    return _normalize_ip_candidate(request.client.host if request.client else "")
+
+
+def _request_targets_html_document(request: Request) -> bool:
+    sec_fetch_dest = (request.headers.get("sec-fetch-dest") or "").lower()
+    if sec_fetch_dest in {"document", "iframe", "frame"}:
+        return True
+
+    sec_fetch_mode = (request.headers.get("sec-fetch-mode") or "").lower()
+    if sec_fetch_mode == "navigate":
+        return True
+
+    accept = (request.headers.get("accept") or "").lower()
+    return "text/html" in accept
+
+
+def _target_matches_request(request: Request, target_path: str) -> bool:
+    target = urlsplit(target_path or "")
+    request_path = request.url.path or ""
+    target_path_value = target.path or ""
+    canonical_request_path = request_path.replace("/backend-static/", "/static/", 1)
+    canonical_target_path = target_path_value.replace("/backend-static/", "/static/", 1)
+    request_query = request.url.query or ""
+    target_query = target.query or ""
+    return canonical_request_path == canonical_target_path and request_query == target_query
+
+
+def _should_redirect_request(request: Request, redirect_config: Optional[Dict[str, Any]]) -> Optional[str]:
+    if not redirect_config or not redirect_config.get("enabled"):
+        return None
+
+    configured_client_ip = _normalize_ip_candidate(redirect_config.get("client_ip"))
+    if not configured_client_ip:
+        return None
+
+    client_ip = _get_request_client_ip(request)
+    if client_ip != configured_client_ip:
+        return None
+
+    if request.method not in {"GET", "HEAD"} or not _request_targets_html_document(request):
+        return None
+
+    target_path = str(redirect_config.get("target_path") or "").strip()
+    if not target_path:
+        return None
+
+    if _target_matches_request(request, target_path):
+        return None
+
+    return target_path
+
 # Create FastAPI app
 app = FastAPI(
     title="nano-dlna Dashboard",
     description="Web dashboard for managing DLNA and Transcreen projectors",
     version="1.0.0",
 )
+
+
+@app.middleware("http")
+async def projector_redirect_middleware(request: Request, call_next):
+    db = SessionLocal()
+    try:
+        redirect_config = OverlayService(db).get_projector_redirect_config()
+    except Exception as exc:
+        logger.warning("Failed to load projector redirect config: %s", exc)
+        redirect_config = None
+    finally:
+        db.close()
+
+    redirect_target = _should_redirect_request(request, redirect_config)
+    if redirect_target:
+        logger.info(
+            "Redirecting client %s from %s to %s",
+            _get_request_client_ip(request),
+            request.url.path,
+            redirect_target,
+        )
+        return RedirectResponse(url=redirect_target, status_code=307)
+
+    return await call_next(request)
 
 # Configure CORS
 app.add_middleware(
@@ -152,12 +279,13 @@ async def root(request: Request):
     finally:
         db.close()
 
-    client_ip = request.client.host if request.client else ""
+    client_ip = _get_request_client_ip(request)
+    configured_client_ip = _normalize_ip_candidate(redirect_config.get("client_ip")) if redirect_config else ""
     if (
         redirect_config
         and redirect_config.get("enabled")
-        and redirect_config.get("client_ip")
-        and client_ip == redirect_config.get("client_ip")
+        and configured_client_ip
+        and client_ip == configured_client_ip
     ):
         return RedirectResponse(url=redirect_config.get("target_path") or "/docs", status_code=307)
 

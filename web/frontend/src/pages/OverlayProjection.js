@@ -406,6 +406,9 @@ function OverlayProjection() {
             // Extract only the fields that the backend expects
             const updateData = {
                 name: config.name,
+                background_type: config.background_type,
+                video_id: config.video_id,
+                mapping_scene_id: config.mapping_scene_id,
                 video_transform: config.video_transform,
                 widgets: config.widgets,
                 api_configs: config.api_configs

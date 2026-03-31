@@ -1,5 +1,7 @@
 import requests
 
+from web.backend.models.overlay import OverlayConfig
+from web.backend.models.video import VideoModel
 from web.backend.services.overlay_service import OverlayService
 
 
@@ -118,3 +120,67 @@ def test_fetch_gmail_refreshes_after_unauthorized(monkeypatch):
         "items": [{"sender": "Sender", "title": "Subject"}],
         "count": 1,
     }
+
+
+def test_window_refresh_state_revision_changes_when_config_content_changes(test_db, tmp_path):
+    video = VideoModel(
+        name="Background",
+        path=str(tmp_path / "background.mp4"),
+        file_name="background.mp4",
+        file_size=1024,
+        format="mp4",
+        duration=10.0,
+        resolution="1920x1080",
+        has_subtitle=False,
+    )
+    test_db.add(video)
+    test_db.commit()
+    test_db.refresh(video)
+
+    config = OverlayConfig(
+        name="Config A",
+        background_type="video",
+        video_id=video.id,
+        mapping_scene_id=None,
+        video_transform={"x": 0, "y": 0, "scale": 1.0, "rotation": 0},
+        widgets=[
+            {
+                "id": "time-1",
+                "type": "time",
+                "position": {"x": 0, "y": 0},
+                "size": {"width": 200, "height": 80},
+                "config": {"format": "12h"},
+                "visible": True,
+                "rotation": 0,
+            }
+        ],
+        api_configs={},
+    )
+    test_db.add(config)
+    test_db.commit()
+    test_db.refresh(config)
+
+    service = OverlayService(test_db)
+    service._global_api_config_path = str(tmp_path / "global_api.json")
+
+    initial_state = service.get_window_refresh_state(config.id)
+
+    config.widgets = [
+        {
+            "id": "time-1",
+            "type": "time",
+            "position": {"x": 50, "y": 25},
+            "size": {"width": 220, "height": 90},
+            "config": {"format": "24h"},
+            "visible": True,
+            "rotation": 15,
+        }
+    ]
+    test_db.commit()
+    test_db.refresh(config)
+
+    updated_state = service.get_window_refresh_state(config.id)
+
+    assert initial_state["config_id"] == config.id
+    assert updated_state["config_id"] == config.id
+    assert initial_state["revision"] != updated_state["revision"]

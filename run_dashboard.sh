@@ -20,7 +20,19 @@ fi
 
 CONFIG_PATH="$(cd "$(dirname "$CONFIG_FILE")" && pwd)/$(basename "$CONFIG_FILE")"
 
-if { [ "$NANODLNA_FRONTEND_ENABLED" = "1" ] && lsof -ti:"$NANODLNA_FRONTEND_PORT" > /dev/null; } || lsof -ti:"$NANODLNA_BACKEND_PORT" > /dev/null; then
+if [ "$NANODLNA_FRONTEND_ENABLED" = "1" ] && ! nanodlna_wait_for_port_release "$NANODLNA_FRONTEND_PORT" "frontend"; then
+    echo "Error: Frontend port $NANODLNA_FRONTEND_PORT is still in use. Cannot start dashboard."
+    echo "Try running ./stop_dashboard.sh again or manually kill the processes."
+    exit 1
+fi
+
+if ! nanodlna_wait_for_port_release "$NANODLNA_BACKEND_PORT" "backend"; then
+    echo "Error: Backend port $NANODLNA_BACKEND_PORT is still in use. Cannot start dashboard."
+    echo "Try running ./stop_dashboard.sh again or manually kill the processes."
+    exit 1
+fi
+
+if { [ "$NANODLNA_FRONTEND_ENABLED" = "1" ] && [ -n "$(nanodlna_listener_pid_for_port "$NANODLNA_FRONTEND_PORT")" ]; } || [ -n "$(nanodlna_listener_pid_for_port "$NANODLNA_BACKEND_PORT")" ]; then
     echo "Error: Required ports are still in use. Cannot start dashboard."
     echo "Try running ./stop_dashboard.sh again or manually kill the processes."
     exit 1
@@ -49,17 +61,29 @@ cd "$NANODLNA_ROOT_DIR"
 echo "Waiting for dashboard to start..."
 MAX_RETRIES="$NANODLNA_DASHBOARD_START_TIMEOUT"
 RETRY_COUNT=0
-while ! curl -s "http://localhost:${NANODLNA_BACKEND_PORT}/health" > /dev/null && [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-    sleep 1
-    RETRY_COUNT=$((RETRY_COUNT + 1))
-    echo "Waiting for backend... ($RETRY_COUNT/$MAX_RETRIES)"
-
+RUNNING_PIDS_FILE="$NANODLNA_ROOT_DIR/web/.running_pids"
+BACKEND_PID=""
+BACKEND_PORT_OWNER=""
+while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
     if ! ps -p $DASHBOARD_PID > /dev/null; then
         echo ""
         echo "Backend process has terminated. Check $NANODLNA_LOG_DIR/dashboard_run.log"
         "$NANODLNA_ROOT_DIR/stop_dashboard.sh" || true
         exit 1
     fi
+
+    if [ -f "$RUNNING_PIDS_FILE" ]; then
+        read -r BACKEND_PID _ < "$RUNNING_PIDS_FILE"
+        BACKEND_PORT_OWNER="$(nanodlna_listener_pid_for_port "$NANODLNA_BACKEND_PORT")"
+
+        if [ -n "$BACKEND_PID" ] && kill -0 "$BACKEND_PID" 2>/dev/null && [ "$BACKEND_PORT_OWNER" = "$BACKEND_PID" ] && curl -fsS "http://localhost:${NANODLNA_BACKEND_PORT}/health" > /dev/null 2>&1; then
+            break
+        fi
+    fi
+
+    sleep 1
+    RETRY_COUNT=$((RETRY_COUNT + 1))
+    echo "Waiting for backend... ($RETRY_COUNT/$MAX_RETRIES)"
 done
 
 if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then

@@ -385,8 +385,8 @@ class DLNADevice(Device):
             try:
                 logger.debug(f"Sending DLNA request to {self.action_url} (attempt {retry+1}/{self.max_retries})")
                 request = urllibreq.Request(self.action_url, action_data, headers)
-                response = urllibreq.urlopen(request)
-                response_data = response.read().decode("UTF-8")
+                with urllibreq.urlopen(request) as response:
+                    response_data = response.read().decode("UTF-8")
                 logger.debug(f"DLNA request sent successfully")
                 return response_data
             except Exception as e:
@@ -721,7 +721,8 @@ class DLNADevice(Device):
         location_url = getattr(self, "location", None)
         if location_url:
             try:
-                urllibreq.urlopen(location_url, timeout=3).read(1)
+                with urllibreq.urlopen(location_url, timeout=3) as response:
+                    response.read(1)
             except Exception:
                 pass
 

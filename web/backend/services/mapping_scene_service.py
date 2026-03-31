@@ -90,19 +90,19 @@ class MappingSceneService:
             content = await upload.read()
             with open(stored_path, "wb") as fh:
                 fh.write(content)
-            image = Image.open(stored_path)
             rel_path = os.path.relpath(stored_path, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-            existing_masks.append(
-                MappingMask(
-                    id=uuid.uuid4().hex,
-                    name=os.path.splitext(upload.filename or stored_name)[0],
-                    file_name=upload.filename or stored_name,
-                    stored_path=rel_path.replace("\\", "/"),
-                    width=image.width,
-                    height=image.height,
-                    sort_order=sort_order,
-                ).model_dump()
-            )
+            with Image.open(stored_path) as image:
+                existing_masks.append(
+                    MappingMask(
+                        id=uuid.uuid4().hex,
+                        name=os.path.splitext(upload.filename or stored_name)[0],
+                        file_name=upload.filename or stored_name,
+                        stored_path=rel_path.replace("\\", "/"),
+                        width=image.width,
+                        height=image.height,
+                        sort_order=sort_order,
+                    ).model_dump()
+                )
             existing_masks[-1]["preprocessing_status"] = "pending"
             existing_masks[-1]["preprocessing_error"] = None
             sort_order += 1
@@ -130,21 +130,20 @@ class MappingSceneService:
             stored_name = f"{uuid.uuid4().hex}{suffix}"
             stored_path = os.path.join(mask_dir, stored_name)
             shutil.copyfile(source_path, stored_path)
-
-            image = Image.open(stored_path)
             rel_path = os.path.relpath(stored_path, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
             file_name = item.get("file_name") or os.path.basename(source_path)
-            existing_masks.append(
-                MappingMask(
-                    id=uuid.uuid4().hex,
-                    name=item.get("name") or os.path.splitext(file_name)[0],
-                    file_name=file_name,
-                    stored_path=rel_path.replace("\\", "/"),
-                    width=image.width,
-                    height=image.height,
-                    sort_order=sort_order,
-                ).model_dump()
-            )
+            with Image.open(stored_path) as image:
+                existing_masks.append(
+                    MappingMask(
+                        id=uuid.uuid4().hex,
+                        name=item.get("name") or os.path.splitext(file_name)[0],
+                        file_name=file_name,
+                        stored_path=rel_path.replace("\\", "/"),
+                        width=image.width,
+                        height=image.height,
+                        sort_order=sort_order,
+                    ).model_dump()
+                )
             existing_masks[-1]["preprocessing_status"] = "pending"
             existing_masks[-1]["preprocessing_error"] = None
             sort_order += 1
@@ -252,19 +251,19 @@ class MappingSceneService:
                 stored_name = f"{uuid.uuid4().hex}{suffix}"
                 stored_path = os.path.join(mask_dir, stored_name)
                 shutil.copyfile(extracted_mask_path, stored_path)
-                image = Image.open(stored_path)
                 rel_path = os.path.relpath(stored_path, backend_root)
-                imported_masks.append(
-                    MappingMask(
-                        id=mask.get("id") or uuid.uuid4().hex,
-                        name=mask.get("name") or os.path.splitext(mask.get("file_name") or stored_name)[0],
-                        file_name=mask.get("file_name") or stored_name,
-                        stored_path=rel_path.replace("\\", "/"),
-                        width=image.width,
-                        height=image.height,
-                        sort_order=sort_order,
-                    ).model_dump()
-                )
+                with Image.open(stored_path) as image:
+                    imported_masks.append(
+                        MappingMask(
+                            id=mask.get("id") or uuid.uuid4().hex,
+                            name=mask.get("name") or os.path.splitext(mask.get("file_name") or stored_name)[0],
+                            file_name=mask.get("file_name") or stored_name,
+                            stored_path=rel_path.replace("\\", "/"),
+                            width=image.width,
+                            height=image.height,
+                            sort_order=sort_order,
+                        ).model_dump()
+                    )
                 imported_masks[-1]["preprocessing_status"] = "pending"
                 imported_masks[-1]["preprocessing_error"] = None
 

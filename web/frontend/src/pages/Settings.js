@@ -455,7 +455,7 @@ function Settings() {
                 client_ip: event.target.value,
               }))}
               fullWidth
-              helperText="Only requests from this client IP to / will be redirected."
+              helperText="Only requests from this client IP to the server root URL (`/`) will be redirected."
             />
             <TextField
               label="Redirect Target Path"

@@ -554,7 +554,8 @@ class DiscoveryCoordinator:
         try:
             logger.debug("Registering DLNA device at %s", location_url)
 
-            xml_raw = urllibreq.urlopen(location_url, timeout=5).read().decode("UTF-8")
+            with urllibreq.urlopen(location_url, timeout=5) as response:
+                xml_raw = response.read().decode("UTF-8")
             xml = re.sub(r"""\s(xmlns="[^"]+"|xmlns='[^']+')""", "", xml_raw, count=1)
             info = ET.fromstring(xml)
 

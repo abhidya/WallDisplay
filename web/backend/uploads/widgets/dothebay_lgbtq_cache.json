@@ -1,33 +1,6 @@
 {
   "events": [
     {
-      "dateTimeText": "9:30PM",
-      "eventUrl": "https://dothebay.com/events/2026/3/27/wublic-perks-public-works-tickets",
-      "imageUrl": "https://assets0.dostuffmedia.com/uploads/aws_asset/aws_asset/30749631/e69e44e1-6d34-4869-a543-335be10c589e.jpg",
-      "startDate": "2026-03-27T21:30-0700",
-      "summary": "ELECTROLUXX Presents: All Night Dance Party",
-      "title": "Wublic Werks @ Public Works",
-      "venue": "Public Works"
-    },
-    {
-      "dateTimeText": "1:00PM",
-      "eventUrl": "https://dothebay.com/events/2026/3/27/prop-contingency-management-tickets",
-      "imageUrl": "https://assets0.dostuffmedia.com/uploads/aws_asset/aws_asset/30681632/c4864d38-07ba-4ded-b61c-64de06d289f4.jpg",
-      "startDate": "2026-03-27T13:00-0700",
-      "summary": "",
-      "title": "PROP Contingency Management",
-      "venue": "San Francisco AIDS Foundation"
-    },
-    {
-      "dateTimeText": "3:00PM",
-      "eventUrl": "https://dothebay.com/events/2026/3/27/prop-for-all-contingency-management-tickets",
-      "imageUrl": "https://assets0.dostuffmedia.com/uploads/aws_asset/aws_asset/30681597/da77eeef-fd7b-4baf-9e52-c9f8f92745a8.jpg",
-      "startDate": "2026-03-27T15:00-0700",
-      "summary": "",
-      "title": "PROP for All \u2013 Contingency Management",
-      "venue": "San Francisco AIDS Foundation"
-    },
-    {
       "dateTimeText": "10:00AM",
       "eventUrl": "https://dothebay.com/events/2026/3/28/community-coffee-social-elizabeth-taylor-50-plus-network-tickets",
       "imageUrl": "https://cloudinary-assets.dostuffmedia.com/res/dostuff-media/image/upload/metro-bkg_1-18/1481123129.jpg",
@@ -217,6 +190,15 @@
       "venue": "San Francisco AIDS Foundation"
     },
     {
+      "dateTimeText": "6:00PM",
+      "eventUrl": "https://dothebay.com/events/2026/4/9/the-castro-the-story-of-san-francisco-s-best-known-lgbtq-neighborhood-tickets",
+      "imageUrl": "https://assets0.dostuffmedia.com/uploads/aws_asset/aws_asset/31028124/6fc57a67-ef1c-4a5c-9e90-d933fcb740f7.jpg",
+      "startDate": "2026-04-09T18:00-0700",
+      "summary": "",
+      "title": "The Castro: The Story of San Francisco's Best-Known LGBTQ+ Neighborhood",
+      "venue": "GLBT History Museum"
+    },
+    {
       "dateTimeText": "3:00PM",
       "eventUrl": "https://dothebay.com/events/2026/4/9/el-grupo-de-apoyo-latino-tickets",
       "imageUrl": "https://assets0.dostuffmedia.com/uploads/aws_asset/aws_asset/29223643/504e80e4-55dd-4167-bb55-95d1ac7e56c3.jpg",
@@ -224,9 +206,27 @@
       "summary": "",
       "title": "El Grupo de Apoyo Latino",
       "venue": "San Francisco AIDS Foundation"
+    },
+    {
+      "dateTimeText": "1:00PM",
+      "eventUrl": "https://dothebay.com/events/2026/4/10/prop-contingency-management-tickets",
+      "imageUrl": "https://assets0.dostuffmedia.com/uploads/aws_asset/aws_asset/30681732/1cdf2bb4-2c62-477a-8e06-840e2cf853bb.jpg",
+      "startDate": "2026-04-10T13:00-0700",
+      "summary": "",
+      "title": "PROP Contingency Management",
+      "venue": "San Francisco AIDS Foundation"
+    },
+    {
+      "dateTimeText": "3:00PM",
+      "eventUrl": "https://dothebay.com/events/2026/4/10/prop-for-all-contingency-management-tickets",
+      "imageUrl": "https://assets0.dostuffmedia.com/uploads/aws_asset/aws_asset/30681745/ca6e9907-95df-47a1-aa5e-94230689e473.jpg",
+      "startDate": "2026-04-10T15:00-0700",
+      "summary": "",
+      "title": "PROP for All \u2013 Contingency Management",
+      "venue": "San Francisco AIDS Foundation"
     }
   ],
-  "fetchedAt": "2026-03-27T19:58:04.314929+00:00",
+  "fetchedAt": "2026-03-29T00:12:58.525134+00:00",
   "source": "https://dothebay.com/events/lgbtq/today",
   "stale": false
 }

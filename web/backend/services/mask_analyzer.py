@@ -17,7 +17,8 @@ class MaskAnalyzer:
         Black pixels (0, 0, 0) are masked areas
         """
         # Load image
-        img = Image.open(filepath).convert('RGB')
+        with Image.open(filepath) as opened:
+            img = opened.convert('RGB')
         self.width, self.height = img.size
         pixels = img.load()
         

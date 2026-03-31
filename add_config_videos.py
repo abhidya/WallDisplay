@@ -8,7 +8,6 @@ import sys
 import json
 import logging
 import sqlite3
-from pathlib import Path
 
 # Configure logging
 logging.basicConfig(
@@ -78,6 +77,10 @@ def add_config_videos(config_path, db_path):
             )
         """)
         
+        # Discover current videos table columns so inserts stay compatible across schema versions.
+        cursor.execute("PRAGMA table_info(videos)")
+        table_columns = {row[1] for row in cursor.fetchall()}
+
         # Add videos to the database
         videos_added = 0
         for video_path in video_paths:
@@ -94,11 +97,29 @@ def add_config_videos(config_path, db_path):
             name = os.path.splitext(file_name)[0]
             file_size = os.path.getsize(video_path)
             
-            # Insert the video into the database
-            cursor.execute("""
-                INSERT INTO videos (name, path, file_name, file_size, has_subtitle)
-                VALUES (?, ?, ?, ?, ?)
-            """, (name, video_path, file_name, file_size, False))
+            # Insert the video into the database.
+            insert_values = {
+                "name": name,
+                "path": video_path,
+                "file_name": file_name,
+                "file_size": file_size,
+                "has_subtitle": False,
+                "category": "background",
+                "source_type": "config",
+                "source_directory_id": None,
+                "preprocessing_status": "pending",
+                "preprocessing_error": None,
+                "overlay_optimized": False,
+                "subtitle_path": None,
+            }
+            selected_columns = [col for col in insert_values.keys() if col in table_columns]
+            placeholders = ", ".join(["?"] * len(selected_columns))
+            column_clause = ", ".join(selected_columns)
+            values = [insert_values[col] for col in selected_columns]
+            cursor.execute(
+                f"INSERT INTO videos ({column_clause}) VALUES ({placeholders})",
+                values,
+            )
             
             videos_added += 1
             logger.info(f"Added video to database: {name} ({video_path})")

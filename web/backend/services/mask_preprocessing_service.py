@@ -8,6 +8,7 @@ from PIL import Image
 
 from database.database import SessionLocal
 from models.mapping_scene import MappingScene
+from services.optimization_limiter import OPTIMIZATION_SEMAPHORE
 
 logger = logging.getLogger(__name__)
 
@@ -80,49 +81,54 @@ class MaskPreprocessingService:
     def _process_mask(self, scene_id: int, mask_id: str) -> None:
         db = SessionLocal()
         try:
-            scene = db.query(MappingScene).filter(MappingScene.id == scene_id).first()
-            if not scene:
-                logger.warning("Queued mask %s/%s disappeared before preprocessing", scene_id, mask_id)
-                return
-
-            masks = list(scene.masks or [])
-            mask_index = next((i for i, item in enumerate(masks) if str((item or {}).get("id")) == mask_id), None)
-            if mask_index is None:
-                logger.warning("Queued mask %s/%s no longer exists", scene_id, mask_id)
-                return
-
-            mask = dict(masks[mask_index] or {})
-            stored_path = mask.get("stored_path")
-            if not stored_path:
-                return
-            absolute_path = os.path.join(self._backend_root, stored_path)
-            if not os.path.exists(absolute_path):
-                raise FileNotFoundError(f"Mask file missing: {absolute_path}")
-
-            original_size = os.path.getsize(absolute_path)
-            optimized_size = self._optimize_mask_file(absolute_path)
-            with Image.open(absolute_path) as image:
-                mask["width"] = image.width
-                mask["height"] = image.height
-            mask["preprocessing_status"] = "completed"
-            mask["preprocessing_error"] = None
-            mask["original_file_size"] = original_size
-            mask["optimized_file_size"] = optimized_size
-            masks[mask_index] = mask
-            scene.masks = masks
-            db.commit()
-            logger.info(
-                "Mask %s/%s preprocessing completed size=%s->%s",
-                scene_id,
-                mask_id,
-                original_size,
-                optimized_size,
-            )
-        except Exception as exc:
-            logger.error("Mask %s/%s preprocessing failed: %s", scene_id, mask_id, exc, exc_info=True)
-            self._mark_mask_failed(db, scene_id, mask_id, str(exc))
+            try:
+                with OPTIMIZATION_SEMAPHORE:
+                    self._run_mask_optimization(db, scene_id, mask_id)
+            except Exception as exc:
+                logger.error("Mask %s/%s preprocessing failed: %s", scene_id, mask_id, exc, exc_info=True)
+                self._mark_mask_failed(db, scene_id, mask_id, str(exc))
         finally:
             db.close()
+
+    def _run_mask_optimization(self, db, scene_id: int, mask_id: str) -> None:
+        scene = db.query(MappingScene).filter(MappingScene.id == scene_id).first()
+        if not scene:
+            logger.warning("Queued mask %s/%s disappeared before preprocessing", scene_id, mask_id)
+            return
+
+        masks = list(scene.masks or [])
+        mask_index = next((i for i, item in enumerate(masks) if str((item or {}).get("id")) == mask_id), None)
+        if mask_index is None:
+            logger.warning("Queued mask %s/%s no longer exists", scene_id, mask_id)
+            return
+
+        mask = dict(masks[mask_index] or {})
+        stored_path = mask.get("stored_path")
+        if not stored_path:
+            return
+        absolute_path = os.path.join(self._backend_root, stored_path)
+        if not os.path.exists(absolute_path):
+            raise FileNotFoundError(f"Mask file missing: {absolute_path}")
+
+        original_size = os.path.getsize(absolute_path)
+        optimized_size = self._optimize_mask_file(absolute_path)
+        with Image.open(absolute_path) as image:
+            mask["width"] = image.width
+            mask["height"] = image.height
+        mask["preprocessing_status"] = "completed"
+        mask["preprocessing_error"] = None
+        mask["original_file_size"] = original_size
+        mask["optimized_file_size"] = optimized_size
+        masks[mask_index] = mask
+        scene.masks = masks
+        db.commit()
+        logger.info(
+            "Mask %s/%s preprocessing completed size=%s->%s",
+            scene_id,
+            mask_id,
+            original_size,
+            optimized_size,
+        )
 
     def _mark_mask_failed(self, db, scene_id: int, mask_id: str, error: str) -> None:
         scene = db.query(MappingScene).filter(MappingScene.id == scene_id).first()

@@ -1721,7 +1721,9 @@
                 return;
             }
 
-            const response = await fetch(`/api/overlay/window-refresh-state?config_id=${encodeURIComponent(currentConfigId)}`);
+            const response = await fetch(`/api/overlay/window-refresh-state?config_id=${encodeURIComponent(currentConfigId)}`, {
+                cache: 'no-store',
+            });
             if (!response.ok) {
                 throw new Error(`Failed to fetch overlay refresh state (${response.status})`);
             }
@@ -1735,12 +1737,19 @@
             }
 
             refreshStatePollInterval = setInterval(async () => {
-                if (!currentConfigId || !currentConfigRevision) {
+                if (!currentConfigId) {
                     return;
                 }
 
                 try {
-                    const response = await fetch(`/api/overlay/window-refresh-state?config_id=${encodeURIComponent(currentConfigId)}`);
+                    if (!currentConfigRevision) {
+                        await refreshCurrentConfigRevision();
+                        return;
+                    }
+
+                    const response = await fetch(`/api/overlay/window-refresh-state?config_id=${encodeURIComponent(currentConfigId)}`, {
+                        cache: 'no-store',
+                    });
                     if (!response.ok) {
                         return;
                     }
@@ -1766,8 +1775,15 @@
             }
         });
 
-        bootstrapFromUrl();
-        startConfigRefreshPolling();
+        async function initializeOverlayWindow() {
+            await bootstrapFromUrl();
+            startConfigRefreshPolling();
+        }
+
+        initializeOverlayWindow().catch((error) => {
+            console.error('Overlay window initialization failed:', error);
+            startConfigRefreshPolling();
+        });
         
         function loadVideoWithRetry(streamingUrl) {
             document.getElementById('video-container').style.display = 'block';

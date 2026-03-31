@@ -23,6 +23,7 @@ export NANODLNA_SERVICE_RESTART_DELAY="${NANODLNA_SERVICE_RESTART_DELAY:-5}"
 export NANODLNA_INSTALL_PLAYWRIGHT="${NANODLNA_INSTALL_PLAYWRIGHT:-1}"
 export NANODLNA_BACKEND_START_TIMEOUT="${NANODLNA_BACKEND_START_TIMEOUT:-120}"
 export NANODLNA_DASHBOARD_START_TIMEOUT="${NANODLNA_DASHBOARD_START_TIMEOUT:-180}"
+export NANODLNA_PORT_RELEASE_TIMEOUT="${NANODLNA_PORT_RELEASE_TIMEOUT:-10}"
 
 if [ -z "${NANODLNA_VENV_DIR:-}" ]; then
     if [ -d "$NANODLNA_ROOT_DIR/.venv" ]; then
@@ -51,3 +52,35 @@ export NANODLNA_DB_PATH="${NANODLNA_DB_PATH:-$NANODLNA_BACKEND_DIR/nanodlna.db}"
 if [ -n "${NANODLNA_CONFIG_FILE:-}" ] && [[ "$NANODLNA_CONFIG_FILE" != /* ]]; then
     export NANODLNA_CONFIG_FILE="$NANODLNA_ROOT_DIR/$NANODLNA_CONFIG_FILE"
 fi
+
+nanodlna_listener_pid_for_port() {
+    local port="$1"
+    lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null | head -n 1
+}
+
+nanodlna_wait_for_port_release() {
+    local port="$1"
+    local label="$2"
+    local timeout="${3:-$NANODLNA_PORT_RELEASE_TIMEOUT}"
+    local listener_pid=""
+    local attempt=0
+
+    while [ "$attempt" -lt "$timeout" ]; do
+        listener_pid="$(nanodlna_listener_pid_for_port "$port")"
+        if [ -z "$listener_pid" ]; then
+            return 0
+        fi
+
+        attempt=$((attempt + 1))
+        echo "Waiting for ${label} port ${port} to clear... (${attempt}/${timeout})"
+        sleep 1
+    done
+
+    listener_pid="$(nanodlna_listener_pid_for_port "$port")"
+    if [ -n "$listener_pid" ]; then
+        echo "Port ${port} is still held by PID ${listener_pid}."
+        return 1
+    fi
+
+    return 0
+}

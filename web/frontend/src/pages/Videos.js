@@ -24,6 +24,7 @@ import {
   LinearProgress,
   List,
   ListItem,
+  ListItemButton,
   ListItemText,
   ListItemAvatar,
   Avatar,
@@ -75,6 +76,12 @@ function Videos() {
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [mediaDirectories, setMediaDirectories] = useState([]);
   const [openDirectoryDialog, setOpenDirectoryDialog] = useState(false);
+  const [openDirectoryBrowserDialog, setOpenDirectoryBrowserDialog] = useState(false);
+  const [directoryBrowserLoading, setDirectoryBrowserLoading] = useState(false);
+  const [directoryBrowserError, setDirectoryBrowserError] = useState('');
+  const [directoryBrowserCurrentPath, setDirectoryBrowserCurrentPath] = useState('');
+  const [directoryBrowserParentPath, setDirectoryBrowserParentPath] = useState(null);
+  const [directoryBrowserEntries, setDirectoryBrowserEntries] = useState([]);
   const [openMediaListDialog, setOpenMediaListDialog] = useState(false);
   const [openMediaChannelDialog, setOpenMediaChannelDialog] = useState(false);
   const [directoryForm, setDirectoryForm] = useState({
@@ -126,16 +133,23 @@ function Videos() {
     return status === 'pending' || status === 'processing';
   });
 
-  const fetchVideos = useCallback(async () => {
+  const fetchVideos = useCallback(async ({ showLoader = true } = {}) => {
     try {
-      setLoading(true);
+      if (showLoader) {
+        setLoading(true);
+        setError(null);
+      }
       const response = await videoApi.getVideos(categoryFilter === 'all' ? {} : { category: categoryFilter });
       setVideos(response.data.videos);
-      setLoading(false);
+      if (showLoader) {
+        setLoading(false);
+      }
     } catch (err) {
       console.error('Error fetching videos:', err);
-      setError('Failed to load videos. Please try again later.');
-      setLoading(false);
+      if (showLoader) {
+        setError('Failed to load videos. Please try again later.');
+        setLoading(false);
+      }
     }
   }, [categoryFilter]);
 
@@ -152,7 +166,7 @@ function Videos() {
     }
 
     const intervalId = window.setInterval(() => {
-      fetchVideos();
+      fetchVideos({ showLoader: false });
     }, 5000);
 
     return () => window.clearInterval(intervalId);
@@ -455,6 +469,42 @@ function Videos() {
       ...prev,
       open: false
     }));
+  };
+
+  const getDirectoryLabelFromPath = (path) => {
+    const normalized = (path || '').replace(/\\/g, '/');
+    const parts = normalized.split('/').filter(Boolean);
+    return parts[parts.length - 1] || path || '';
+  };
+
+  const loadDirectoryBrowser = async (path = null) => {
+    setDirectoryBrowserLoading(true);
+    setDirectoryBrowserError('');
+    try {
+      const response = await mediaLibraryApi.browseDirectories(path);
+      setDirectoryBrowserCurrentPath(response.data.current_path || '');
+      setDirectoryBrowserParentPath(response.data.parent_path || null);
+      setDirectoryBrowserEntries(response.data.directories || []);
+    } catch (err) {
+      console.error('Error browsing directories:', err);
+      setDirectoryBrowserError(err.response?.data?.detail || 'Failed to browse directories');
+    } finally {
+      setDirectoryBrowserLoading(false);
+    }
+  };
+
+  const handleOpenDirectoryBrowser = () => {
+    setOpenDirectoryBrowserDialog(true);
+    loadDirectoryBrowser(directoryForm.path || null);
+  };
+
+  const handleSelectBrowsedDirectory = () => {
+    setDirectoryForm((current) => ({
+      ...current,
+      path: directoryBrowserCurrentPath,
+      name: current.name || getDirectoryLabelFromPath(directoryBrowserCurrentPath),
+    }));
+    setOpenDirectoryBrowserDialog(false);
   };
 
   const formatDuration = (seconds) => {
@@ -1006,7 +1056,16 @@ function Videos() {
             value={directoryForm.path}
             onChange={(event) => setDirectoryForm((current) => ({ ...current, path: event.target.value }))}
             sx={{ mb: 2 }}
+            helperText="Use Browse to select a folder on the backend host."
           />
+          <Button
+            variant="outlined"
+            startIcon={<FolderIcon />}
+            onClick={handleOpenDirectoryBrowser}
+            sx={{ mb: 2 }}
+          >
+            Browse Folders
+          </Button>
           <FormControl fullWidth>
             <InputLabel>Category</InputLabel>
             <Select
@@ -1024,6 +1083,65 @@ function Videos() {
         <DialogActions>
           <Button onClick={() => setOpenDirectoryDialog(false)}>Cancel</Button>
           <Button onClick={handleCreateDirectory} variant="contained">Save Folder</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={openDirectoryBrowserDialog} onClose={() => setOpenDirectoryBrowserDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Select Media Folder</DialogTitle>
+        <DialogContent>
+          <DialogContentText sx={{ mb: 2 }}>
+            Browse folders on this machine, then choose one to populate the media folder path.
+          </DialogContentText>
+          <TextField
+            label="Current Path"
+            fullWidth
+            value={directoryBrowserCurrentPath}
+            InputProps={{ readOnly: true }}
+            sx={{ mb: 2 }}
+          />
+          {directoryBrowserError && <Alert severity="error" sx={{ mb: 2 }}>{directoryBrowserError}</Alert>}
+          {directoryBrowserLoading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
+              <CircularProgress size={24} />
+            </Box>
+          ) : (
+            <List dense>
+              {directoryBrowserParentPath && (
+                <ListItem disablePadding>
+                  <ListItemButton onClick={() => loadDirectoryBrowser(directoryBrowserParentPath)}>
+                    <ListItemText primary=".." secondary={directoryBrowserParentPath} />
+                  </ListItemButton>
+                </ListItem>
+              )}
+              {directoryBrowserEntries.map((entry) => (
+                <ListItem key={entry.path} disablePadding>
+                  <ListItemButton onClick={() => loadDirectoryBrowser(entry.path)}>
+                    <ListItemAvatar>
+                      <Avatar>
+                        <FolderIcon />
+                      </Avatar>
+                    </ListItemAvatar>
+                    <ListItemText primary={entry.name} secondary={entry.path} />
+                  </ListItemButton>
+                </ListItem>
+              ))}
+              {!directoryBrowserParentPath && directoryBrowserEntries.length === 0 && (
+                <ListItem>
+                  <ListItemText primary="No subfolders available." />
+                </ListItem>
+              )}
+            </List>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenDirectoryBrowserDialog(false)}>Cancel</Button>
+          <Button
+            onClick={handleSelectBrowsedDirectory}
+            variant="contained"
+            disabled={!directoryBrowserCurrentPath}
+          >
+            Use This Folder
+          </Button>
         </DialogActions>
       </Dialog>
 
