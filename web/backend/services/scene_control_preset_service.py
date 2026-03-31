@@ -86,8 +86,8 @@ class SceneControlPresetService:
                 normalized.append(value)
         return normalized
 
-    def _normalize_group_assignments(self, assignments: Dict[str, List[List[int]]]) -> Dict[str, List[List[int]]]:
-        normalized: Dict[str, List[List[int]]] = {}
+    def _normalize_group_assignments(self, assignments: Dict[str, List[List[str]]]) -> Dict[str, List[List[str]]]:
+        normalized: Dict[str, List[List[str]]] = {}
         for scene_id, buckets in assignments.items():
             try:
                 scene_key = str(int(scene_id))
@@ -95,12 +95,12 @@ class SceneControlPresetService:
                 continue
             normalized[scene_key] = []
             for bucket in buckets or []:
-                normalized_bucket = []
+                normalized_bucket: List[str] = []
                 for group_id in bucket or []:
-                    try:
-                        normalized_bucket.append(int(group_id))
-                    except (TypeError, ValueError):
+                    value = str(group_id or "").strip()
+                    if not value:
                         continue
+                    normalized_bucket.append(value)
                 normalized[scene_key].append(normalized_bucket)
         return normalized
 
