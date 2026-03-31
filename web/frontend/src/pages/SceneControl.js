@@ -434,6 +434,29 @@ function SceneControl() {
     });
   };
 
+  const buildPresetPayload = (rankId = selectedRank?.id || null) => ({
+    name: presetName || `Preset ${selectedSceneIds.join('-')}`,
+    scene_ids: selectedSceneIds.map(Number),
+    group_assignments: Object.fromEntries(
+      Object.entries(groupAssignments || {}).map(([sceneId, buckets]) => [String(sceneId), buckets || []]),
+    ),
+    row_edits: Object.fromEntries(
+      Object.entries(rowEdits || {}).map(([rowIndex, rowEdit]) => [String(rowIndex), rowEdit || {}]),
+    ),
+    rank_id: rankId,
+    preset_metadata: selectedPreset?.preset_metadata || {},
+  });
+
+  const storeSavedPreset = (savedPreset) => {
+    setSceneControlPresets((current) => (
+      selectedPreset
+        ? current.map((preset) => (preset.id === savedPreset.id ? savedPreset : preset))
+        : [savedPreset, ...current]
+    ));
+    setSelectedPresetId(String(savedPreset.id));
+    setPresetName(savedPreset.name || '');
+  };
+
   const persistRank = async () => {
     try {
       setRankSaving(true);
@@ -506,29 +529,12 @@ function SceneControl() {
       setPresetSaving(true);
       setError('');
       setMessage('');
-      const payload = {
-        name: presetName || `Preset ${selectedSceneIds.join('-')}`,
-        scene_ids: selectedSceneIds.map(Number),
-        group_assignments: Object.fromEntries(
-          Object.entries(groupAssignments || {}).map(([sceneId, buckets]) => [String(sceneId), buckets || []]),
-        ),
-        row_edits: Object.fromEntries(
-          Object.entries(rowEdits || {}).map(([rowIndex, rowEdit]) => [String(rowIndex), rowEdit || {}]),
-        ),
-        rank_id: selectedRank?.id || null,
-        preset_metadata: {},
-      };
+      const payload = buildPresetPayload();
       const response = selectedPreset
         ? await mappingsApi.updateSceneControlPreset(selectedPreset.id, payload)
         : await mappingsApi.createSceneControlPreset(payload);
       const savedPreset = response.data;
-      setSceneControlPresets((current) => (
-        selectedPreset
-          ? current.map((preset) => (preset.id === savedPreset.id ? savedPreset : preset))
-          : [savedPreset, ...current]
-      ));
-      setSelectedPresetId(String(savedPreset.id));
-      setPresetName(savedPreset.name || '');
+      storeSavedPreset(savedPreset);
       setMessage(`Saved preset "${savedPreset.name}".`);
     } catch (err) {
       console.error(err);
@@ -623,9 +629,22 @@ function SceneControl() {
       const refreshedScenes = await Promise.all(
         selectedSceneIds.map((sceneId) => mappingsApi.getScene(sceneId).then((response) => hydrateSceneWithCoverage(response.data))),
       );
+      let syncedPreset = null;
+      if (selectedPreset) {
+        const presetResponse = await mappingsApi.updateSceneControlPreset(
+          selectedPreset.id,
+          buildPresetPayload(),
+        );
+        syncedPreset = presetResponse.data;
+        storeSavedPreset(syncedPreset);
+      }
       setSelectedScenes(refreshedScenes);
       setGroupAssignments((current) => current && Object.keys(current).length ? current : createSmartGroupAssignments(refreshedScenes));
-      setMessage(`Saved ${selectedScenes.length} scenes.`);
+      setMessage(
+        syncedPreset
+          ? `Saved ${selectedScenes.length} scenes and synced preset "${syncedPreset.name}".`
+          : `Saved ${selectedScenes.length} scenes.`,
+      );
     } catch (err) {
       console.error(err);
       setError('Failed to save aligned scene groups.');

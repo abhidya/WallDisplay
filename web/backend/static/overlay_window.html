@@ -3147,17 +3147,22 @@
 
             if (layer.frameToken !== mappingRenderFrameToken) {
                 layer.ctx.clearRect(0, 0, width, height);
-                drawMediaCover(
-                    layer.ctx,
-                    media,
-                    {
-                        x: 0,
-                        y: 0,
-                        width,
-                        height,
-                    },
-                    group.transform || {}
-                );
+                const rankScopedRect = getRankScopedMediaRect(sourceBounds, group, media);
+                if (rankScopedRect) {
+                    drawMediaRect(layer.ctx, media, rankScopedRect);
+                } else {
+                    drawMediaCover(
+                        layer.ctx,
+                        media,
+                        {
+                            x: 0,
+                            y: 0,
+                            width,
+                            height,
+                        },
+                        group.transform || {}
+                    );
+                }
                 layer.frameToken = mappingRenderFrameToken;
                 layer.mediaStateType = mediaState?.type || '';
             }
@@ -3198,7 +3203,7 @@
 
             const media = mappingMediaCache.get(group.id);
             const mediaState = mappingMediaState.get(group.id);
-            const rankScopedRect = media ? getRankScopedLocalMediaRect(maskBounds, group, media) : null;
+            const rankScopedRect = media ? getRankScopedMediaRect(maskBounds, group, media) : null;
             const isStableImageGroup = Boolean(
                 renderCache
                 && mediaState?.type === 'image'
@@ -3230,7 +3235,7 @@
                 if (renderCache.staticLayerKey !== staticLayerKey) {
                     const staticCtx = renderCache.staticLayerCtx;
                     staticCtx.clearRect(0, 0, localWidth, localHeight);
-                    const staticRankScopedRect = getRankScopedLocalMediaRect(maskBounds, group, mediaState.element);
+                    const staticRankScopedRect = getRankScopedMediaRect(maskBounds, group, mediaState.element);
                     if (staticRankScopedRect) {
                         drawMediaRect(staticCtx, mediaState.element, staticRankScopedRect);
                     } else {
@@ -3392,7 +3397,7 @@
             drawMediaRect(ctx, media, computeMediaCoverRect(media, bounds, transform));
         }
 
-        function getRankScopedLocalMediaRect(maskBounds, group, media) {
+        function getRankScopedMediaRect(referenceBounds, group, media) {
             if ((group.layout_scope || 'scene') !== 'rank' || !mappingRankLayout || !mappingSceneViewport) {
                 return null;
             }
@@ -3407,8 +3412,8 @@
                 group.transform || {}
             );
             return {
-                x: rankRect.x - (mappingSceneViewport.x || 0) - maskBounds.x,
-                y: rankRect.y - (mappingSceneViewport.y || 0) - maskBounds.y,
+                x: rankRect.x - (mappingSceneViewport.x || 0) - referenceBounds.x,
+                y: rankRect.y - (mappingSceneViewport.y || 0) - referenceBounds.y,
                 width: rankRect.width,
                 height: rankRect.height,
             };
