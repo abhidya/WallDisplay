@@ -1,13 +1,15 @@
 import asyncio
 from asyncio import Queue
-from typing import Iterable, Set
+from typing import Iterable, Optional, Set
 
 
 class OverlayEventManager:
     def __init__(self):
         self.connections: Set[Queue] = set()
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
 
     async def connect(self) -> Queue:
+        self._loop = asyncio.get_running_loop()
         queue = Queue()
         self.connections.add(queue)
         return queue
@@ -34,6 +36,12 @@ def broadcast_overlay_event(event_type: str, data: dict) -> None:
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
+        loop = overlay_events._loop
+        if loop is None or loop.is_closed():
+            return
+        loop.call_soon_threadsafe(
+            lambda: loop.create_task(overlay_events.broadcast(event_type, data))
+        )
         return
     loop.create_task(overlay_events.broadcast(event_type, data))
 
