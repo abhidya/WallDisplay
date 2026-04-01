@@ -82,33 +82,67 @@ class OverlayService:
             "enabled": False,
             "client_ip": "",
             "target_path": "/backend-static/overlay_window.html?config_id=5&controls=hidden",
+            "rules": [],
         }
         if not os.path.exists(self._projector_redirect_config_path):
-            return defaults
+            return self._normalize_projector_redirect_config(defaults)
         try:
             with open(self._projector_redirect_config_path, "r", encoding="utf-8") as handle:
                 stored = json.load(handle) or {}
         except Exception:
             stored = {}
-        merged = {**defaults, **stored}
-        merged["enabled"] = bool(merged.get("enabled"))
-        merged["client_ip"] = str(merged.get("client_ip") or "").strip()
-        merged["target_path"] = str(merged.get("target_path") or defaults["target_path"]).strip() or defaults["target_path"]
-        return merged
+        return self._normalize_projector_redirect_config({**defaults, **stored})
 
     def update_projector_redirect_config(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         current = self.get_projector_redirect_config()
-        merged = {
+        merged = self._normalize_projector_redirect_config({
             **current,
             **(payload or {}),
-        }
-        merged["enabled"] = bool(merged.get("enabled"))
-        merged["client_ip"] = str(merged.get("client_ip") or "").strip()
-        merged["target_path"] = str(merged.get("target_path") or current["target_path"]).strip() or current["target_path"]
+        })
         os.makedirs(os.path.dirname(self._projector_redirect_config_path), exist_ok=True)
         with open(self._projector_redirect_config_path, "w", encoding="utf-8") as handle:
             json.dump(merged, handle, indent=2, sort_keys=True)
         return merged
+
+    def _normalize_projector_redirect_config(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        defaults = {
+            "enabled": False,
+            "client_ip": "",
+            "target_path": "/backend-static/overlay_window.html?config_id=5&controls=hidden",
+            "rules": [],
+        }
+        merged = {**defaults, **(payload or {})}
+        raw_rules = merged.get("rules")
+        normalized_rules = []
+        if isinstance(raw_rules, list):
+            for index, rule in enumerate(raw_rules):
+                if not isinstance(rule, dict):
+                    continue
+                target_path = str(rule.get("target_path") or defaults["target_path"]).strip() or defaults["target_path"]
+                client_ip = str(rule.get("client_ip") or "").strip()
+                normalized_rules.append({
+                    "id": str(rule.get("id") or f"rule-{index + 1}"),
+                    "name": str(rule.get("name") or f"Projector {index + 1}").strip() or f"Projector {index + 1}",
+                    "enabled": bool(rule.get("enabled")),
+                    "client_ip": client_ip,
+                    "target_path": target_path,
+                })
+        if not normalized_rules:
+            normalized_rules = [{
+                "id": "rule-1",
+                "name": "Default projector",
+                "enabled": bool(merged.get("enabled")),
+                "client_ip": str(merged.get("client_ip") or "").strip(),
+                "target_path": str(merged.get("target_path") or defaults["target_path"]).strip() or defaults["target_path"],
+            }]
+
+        primary_rule = next((rule for rule in normalized_rules if rule.get("enabled")), normalized_rules[0])
+        return {
+            "enabled": bool(primary_rule.get("enabled")),
+            "client_ip": str(primary_rule.get("client_ip") or "").strip(),
+            "target_path": str(primary_rule.get("target_path") or defaults["target_path"]).strip() or defaults["target_path"],
+            "rules": normalized_rules,
+        }
 
     def _stable_revision_hash(self, payload: Dict[str, Any]) -> str:
         serialized = json.dumps(payload or {}, sort_keys=True, separators=(",", ":"), default=str)

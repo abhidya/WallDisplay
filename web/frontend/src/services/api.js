@@ -128,10 +128,12 @@ const discoveryV2Api = {
 };
 
 const overlayApi = {
+  listConfigs: (params = {}) => api.get('/overlay/configs', { params }),
   getGlobalApiConfigs: () => api.get('/overlay/global-api-configs'),
   updateGlobalApiConfigs: (payload) => api.put('/overlay/global-api-configs', payload),
   getProjectorRedirectConfig: () => api.get('/overlay/projector-redirect'),
   updateProjectorRedirectConfig: (payload) => api.put('/overlay/projector-redirect', payload),
+  getRecentProjectorRedirectRequests: (limit = 50) => api.get('/overlay/projector-redirect/recent', { params: { limit } }),
   exportMp4: (payload) => api.post('/overlay/export', payload, { responseType: 'blob', timeout: 0 }),
   startCast: (payload) => api.post('/overlay/cast', payload),
   listCastSessions: () => api.get('/overlay/cast/sessions'),

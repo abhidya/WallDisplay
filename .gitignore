@@ -186,6 +186,11 @@ celerybeat-schedule
 
 # Environments
 .env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.*.local
 .venv
 env/
 venv/
@@ -220,8 +225,10 @@ backend_coverage_report.txt
 # Log files
 *.log
 dashboard_run.log
+dashboard_run.log*
 nanodlna_output.log
 logs/
+web/backend/dashboard_run.log*
 
 # Database files
 *.db
@@ -239,6 +246,7 @@ nanodlna.db
 # Node.js files
 node_modules/
 npm-debug.log
+chrome-headless-shell/
 
 # Generated service files
 service/generated/
@@ -275,6 +283,11 @@ proxy_response.txt
 # Runtime files
 .pid
 .lock
+
+# Backend upload runtime outputs
+web/backend/uploads/masks/
+web/backend/uploads/mappings/*/masks/
+web/backend/uploads/structured_lighting/*/
 
 # Claude rules
 # .claude_rules.md - Keep this tracked for context restoration

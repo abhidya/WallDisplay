@@ -24,15 +24,25 @@ from schemas.overlay import (
 from services.overlay_service import OverlayService
 from services.overlay_cast_service import get_overlay_cast_service
 from services.overlay_event_bus import overlay_events, notify_overlay_config_update
+from services.projector_redirect_runtime import get_recent_projector_requests
 from models.overlay import OverlayConfig
 
 router = APIRouter(prefix="/api/overlay", tags=["overlay"])
+
+
+class ProjectorRedirectRulePayload(BaseModel):
+    id: str = ""
+    name: str = ""
+    enabled: bool = False
+    client_ip: str = ""
+    target_path: str = "/backend-static/overlay_window.html?config_id=5&controls=hidden"
 
 
 class ProjectorRedirectConfigPayload(BaseModel):
     enabled: bool = False
     client_ip: str = ""
     target_path: str = "/backend-static/overlay_window.html?config_id=5&controls=hidden"
+    rules: List[ProjectorRedirectRulePayload] = []
 
 @router.post("/configs", response_model=OverlayConfigResponse)
 async def create_overlay_config(
@@ -237,6 +247,16 @@ async def update_projector_redirect_config(
     try:
         service = OverlayService(db)
         return service.update_projector_redirect_config(payload.model_dump())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/projector-redirect/recent")
+async def get_recent_projector_redirect_requests(
+    limit: int = Query(50, ge=1, le=100),
+):
+    try:
+        return {"items": get_recent_projector_requests(limit=limit)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

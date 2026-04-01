@@ -457,27 +457,32 @@ function SceneControl() {
     setPresetName(savedPreset.name || '');
   };
 
+  const persistRankDefinition = async () => {
+    const payload = {
+      name: rankName || `Rank ${selectedSceneIds.join('-')}`,
+      orientation: 'horizontal',
+      scene_ids: selectedSceneIds.map(Number),
+      gap_px: Number(rankGapPx) || 0,
+      rank_metadata: {},
+    };
+    const response = selectedRank
+      ? await mappingsApi.updateRank(selectedRank.id, payload)
+      : await mappingsApi.createRank(payload);
+    const savedRank = response.data;
+    setSceneRanks((current) => (
+      selectedRank
+        ? current.map((rank) => (rank.id === savedRank.id ? savedRank : rank))
+        : [savedRank, ...current]
+    ));
+    return savedRank;
+  };
+
   const persistRank = async () => {
     try {
       setRankSaving(true);
       setError('');
       setMessage('');
-      const payload = {
-        name: rankName || `Rank ${selectedSceneIds.join('-')}`,
-        orientation: 'horizontal',
-        scene_ids: selectedSceneIds.map(Number),
-        gap_px: Number(rankGapPx) || 0,
-        rank_metadata: {},
-      };
-      const response = selectedRank
-        ? await mappingsApi.updateRank(selectedRank.id, payload)
-        : await mappingsApi.createRank(payload);
-      const savedRank = response.data;
-      setSceneRanks((current) => (
-        selectedRank
-          ? current.map((rank) => (rank.id === savedRank.id ? savedRank : rank))
-          : [savedRank, ...current]
-      ));
+      const savedRank = await persistRankDefinition();
       setMessage(`Saved rank "${savedRank.name}".`);
     } catch (err) {
       console.error(err);
@@ -571,6 +576,10 @@ function SceneControl() {
       setSaving(true);
       setError('');
       setMessage('');
+      const hasRankScopedRows = Object.values(rowEdits || {}).some((edit) => (edit?.layout_scope || 'scene') === 'rank');
+      const savedRank = (hasRankScopedRows || selectedRank) && selectedSceneIds.length >= 2
+        ? await persistRankDefinition()
+        : null;
       await Promise.all(selectedScenes.map(async (scene) => {
         const groupsById = Object.fromEntries((scene.groups || []).map((group) => [group.id, group]));
         alignedRows.forEach((row) => {
@@ -633,7 +642,7 @@ function SceneControl() {
       if (selectedPreset) {
         const presetResponse = await mappingsApi.updateSceneControlPreset(
           selectedPreset.id,
-          buildPresetPayload(),
+          buildPresetPayload(savedRank?.id || selectedRank?.id || null),
         );
         syncedPreset = presetResponse.data;
         storeSavedPreset(syncedPreset);
@@ -642,8 +651,8 @@ function SceneControl() {
       setGroupAssignments((current) => current && Object.keys(current).length ? current : createSmartGroupAssignments(refreshedScenes));
       setMessage(
         syncedPreset
-          ? `Saved ${selectedScenes.length} scenes and synced preset "${syncedPreset.name}".`
-          : `Saved ${selectedScenes.length} scenes.`,
+          ? `Saved ${selectedScenes.length} scenes, synced rank${savedRank ? ` "${savedRank.name}"` : ''}, and synced preset "${syncedPreset.name}".`
+          : `Saved ${selectedScenes.length} scenes${savedRank ? ` and synced rank "${savedRank.name}"` : ''}.`,
       );
     } catch (err) {
       console.error(err);

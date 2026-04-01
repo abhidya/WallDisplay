@@ -3,6 +3,8 @@ const path = require('path');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 
 const BACKEND_TARGET = 'http://localhost:8000';
+const RECENT_PROJECTOR_REQUEST_LIMIT = 100;
+const recentProjectorRequests = [];
 const PROJECTOR_REDIRECT_CONFIG_PATH = path.resolve(
   __dirname,
   '../../backend/uploads/env.overlay_projector_redirect.json'
@@ -81,6 +83,7 @@ function getProjectorRedirectConfig() {
     enabled: false,
     client_ip: '',
     target_path: '/backend-static/overlay_window.html?config_id=5&controls=hidden',
+    rules: [],
   };
 
   try {
@@ -89,12 +92,32 @@ function getProjectorRedirectConfig() {
     }
     const raw = fs.readFileSync(PROJECTOR_REDIRECT_CONFIG_PATH, 'utf8');
     const stored = raw ? JSON.parse(raw) : {};
-    return {
+    const merged = {
       ...defaults,
       ...stored,
-      enabled: Boolean(stored && stored.enabled),
-      client_ip: String((stored && stored.client_ip) || '').trim(),
-      target_path: String((stored && stored.target_path) || defaults.target_path).trim() || defaults.target_path,
+    };
+    const rules = Array.isArray(merged.rules) && merged.rules.length
+      ? merged.rules
+      : [{
+        id: 'rule-1',
+        name: 'Default projector',
+        enabled: Boolean(merged.enabled),
+        client_ip: String(merged.client_ip || '').trim(),
+        target_path: String(merged.target_path || defaults.target_path).trim() || defaults.target_path,
+      }];
+    const primaryRule = rules.find((rule) => rule && rule.enabled) || rules[0];
+    return {
+      ...merged,
+      enabled: Boolean(primaryRule && primaryRule.enabled),
+      client_ip: String((primaryRule && primaryRule.client_ip) || '').trim(),
+      target_path: String((primaryRule && primaryRule.target_path) || defaults.target_path).trim() || defaults.target_path,
+      rules: rules.map((rule, index) => ({
+        id: String((rule && rule.id) || `rule-${index + 1}`),
+        name: String((rule && rule.name) || `Projector ${index + 1}`),
+        enabled: Boolean(rule && rule.enabled),
+        client_ip: String((rule && rule.client_ip) || '').trim(),
+        target_path: String((rule && rule.target_path) || defaults.target_path).trim() || defaults.target_path,
+      })),
     };
   } catch (error) {
     console.warn('Failed to read projector redirect config:', error.message);
@@ -113,12 +136,7 @@ function targetMatchesRequest(req, targetPath) {
 }
 
 function shouldRedirectRequest(req, redirectConfig) {
-  if (!redirectConfig || !redirectConfig.enabled) {
-    return null;
-  }
-
-  const configuredClientIp = normalizeIpCandidate(redirectConfig.client_ip);
-  if (!configuredClientIp) {
+  if (!redirectConfig) {
     return null;
   }
 
@@ -127,16 +145,48 @@ function shouldRedirectRequest(req, redirectConfig) {
   }
 
   const clientIp = getRequestClientIp(req);
-  if (clientIp !== configuredClientIp) {
-    return null;
+  const rules = Array.isArray(redirectConfig.rules) && redirectConfig.rules.length
+    ? redirectConfig.rules
+    : [{
+      name: 'Default projector',
+      enabled: Boolean(redirectConfig.enabled),
+      client_ip: redirectConfig.client_ip,
+      target_path: redirectConfig.target_path,
+    }];
+  for (const rule of rules) {
+    if (!rule || !rule.enabled) {
+      continue;
+    }
+    const configuredClientIp = normalizeIpCandidate(rule.client_ip);
+    if (!configuredClientIp || clientIp !== configuredClientIp) {
+      continue;
+    }
+    const targetPath = String(rule.target_path || '').trim();
+    if (!targetPath || targetMatchesRequest(req, targetPath)) {
+      continue;
+    }
+    return {
+      targetPath,
+      ruleName: String(rule.name || '').trim() || 'Projector redirect',
+    };
   }
+  return null;
+}
 
-  const targetPath = String(redirectConfig.target_path || '').trim();
-  if (!targetPath || targetMatchesRequest(req, targetPath)) {
-    return null;
+function recordProjectorRequest(req, redirectMatch) {
+  recentProjectorRequests.unshift({
+    timestamp: new Date().toISOString(),
+    client_ip: getRequestClientIp(req),
+    method: req.method,
+    path: req.path || req.originalUrl || req.url || '',
+    query: req.query ? new URLSearchParams(req.query).toString() : '',
+    matched_rule_name: redirectMatch ? redirectMatch.ruleName : '',
+    redirect_target: redirectMatch ? redirectMatch.targetPath : '',
+    redirected: Boolean(redirectMatch),
+  });
+  if (recentProjectorRequests.length > RECENT_PROJECTOR_REQUEST_LIMIT) {
+    recentProjectorRequests.length = RECENT_PROJECTOR_REQUEST_LIMIT;
   }
-
-  return targetPath;
 }
 
 function createBackendProxy(options = {}) {
@@ -149,18 +199,28 @@ function createBackendProxy(options = {}) {
 }
 
 module.exports = function setupProxy(app) {
+  app.get('/api/overlay/projector-redirect/recent', (req, res) => {
+    const limit = Math.max(1, Math.min(Number(req.query.limit) || 50, RECENT_PROJECTOR_REQUEST_LIMIT));
+    res.json({
+      items: recentProjectorRequests.slice(0, limit),
+    });
+  });
+
   app.use((req, res, next) => {
     const redirectConfig = getProjectorRedirectConfig();
-    const redirectTarget = shouldRedirectRequest(req, redirectConfig);
-    if (!redirectTarget) {
+    const redirectMatch = shouldRedirectRequest(req, redirectConfig);
+    if (['GET', 'HEAD'].includes(req.method) && requestTargetsHtmlDocument(req)) {
+      recordProjectorRequest(req, redirectMatch);
+    }
+    if (!redirectMatch) {
       next();
       return;
     }
 
     console.log(
-      `Projector redirect: ${getRequestClientIp(req)} ${req.originalUrl || req.url} -> ${redirectTarget}`
+      `Projector redirect: ${getRequestClientIp(req)} ${req.originalUrl || req.url} -> ${redirectMatch.targetPath}`
     );
-    res.redirect(307, redirectTarget);
+    res.redirect(307, redirectMatch.targetPath);
   });
 
   app.use('/api', createBackendProxy());

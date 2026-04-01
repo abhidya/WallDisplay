@@ -26,6 +26,7 @@ from services.app_runtime import get_app_runtime
 from services.mask_preprocessing_service import get_mask_preprocessing_service
 from services.video_preprocessing_service import get_video_preprocessing_service
 from services.overlay_service import OverlayService
+from services.projector_redirect_runtime import record_projector_request
 
 # Configure logging - check if already configured by run.py
 import logging.handlers
@@ -168,29 +169,35 @@ def _target_matches_request(request: Request, target_path: str) -> bool:
     return canonical_request_path == canonical_target_path and request_query == target_query
 
 
-def _should_redirect_request(request: Request, redirect_config: Optional[Dict[str, Any]]) -> Optional[str]:
-    if not redirect_config or not redirect_config.get("enabled"):
-        return None
-
-    configured_client_ip = _normalize_ip_candidate(redirect_config.get("client_ip"))
-    if not configured_client_ip:
-        return None
-
-    client_ip = _get_request_client_ip(request)
-    if client_ip != configured_client_ip:
+def _should_redirect_request(request: Request, redirect_config: Optional[Dict[str, Any]]) -> Optional[Dict[str, str]]:
+    if not redirect_config:
         return None
 
     if request.method not in {"GET", "HEAD"} or not _request_targets_html_document(request):
         return None
 
-    target_path = str(redirect_config.get("target_path") or "").strip()
-    if not target_path:
-        return None
-
-    if _target_matches_request(request, target_path):
-        return None
-
-    return target_path
+    client_ip = _get_request_client_ip(request)
+    raw_rules = redirect_config.get("rules") if isinstance(redirect_config, dict) else None
+    rules = raw_rules if isinstance(raw_rules, list) and raw_rules else [{
+        "name": "Default projector",
+        "enabled": bool(redirect_config.get("enabled")),
+        "client_ip": redirect_config.get("client_ip"),
+        "target_path": redirect_config.get("target_path"),
+    }]
+    for rule in rules:
+        if not isinstance(rule, dict) or not rule.get("enabled"):
+            continue
+        configured_client_ip = _normalize_ip_candidate(rule.get("client_ip"))
+        if not configured_client_ip or client_ip != configured_client_ip:
+            continue
+        target_path = str(rule.get("target_path") or "").strip()
+        if not target_path or _target_matches_request(request, target_path):
+            continue
+        return {
+            "target_path": target_path,
+            "rule_name": str(rule.get("name") or "").strip() or "Projector redirect",
+        }
+    return None
 
 # Create FastAPI app
 app = FastAPI(
@@ -211,15 +218,27 @@ async def projector_redirect_middleware(request: Request, call_next):
     finally:
         db.close()
 
-    redirect_target = _should_redirect_request(request, redirect_config)
-    if redirect_target:
+    redirect_match = _should_redirect_request(request, redirect_config)
+    client_ip = _get_request_client_ip(request)
+    if request.method in {"GET", "HEAD"} and _request_targets_html_document(request):
+        record_projector_request(
+            client_ip=client_ip,
+            method=request.method,
+            path=request.url.path,
+            query=request.url.query or "",
+            matched_rule_name=redirect_match.get("rule_name") if redirect_match else "",
+            redirect_target=redirect_match.get("target_path") if redirect_match else "",
+            redirected=bool(redirect_match),
+        )
+
+    if redirect_match:
         logger.info(
             "Redirecting client %s from %s to %s",
-            _get_request_client_ip(request),
+            client_ip,
             request.url.path,
-            redirect_target,
+            redirect_match["target_path"],
         )
-        return RedirectResponse(url=redirect_target, status_code=307)
+        return RedirectResponse(url=redirect_match["target_path"], status_code=307)
 
     return await call_next(request)
 
@@ -280,14 +299,9 @@ async def root(request: Request):
         db.close()
 
     client_ip = _get_request_client_ip(request)
-    configured_client_ip = _normalize_ip_candidate(redirect_config.get("client_ip")) if redirect_config else ""
-    if (
-        redirect_config
-        and redirect_config.get("enabled")
-        and configured_client_ip
-        and client_ip == configured_client_ip
-    ):
-        return RedirectResponse(url=redirect_config.get("target_path") or "/docs", status_code=307)
+    redirect_match = _should_redirect_request(request, redirect_config)
+    if redirect_match:
+        return RedirectResponse(url=redirect_match["target_path"] or "/docs", status_code=307)
 
     return RedirectResponse(url="/docs")
 

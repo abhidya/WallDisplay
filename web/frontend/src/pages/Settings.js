@@ -1,5 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Grid,
   Paper,
   Typography,
@@ -14,9 +17,6 @@ import {
   ListItemText,
   Switch,
   FormControlLabel,
-  Card,
-  CardContent,
-  CardActions,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -25,7 +25,16 @@ import {
   CircularProgress,
   Stack,
   InputAdornment,
-  Tooltip
+  Tooltip,
+  Chip,
+  IconButton,
+  MenuItem,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow
 } from '@mui/material';
 import {
   Save as SaveIcon,
@@ -33,7 +42,10 @@ import {
   Upload as UploadIcon,
   Download as DownloadIcon,
   Settings as SettingsIcon,
-  Refresh as RefreshIcon
+  Refresh as RefreshIcon,
+  Add as AddIcon,
+  Delete as DeleteIcon,
+  ExpandMore as ExpandMoreIcon,
 } from '@mui/icons-material';
 import {
   InfoOutlined as InfoIcon,
@@ -42,6 +54,14 @@ import axios from 'axios';
 import { overlayApi } from '../services/api';
 
 const UI_PREFS_KEY = 'nanoDlnaUiPrefs';
+const DEFAULT_REDIRECT_TARGET = '/backend-static/overlay_window.html?config_id=5&controls=hidden';
+const createRedirectRule = (index = 1) => ({
+  id: `rule-${Date.now()}-${index}`,
+  name: `Projector ${index}`,
+  enabled: index === 1,
+  client_ip: '',
+  target_path: DEFAULT_REDIRECT_TARGET,
+});
 
 function loadUiPrefs() {
   try {
@@ -104,8 +124,11 @@ function Settings() {
   const [projectorRedirect, setProjectorRedirect] = useState({
     enabled: false,
     client_ip: '',
-    target_path: '/backend-static/overlay_window.html?config_id=5&controls=hidden',
+    target_path: DEFAULT_REDIRECT_TARGET,
+    rules: [createRedirectRule()],
   });
+  const [overlayConfigs, setOverlayConfigs] = useState([]);
+  const [recentProjectorRequests, setRecentProjectorRequests] = useState([]);
 
   const apiFieldHelp = {
     weather_api_key: 'Get your API key from openweathermap.org/api.',
@@ -149,13 +172,37 @@ function Settings() {
       });
     overlayApi.getProjectorRedirectConfig()
       .then((response) => {
+        const nextConfig = response.data || {};
         setProjectorRedirect((current) => ({
           ...current,
-          ...(response.data || {}),
+          ...nextConfig,
+          rules: Array.isArray(nextConfig.rules) && nextConfig.rules.length
+            ? nextConfig.rules
+            : [{
+              id: 'rule-1',
+              name: 'Default projector',
+              enabled: Boolean(nextConfig.enabled),
+              client_ip: nextConfig.client_ip || '',
+              target_path: nextConfig.target_path || DEFAULT_REDIRECT_TARGET,
+            }],
         }));
       })
       .catch((error) => {
         console.error('Error loading projector redirect config:', error);
+      });
+    overlayApi.listConfigs()
+      .then((response) => {
+        setOverlayConfigs(response.data || []);
+      })
+      .catch((error) => {
+        console.error('Error loading overlay configs:', error);
+      });
+    overlayApi.getRecentProjectorRedirectRequests()
+      .then((response) => {
+        setRecentProjectorRequests(response.data?.items || []);
+      })
+      .catch((error) => {
+        console.error('Error loading recent projector requests:', error);
       });
   }, []);
 
@@ -228,6 +275,8 @@ function Settings() {
       window.dispatchEvent(new Event('nanoDlnaUiPrefsChanged'));
       await overlayApi.updateGlobalApiConfigs(globalApiConfigs);
       await overlayApi.updateProjectorRedirectConfig(projectorRedirect);
+      const recentResponse = await overlayApi.getRecentProjectorRedirectRequests();
+      setRecentProjectorRequests(recentResponse.data?.items || []);
       setSnackbar({
         open: true,
         message: 'Settings saved successfully',
@@ -273,26 +322,218 @@ function Settings() {
     }));
   };
 
+  const updateRedirectRule = (ruleId, patch) => {
+    setProjectorRedirect((current) => {
+      const nextRules = (current.rules || []).map((rule) => (
+        rule.id === ruleId ? { ...rule, ...patch } : rule
+      ));
+      return {
+        ...current,
+        rules: nextRules,
+        enabled: nextRules.some((rule) => rule.enabled),
+        client_ip: nextRules.find((rule) => rule.enabled)?.client_ip || nextRules[0]?.client_ip || '',
+        target_path: nextRules.find((rule) => rule.enabled)?.target_path || nextRules[0]?.target_path || DEFAULT_REDIRECT_TARGET,
+      };
+    });
+  };
+
+  const addRedirectRule = () => {
+    setProjectorRedirect((current) => {
+      const nextRules = [...(current.rules || []), createRedirectRule((current.rules || []).length + 1)];
+      return { ...current, rules: nextRules };
+    });
+  };
+
+  const removeRedirectRule = (ruleId) => {
+    setProjectorRedirect((current) => {
+      const nextRules = (current.rules || []).filter((rule) => rule.id !== ruleId);
+      const safeRules = nextRules.length ? nextRules : [createRedirectRule()];
+      return {
+        ...current,
+        rules: safeRules,
+        enabled: safeRules.some((rule) => rule.enabled),
+        client_ip: safeRules.find((rule) => rule.enabled)?.client_ip || safeRules[0]?.client_ip || '',
+        target_path: safeRules.find((rule) => rule.enabled)?.target_path || safeRules[0]?.target_path || DEFAULT_REDIRECT_TARGET,
+      };
+    });
+  };
+
+  const handleQuickTargetChange = (ruleId, targetPath) => {
+    updateRedirectRule(ruleId, { target_path: targetPath });
+  };
+
+  const refreshRecentProjectorRequests = async () => {
+    try {
+      const response = await overlayApi.getRecentProjectorRedirectRequests();
+      setRecentProjectorRequests(response.data?.items || []);
+    } catch (error) {
+      console.error('Error refreshing recent projector requests:', error);
+    }
+  };
+
+  const quickRedirectTargets = [
+    { label: 'Overlay Window (config 5)', value: DEFAULT_REDIRECT_TARGET },
+    { label: 'API Docs', value: '/docs' },
+    ...overlayConfigs.map((config) => ({
+      label: `Overlay: ${config.name}`,
+      value: `/backend-static/overlay_window.html?config_id=${config.id}&controls=hidden`,
+    })),
+  ];
+
   return (
     <Grid container spacing={3}>
-      {/* Header */}
       <Grid item xs={12}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Typography variant="h4">Settings</Typography>
-          <Button
-            variant="contained"
-            color="primary"
-            startIcon={<SaveIcon />}
-            onClick={handleSaveSettings}
-          >
+        <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} justifyContent="space-between" alignItems={{ xs: 'flex-start', md: 'center' }}>
+          <Box>
+            <Typography variant="h4">Settings</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Tidy global settings, data sources, and projector redirect routing in one place.
+            </Typography>
+          </Box>
+          <Button variant="contained" color="primary" startIcon={<SaveIcon />} onClick={handleSaveSettings}>
             Save Settings
           </Button>
-        </Box>
-        <Divider sx={{ mb: 2 }} />
+        </Stack>
       </Grid>
 
-      {/* General Settings */}
-      <Grid item xs={12} md={6}>
+      <Grid item xs={12}>
+        <Paper sx={{ p: 2.5 }}>
+          <Stack spacing={2}>
+            <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} justifyContent="space-between" alignItems={{ xs: 'flex-start', md: 'center' }}>
+              <Box>
+                <Typography variant="h6">
+                  <SettingsIcon sx={{ verticalAlign: 'middle', mr: 1 }} />
+                  Projector Redirect
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Route known client IPs to a target page and inspect recent navigation attempts.
+                </Typography>
+              </Box>
+              <Stack direction="row" spacing={1}>
+                <Button variant="outlined" startIcon={<RefreshIcon />} onClick={refreshRecentProjectorRequests}>
+                  Refresh Recent
+                </Button>
+                <Button variant="outlined" startIcon={<AddIcon />} onClick={addRedirectRule}>
+                  Add Rule
+                </Button>
+              </Stack>
+            </Stack>
+            <FormControlLabel
+              control={(
+                <Switch
+                  checked={projectorRedirect.enabled}
+                  onChange={(e) => setProjectorRedirect((current) => ({ ...current, enabled: e.target.checked }))}
+                  color="primary"
+                />
+              )}
+              label="Enable projector auto-redirect"
+            />
+            <Grid container spacing={2}>
+              {(projectorRedirect.rules || []).map((rule, index) => (
+                <Grid item xs={12} md={6} key={rule.id || index}>
+                  <Paper variant="outlined" sx={{ p: 2 }}>
+                    <Stack spacing={1.5}>
+                      <Stack direction="row" spacing={1} justifyContent="space-between" alignItems="center">
+                        <TextField
+                          label="Rule Name"
+                          value={rule.name || ''}
+                          onChange={(event) => updateRedirectRule(rule.id, { name: event.target.value })}
+                          size="small"
+                          fullWidth
+                        />
+                        <IconButton color="error" onClick={() => removeRedirectRule(rule.id)} disabled={(projectorRedirect.rules || []).length <= 1}>
+                          <DeleteIcon />
+                        </IconButton>
+                      </Stack>
+                      <FormControlLabel
+                        control={(
+                          <Switch
+                            checked={Boolean(rule.enabled)}
+                            onChange={(event) => updateRedirectRule(rule.id, { enabled: event.target.checked })}
+                          />
+                        )}
+                        label="Rule enabled"
+                      />
+                      <TextField
+                        label="Client IP"
+                        value={rule.client_ip || ''}
+                        onChange={(event) => updateRedirectRule(rule.id, { client_ip: event.target.value })}
+                        fullWidth
+                        size="small"
+                        helperText="Exact forwarded client IP to match."
+                      />
+                      <TextField
+                        select
+                        label="Quick Target"
+                        value={quickRedirectTargets.some((option) => option.value === rule.target_path) ? rule.target_path : '__custom__'}
+                        onChange={(event) => {
+                          if (event.target.value !== '__custom__') {
+                            handleQuickTargetChange(rule.id, event.target.value);
+                          }
+                        }}
+                        fullWidth
+                        size="small"
+                      >
+                        {quickRedirectTargets.map((option) => (
+                          <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
+                        ))}
+                        <MenuItem value="__custom__">Custom path</MenuItem>
+                      </TextField>
+                      <TextField
+                        label="Redirect Target Path"
+                        value={rule.target_path || ''}
+                        onChange={(event) => updateRedirectRule(rule.id, { target_path: event.target.value })}
+                        fullWidth
+                        size="small"
+                        helperText="Example: /backend-static/overlay_window.html?config_id=5&controls=hidden"
+                      />
+                    </Stack>
+                  </Paper>
+                </Grid>
+              ))}
+            </Grid>
+            <Divider />
+            <Stack direction="row" spacing={1} alignItems="center">
+              <Typography variant="subtitle1">Recent projector client requests</Typography>
+              <Chip size="small" label={`${recentProjectorRequests.length} cached`} />
+            </Stack>
+            <TableContainer component={Paper} variant="outlined">
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Time</TableCell>
+                    <TableCell>Client IP</TableCell>
+                    <TableCell>Request</TableCell>
+                    <TableCell>Rule</TableCell>
+                    <TableCell>Redirect</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {recentProjectorRequests.length ? recentProjectorRequests.map((item, index) => (
+                    <TableRow key={`${item.timestamp}-${index}`}>
+                      <TableCell>{item.timestamp?.replace('T', ' ').replace(/\.\d+.*$/, 'Z') || '-'}</TableCell>
+                      <TableCell>{item.client_ip || '-'}</TableCell>
+                      <TableCell>{item.method} {item.path}{item.query ? `?${item.query}` : ''}</TableCell>
+                      <TableCell>{item.matched_rule_name || '-'}</TableCell>
+                      <TableCell>{item.redirected ? item.redirect_target : '-'}</TableCell>
+                    </TableRow>
+                  )) : (
+                    <TableRow>
+                      <TableCell colSpan={5}>
+                        <Typography variant="body2" color="text.secondary">
+                          No recent projector navigation requests recorded yet.
+                        </Typography>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Stack>
+        </Paper>
+      </Grid>
+
+      <Grid item xs={12} md={4}>
         <Paper sx={{ p: 2, mb: 3 }}>
           <Typography variant="h6" gutterBottom>
             <SettingsIcon sx={{ verticalAlign: 'middle', mr: 1 }} />
@@ -383,147 +624,22 @@ function Settings() {
             </ListItem>
           </List>
         </Paper>
-      </Grid>
-
-      <Grid item xs={12} md={6}>
-        <Paper sx={{ p: 2, mb: 3 }}>
-          <Typography variant="h6" gutterBottom>
-            <SettingsIcon sx={{ verticalAlign: 'middle', mr: 1 }} />
-            Global API Settings
-          </Typography>
-          <Divider sx={{ my: 1 }} />
-          <Stack spacing={2}>
-            {renderApiConfigField('weather_api_key', 'Weather API Key (OpenWeatherMap)', {
-              helperText: 'Used by weather widgets across the app.',
-            })}
-            {renderApiConfigField('transit_stop_id', 'Transit Stop ID')}
-            {renderApiConfigField('timezone', 'Timezone')}
-            {renderApiConfigField('apple_health_stats_json', 'Apple Health Stats JSON', {
-              multiline: true,
-              minRows: 6,
-            })}
-            <Divider />
-            {renderApiConfigField('spotify_client_id', 'Spotify Client ID')}
-            {renderApiConfigField('spotify_client_secret', 'Spotify Client Secret')}
-            {renderApiConfigField('spotify_refresh_token', 'Spotify Refresh Token')}
-            {renderApiConfigField('spotify_access_token', 'Spotify Access Token Override')}
-            <Divider />
-            {renderApiConfigField('google_calendar_api_key', 'Google Calendar API Key')}
-            {renderApiConfigField('google_calendar_id', 'Google Calendar ID')}
-            {renderApiConfigField('gmail_client_id', 'Gmail Client ID')}
-            {renderApiConfigField('gmail_client_secret', 'Gmail Client Secret')}
-            {renderApiConfigField('gmail_refresh_token', 'Gmail Refresh Token')}
-            {renderApiConfigField('gmail_access_token', 'Gmail Access Token Override')}
-            <Divider />
-            {renderApiConfigField('steam_api_key', 'Steam API Key')}
-            {renderApiConfigField('steam_id', 'Steam ID')}
-            <Divider />
-            {renderApiConfigField('tuya_access_id', 'Tuya Access ID')}
-            {renderApiConfigField('tuya_access_secret', 'Tuya Access Secret')}
-            {renderApiConfigField('tuya_device_id', 'Tuya Device ID')}
-            {renderApiConfigField('tuya_api_base_url', 'Tuya API Base URL')}
-          </Stack>
-        </Paper>
-      </Grid>
-
-      <Grid item xs={12} md={6}>
-        <Paper sx={{ p: 2, mb: 3 }}>
-          <Typography variant="h6" gutterBottom>
-            <SettingsIcon sx={{ verticalAlign: 'middle', mr: 1 }} />
-            Projector Redirect
-          </Typography>
-          <Divider sx={{ my: 1 }} />
-          <Stack spacing={2}>
-            <FormControlLabel
-              control={(
-                <Switch
-                  checked={projectorRedirect.enabled}
-                  onChange={(e) => setProjectorRedirect((current) => ({
-                    ...current,
-                    enabled: e.target.checked,
-                  }))}
-                  color="primary"
-                />
-              )}
-              label="Enable projector auto-redirect"
-            />
-            <TextField
-              label="Projector Client IP"
-              value={projectorRedirect.client_ip}
-              onChange={(event) => setProjectorRedirect((current) => ({
-                ...current,
-                client_ip: event.target.value,
-              }))}
-              fullWidth
-              helperText="Only requests from this client IP to the server root URL (`/`) will be redirected."
-            />
-            <TextField
-              label="Redirect Target Path"
-              value={projectorRedirect.target_path}
-              onChange={(event) => setProjectorRedirect((current) => ({
-                ...current,
-                target_path: event.target.value,
-              }))}
-              fullWidth
-              helperText="Example: /backend-static/overlay_window.html?config_id=5&controls=hidden"
-            />
-          </Stack>
-        </Paper>
-      </Grid>
-
-      {/* Configuration Management */}
-      <Grid item xs={12} md={6}>
         <Paper sx={{ p: 2, mb: 3 }}>
           <Typography variant="h6" gutterBottom>
             <FolderIcon sx={{ verticalAlign: 'middle', mr: 1 }} />
             Configuration Management
           </Typography>
           <Divider sx={{ my: 1 }} />
-          <Grid container spacing={2} sx={{ mt: 1 }}>
-            <Grid item xs={12} sm={6}>
-              <Card>
-                <CardContent>
-                  <Typography variant="h6">Load Configuration</Typography>
-                  <Typography variant="body2" color="textSecondary">
-                    Load devices from a configuration file
-                  </Typography>
-                </CardContent>
-                <CardActions>
-                  <Button
-                    size="small"
-                    color="primary"
-                    startIcon={<UploadIcon />}
-                    onClick={() => setOpenLoadDialog(true)}
-                  >
-                    Load
-                  </Button>
-                </CardActions>
-              </Card>
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <Card>
-                <CardContent>
-                  <Typography variant="h6">Save Configuration</Typography>
-                  <Typography variant="body2" color="textSecondary">
-                    Save devices to a configuration file
-                  </Typography>
-                </CardContent>
-                <CardActions>
-                  <Button
-                    size="small"
-                    color="primary"
-                    startIcon={<DownloadIcon />}
-                    onClick={() => setOpenSaveDialog(true)}
-                  >
-                    Save
-                  </Button>
-                </CardActions>
-              </Card>
-            </Grid>
-          </Grid>
+          <Stack spacing={1.5} sx={{ mt: 1 }}>
+            <Button variant="outlined" startIcon={<UploadIcon />} onClick={() => setOpenLoadDialog(true)}>
+              Load device configuration
+            </Button>
+            <Button variant="outlined" startIcon={<DownloadIcon />} onClick={() => setOpenSaveDialog(true)}>
+              Save device configuration
+            </Button>
+          </Stack>
         </Paper>
 
-        {/* System Information */}
         <Paper sx={{ p: 2 }}>
           <Typography variant="h6" gutterBottom>
             <RefreshIcon sx={{ verticalAlign: 'middle', mr: 1 }} />
@@ -560,6 +676,72 @@ function Settings() {
               </Button>
             </ListItem>
           </List>
+        </Paper>
+      </Grid>
+
+      <Grid item xs={12} md={8}>
+        <Paper sx={{ p: 2 }}>
+          <Typography variant="h6" gutterBottom>
+            <SettingsIcon sx={{ verticalAlign: 'middle', mr: 1 }} />
+            Global API Settings
+          </Typography>
+          <Divider sx={{ my: 1 }} />
+          <Stack spacing={1.5}>
+            <Accordion defaultExpanded disableGutters>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography variant="subtitle1">Core data sources</Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                <Stack spacing={2}>
+                  {renderApiConfigField('weather_api_key', 'Weather API Key (OpenWeatherMap)', {
+                    helperText: 'Used by weather widgets across the app.',
+                  })}
+                  {renderApiConfigField('transit_stop_id', 'Transit Stop ID')}
+                  {renderApiConfigField('timezone', 'Timezone')}
+                  {renderApiConfigField('apple_health_stats_json', 'Apple Health Stats JSON', {
+                    multiline: true,
+                    minRows: 6,
+                  })}
+                </Stack>
+              </AccordionDetails>
+            </Accordion>
+            <Accordion disableGutters>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography variant="subtitle1">Spotify + Google</Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                <Stack spacing={2}>
+                  {renderApiConfigField('spotify_client_id', 'Spotify Client ID')}
+                  {renderApiConfigField('spotify_client_secret', 'Spotify Client Secret')}
+                  {renderApiConfigField('spotify_refresh_token', 'Spotify Refresh Token')}
+                  {renderApiConfigField('spotify_access_token', 'Spotify Access Token Override')}
+                  <Divider />
+                  {renderApiConfigField('google_calendar_api_key', 'Google Calendar API Key')}
+                  {renderApiConfigField('google_calendar_id', 'Google Calendar ID')}
+                  {renderApiConfigField('gmail_client_id', 'Gmail Client ID')}
+                  {renderApiConfigField('gmail_client_secret', 'Gmail Client Secret')}
+                  {renderApiConfigField('gmail_refresh_token', 'Gmail Refresh Token')}
+                  {renderApiConfigField('gmail_access_token', 'Gmail Access Token Override')}
+                </Stack>
+              </AccordionDetails>
+            </Accordion>
+            <Accordion disableGutters>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography variant="subtitle1">Gaming + Tuya</Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                <Stack spacing={2}>
+                  {renderApiConfigField('steam_api_key', 'Steam API Key')}
+                  {renderApiConfigField('steam_id', 'Steam ID')}
+                  <Divider />
+                  {renderApiConfigField('tuya_access_id', 'Tuya Access ID')}
+                  {renderApiConfigField('tuya_access_secret', 'Tuya Access Secret')}
+                  {renderApiConfigField('tuya_device_id', 'Tuya Device ID')}
+                  {renderApiConfigField('tuya_api_base_url', 'Tuya API Base URL')}
+                </Stack>
+              </AccordionDetails>
+            </Accordion>
+          </Stack>
         </Paper>
       </Grid>
 
