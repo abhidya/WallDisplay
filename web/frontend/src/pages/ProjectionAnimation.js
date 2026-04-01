@@ -28,7 +28,7 @@ import {
 } from '@mui/icons-material';
 import { projectionApi } from '../services/api';
 
-const PREVIEW_BUNDLE_VERSION = '20260327-anim-2';
+const PREVIEW_BUNDLE_VERSION = '20260401-anim-3';
 
 function ProjectionAnimation() {
   const [animations, setAnimations] = useState([]);

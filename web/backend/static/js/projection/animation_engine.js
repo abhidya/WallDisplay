@@ -150,6 +150,7 @@ class BaseAnimation {
         this.tempCanvas = null;
         this.tempCtx = null;
         this.externalClock = false;
+        this.renderElement = null;
     }
     
     init() {
@@ -194,6 +195,14 @@ class BaseAnimation {
         
         // Call child class setup
         this.setup();
+
+        if (this.renderElement && this.renderElement !== this.canvas && !this.maskImage) {
+            this.renderElement.className = 'animation-canvas';
+            this.renderElement.width = this.zone.bounds.width;
+            this.renderElement.height = this.zone.bounds.height;
+            this.container.appendChild(this.renderElement);
+            this.canvas.style.display = 'none';
+        }
     }
     
     setup() {
@@ -244,6 +253,11 @@ class BaseAnimation {
 
     renderFrame(_timestamp) {
         if (!this.isRunning) return;
+
+        if (this.renderElement && this.renderElement !== this.canvas && !this.maskCanvas) {
+            this.draw();
+            return;
+        }
 
         // Clear canvas
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
@@ -313,7 +327,11 @@ class BaseAnimation {
     getZoneArea() {
         return this.zone.area;
     }
-    
+
+    getRenderElement() {
+        return this.renderElement || this.canvas;
+    }
+
     // Convert normalized coordinates (0-1) to canvas coordinates
     toCanvasX(normalizedX) {
         return normalizedX * this.canvas.width;

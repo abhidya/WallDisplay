@@ -5,6 +5,7 @@ class KelpForestAnimation extends BaseAnimation {
         this.glCanvas = document.createElement('canvas');
         this.glCanvas.width = this.canvas.width;
         this.glCanvas.height = this.canvas.height;
+        this.renderElement = this.glCanvas;
 
         this.gl = null;
         this.program = null;
@@ -603,7 +604,6 @@ class KelpForestAnimation extends BaseAnimation {
         this.gl.uniform1f(this.uniforms.time, this.time * 0.001);
         this.gl.uniform2f(this.uniforms.mouse, this.mouse.x, this.mouse.y);
         this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
-        this.ctx.drawImage(this.glCanvas, 0, 0, this.canvas.width, this.canvas.height);
     }
 }
 

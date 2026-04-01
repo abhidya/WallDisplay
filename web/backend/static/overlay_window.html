@@ -1063,6 +1063,12 @@
         let mappingSharedSourceFrameCache = new Map();
         let mappingSharedAnimationStates = new Map();
         let mappingRenderableGroups = [];
+        let mappingRenderableGroupsById = new Map();
+        let mappingRenderEntries = [];
+        let mappingStaticSceneCanvas = null;
+        let mappingStaticSceneCtx = null;
+        let mappingStaticSceneDirty = true;
+        let mappingMainCanvasPrimed = false;
         let mappingAnimationFrame = null;
         let mappingAnimationEngine = null;
         let mappingCanvasContext = null;
@@ -1080,7 +1086,10 @@
         const MAPPING_MEDIUM_TARGET_FRAME_MS = 1000 / 24;
         const MAPPING_HEAVY_TARGET_FRAME_MS = 1000 / 20;
         const MAPPING_HIDDEN_TARGET_FRAME_MS = 1000 / 5;
-        const PLAYBACK_SYNC_POLL_MS = 5000;
+        const PLAYBACK_SYNC_MIN_POLL_MS = 2000;
+        const PLAYBACK_SYNC_FALLBACK_POLL_MS = 15000;
+        const PLAYBACK_SYNC_MAX_POLL_MS = 30000;
+        const PLAYBACK_SYNC_POST_TRANSITION_DELAY_MS = 250;
         const OVERLAY_STATUS_FALLBACK_POLL_MS = 15000;
         const CONFIG_REFRESH_FALLBACK_POLL_MS = 30000;
         let mappingPlaybackSyncBySourceKey = new Map();
@@ -1687,12 +1696,6 @@
             createVisibilityControls();
             startDataUpdates();
             startOverlayStatusPolling();
-            if (backgroundType === 'mapping') {
-                fetchMappingPlaybackSync().catch((error) => {
-                    console.error('Initial playback sync fetch failed:', error);
-                });
-                startMappingPlaybackHeartbeat();
-            }
         }
 
         async function bootstrapFromUrl() {
@@ -1850,6 +1853,7 @@
 
         function markMappingDirty() {
             mappingDirty = true;
+            mappingStaticSceneDirty = true;
         }
 
         function resetMappingPlaybackState() {
@@ -1877,6 +1881,12 @@
             mappingPlaybackSyncBySourceKey = new Map();
             mappingServerTimeOffsetMs = 0;
             mappingRenderableGroups = [];
+            mappingRenderableGroupsById = new Map();
+            mappingRenderEntries = [];
+            mappingStaticSceneCanvas = null;
+            mappingStaticSceneCtx = null;
+            mappingStaticSceneDirty = true;
+            mappingMainCanvasPrimed = false;
             mappingCanvasContext = null;
             mappingLastRenderTimestamp = 0;
             mappingRenderFrameToken = 0;
@@ -1935,32 +1945,85 @@
             if (!currentConfigId || backgroundType !== 'mapping') {
                 return;
             }
-            const response = await fetch(`/api/overlay/playback-sync?config_id=${encodeURIComponent(currentConfigId)}`);
-            if (!response.ok) {
-                throw new Error(`Failed to fetch playback sync (${response.status})`);
+            try {
+                const response = await fetch(`/api/overlay/playback-sync?config_id=${encodeURIComponent(currentConfigId)}`);
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch playback sync (${response.status})`);
+                }
+                const payload = await response.json();
+                normalizePlaybackSyncSnapshot(payload);
+                synchronizeMappingGroups();
+            } finally {
+                startMappingPlaybackHeartbeat();
             }
-            const payload = await response.json();
-            normalizePlaybackSyncSnapshot(payload);
-            synchronizeMappingGroups();
+        }
+
+        function mappingGroupNeedsPlaybackSync(group) {
+            const state = mappingMediaState.get(group.id);
+            if (state?.syncManaged) {
+                return true;
+            }
+            if (state?.type === 'animation_list' && state.activeToken) {
+                return true;
+            }
+            return Boolean(getPlaybackSyncSnapshot(group));
+        }
+
+        function getNextPlaybackSyncRefreshDelayMs() {
+            if (backgroundType !== 'mapping' || !currentConfigId) {
+                return null;
+            }
+
+            const relevantGroups = mappingRenderableGroups.filter(mappingGroupNeedsPlaybackSync);
+            if (!relevantGroups.length) {
+                return null;
+            }
+
+            const nowMs = getPlaybackSyncNowMs();
+            let earliestTransitionMs = null;
+            relevantGroups.forEach((group) => {
+                const snapshot = getPlaybackSyncSnapshot(group);
+                const nextTransitionMs = Number(snapshot?.next_transition_at_ms || 0);
+                if (!nextTransitionMs) {
+                    return;
+                }
+                if (earliestTransitionMs === null || nextTransitionMs < earliestTransitionMs) {
+                    earliestTransitionMs = nextTransitionMs;
+                }
+            });
+
+            if (earliestTransitionMs === null) {
+                return PLAYBACK_SYNC_FALLBACK_POLL_MS;
+            }
+
+            return Math.min(
+                PLAYBACK_SYNC_MAX_POLL_MS,
+                Math.max(
+                    PLAYBACK_SYNC_MIN_POLL_MS,
+                    (earliestTransitionMs - nowMs) + PLAYBACK_SYNC_POST_TRANSITION_DELAY_MS
+                )
+            );
         }
 
         function stopMappingPlaybackHeartbeat() {
             if (mappingPlaybackHeartbeatTimer) {
-                clearInterval(mappingPlaybackHeartbeatTimer);
+                clearTimeout(mappingPlaybackHeartbeatTimer);
                 mappingPlaybackHeartbeatTimer = null;
             }
         }
 
         function startMappingPlaybackHeartbeat() {
             stopMappingPlaybackHeartbeat();
-            if (backgroundType !== 'mapping' || !currentConfigId) {
+            const nextDelayMs = getNextPlaybackSyncRefreshDelayMs();
+            if (nextDelayMs === null) {
                 return;
             }
-            mappingPlaybackHeartbeatTimer = window.setInterval(() => {
+            mappingPlaybackHeartbeatTimer = window.setTimeout(() => {
+                mappingPlaybackHeartbeatTimer = null;
                 fetchMappingPlaybackSync().catch((error) => {
                     console.error('Failed to refresh playback sync:', error);
                 });
-            }, PLAYBACK_SYNC_POLL_MS);
+            }, nextDelayMs);
         }
 
         function buildDeterministicPlaybackOrder(items, snapshot) {
@@ -2301,6 +2364,7 @@
                     transit: latestMappingTransit,
                 });
             }
+            startMappingPlaybackHeartbeat();
             markMappingDirty();
             startMappingRenderLoop();
         }
@@ -2418,12 +2482,85 @@
             return cropped;
         }
 
+        function getSharedSourceBatchKey(group, renderCache) {
+            if (!renderCache?.sourceKey) {
+                return null;
+            }
+            return JSON.stringify({
+                sourceKey: renderCache.sourceKey,
+                zIndex: Number(group.z_index || 0),
+                layoutScope: group.layout_scope || 'scene',
+                transform: group.transform || {},
+            });
+        }
+
+        function buildSharedSourceBatchEntry(groupIds) {
+            if (!groupIds.length) {
+                return null;
+            }
+            if (groupIds.length === 1) {
+                return {
+                    type: 'group',
+                    groupId: groupIds[0],
+                };
+            }
+
+            const representativeGroupId = groupIds[0];
+            const representativeRenderCache = mappingGroupRenderCache.get(representativeGroupId);
+            if (!representativeRenderCache) {
+                return {
+                    type: 'group',
+                    groupId: representativeGroupId,
+                };
+            }
+
+            let bounds = representativeRenderCache.bounds;
+            groupIds.slice(1).forEach((groupId) => {
+                const renderCache = mappingGroupRenderCache.get(groupId);
+                if (renderCache?.bounds) {
+                    bounds = mergeBounds(bounds, renderCache.bounds);
+                }
+            });
+
+            const localWidth = Math.max(1, Math.round(bounds.width));
+            const localHeight = Math.max(1, Math.round(bounds.height));
+            const maskCanvas = document.createElement('canvas');
+            maskCanvas.width = localWidth;
+            maskCanvas.height = localHeight;
+            const maskCtx = maskCanvas.getContext('2d');
+
+            groupIds.forEach((groupId) => {
+                const renderCache = mappingGroupRenderCache.get(groupId);
+                if (!renderCache?.maskCanvas || !renderCache?.bounds) {
+                    return;
+                }
+                maskCtx.drawImage(
+                    renderCache.maskCanvas,
+                    Math.round(renderCache.bounds.x - bounds.x),
+                    Math.round(renderCache.bounds.y - bounds.y)
+                );
+            });
+
+            return {
+                type: 'shared_batch',
+                groupIds,
+                representativeGroupId,
+                sourceKey: representativeRenderCache.sourceKey,
+                sourceBounds: representativeRenderCache.sourceBounds || representativeRenderCache.bounds,
+                bounds,
+                maskCanvas,
+                renderCanvas: null,
+                renderCtx: null,
+            };
+        }
+
         function prepareMappingGroupRenderCaches(scene, canvasWidth, canvasHeight) {
             mappingGroupRenderCache = new Map();
             mappingSharedSourceMeta = new Map();
             mappingRenderableGroups = (scene.groups || [])
                 .filter(group => group.visible !== false && group.mask_ids && group.mask_ids.length)
                 .sort((a, b) => (a.z_index || 0) - (b.z_index || 0));
+            mappingRenderableGroupsById = new Map(mappingRenderableGroups.map((group) => [group.id, group]));
 
             const sceneCacheKey = getPreparedSceneCacheKey(scene, canvasWidth, canvasHeight);
             const cachedSceneTemplates = mappingPreparedSceneCache.get(sceneCacheKey);
@@ -2478,6 +2615,35 @@
                 }
                 renderCache.maskCanvas = cropMaskCanvasToBounds(renderCache.fullMaskCanvas, renderCache.bounds);
             });
+
+            mappingRenderEntries = [];
+            let pendingBatchKey = null;
+            let pendingGroupIds = [];
+            const flushPendingBatch = () => {
+                if (!pendingGroupIds.length) {
+                    return;
+                }
+                mappingRenderEntries.push(buildSharedSourceBatchEntry(pendingGroupIds));
+                pendingBatchKey = null;
+                pendingGroupIds = [];
+            };
+
+            mappingRenderableGroups.forEach((group) => {
+                const renderCache = mappingGroupRenderCache.get(group.id);
+                const batchKey = getSharedSourceBatchKey(group, renderCache);
+                if (!batchKey) {
+                    flushPendingBatch();
+                    mappingRenderEntries.push({ type: 'group', groupId: group.id });
+                    return;
+                }
+                if (pendingBatchKey && batchKey !== pendingBatchKey) {
+                    flushPendingBatch();
+                }
+                pendingBatchKey = batchKey;
+                pendingGroupIds.push(group.id);
+            });
+            flushPendingBatch();
+
             mappingPreparedSceneCache.set(
                 sceneCacheKey,
                 mappingRenderableGroups
@@ -2571,7 +2737,7 @@
                 groupId: group.id,
                 sourceKey,
                 type: 'animation',
-                element: animation.canvas,
+                element: animation.getRenderElement ? animation.getRenderElement() : animation.canvas,
                 animation,
                 container,
                 animationId,
@@ -3119,16 +3285,116 @@
         }
 
         function mappingSceneNeedsContinuousRender() {
-            return mappingRenderableGroups.some((group) => {
-                const mediaState = mappingMediaState.get(group.id);
-                if (!mediaState) {
-                    return false;
+            return mappingRenderableGroups.some((group) => groupNeedsContinuousRender(group));
+        }
+
+        function groupNeedsContinuousRender(group) {
+            const mediaState = mappingMediaState.get(group.id);
+            if (!mediaState) {
+                return false;
+            }
+            if (mediaState.type === 'video' || mediaState.type === 'animation' || mediaState.type === 'animation_list') {
+                return true;
+            }
+            return mediaState.type === 'image' && Boolean(mediaState.previousElement || mediaState.transitionStart);
+        }
+
+        function renderEntry(ctx, entry, canvasWidth, canvasHeight) {
+            if (!entry) {
+                return;
+            }
+            if (entry.type === 'shared_batch') {
+                if (drawSharedSourceBatch(ctx, entry)) {
+                    return;
                 }
-                if (mediaState.type === 'video' || mediaState.type === 'animation' || mediaState.type === 'animation_list') {
-                    return true;
+                entry.groupIds.forEach((groupId) => {
+                    const group = mappingRenderableGroupsById.get(groupId);
+                    if (group) {
+                        drawMappingGroup(ctx, group, canvasWidth, canvasHeight);
+                    }
+                });
+                return;
+            }
+            const group = mappingRenderableGroupsById.get(entry.groupId);
+            if (group) {
+                drawMappingGroup(ctx, group, canvasWidth, canvasHeight);
+            }
+        }
+
+        function entryNeedsContinuousRender(entry) {
+            if (!entry) {
+                return false;
+            }
+            if (entry.type === 'shared_batch') {
+                return entry.groupIds.some((groupId) => {
+                    const group = mappingRenderableGroupsById.get(groupId);
+                    return group ? groupNeedsContinuousRender(group) : false;
+                });
+            }
+            const group = mappingRenderableGroupsById.get(entry.groupId);
+            return group ? groupNeedsContinuousRender(group) : false;
+        }
+
+        function getRenderEntryBounds(entry) {
+            if (!entry) {
+                return null;
+            }
+            if (entry.type === 'shared_batch' && entry.bounds) {
+                return entry.bounds;
+            }
+            const renderCache = mappingGroupRenderCache.get(entry.groupId);
+            return renderCache?.bounds || null;
+        }
+
+        function getCombinedEntryBounds(entries, canvasWidth, canvasHeight) {
+            let combined = null;
+            entries.forEach((entry) => {
+                const bounds = getRenderEntryBounds(entry);
+                if (!bounds) {
+                    return;
                 }
-                return mediaState.type === 'image' && Boolean(mediaState.previousElement || mediaState.transitionStart);
+                combined = combined ? mergeBounds(combined, bounds) : bounds;
             });
+            if (!combined) {
+                return null;
+            }
+            const x = Math.max(0, Math.floor(combined.x));
+            const y = Math.max(0, Math.floor(combined.y));
+            const maxX = Math.min(canvasWidth, Math.ceil(combined.x + combined.width));
+            const maxY = Math.min(canvasHeight, Math.ceil(combined.y + combined.height));
+            return {
+                x,
+                y,
+                width: Math.max(1, maxX - x),
+                height: Math.max(1, maxY - y),
+            };
+        }
+
+        function ensureStaticSceneLayer(canvasWidth, canvasHeight, staticEntries) {
+            if (!mappingStaticSceneCanvas) {
+                mappingStaticSceneCanvas = document.createElement('canvas');
+                mappingStaticSceneCanvas.width = canvasWidth;
+                mappingStaticSceneCanvas.height = canvasHeight;
+                mappingStaticSceneCtx = mappingStaticSceneCanvas.getContext('2d');
+                mappingStaticSceneDirty = true;
+            } else if (mappingStaticSceneCanvas.width !== canvasWidth || mappingStaticSceneCanvas.height !== canvasHeight) {
+                mappingStaticSceneCanvas.width = canvasWidth;
+                mappingStaticSceneCanvas.height = canvasHeight;
+                mappingStaticSceneCtx = mappingStaticSceneCanvas.getContext('2d');
+                mappingStaticSceneDirty = true;
+            }
+
+            if (!mappingStaticSceneDirty) {
+                return;
+            }
+
+            mappingStaticSceneCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+            mappingStaticSceneCtx.fillStyle = 'black';
+            mappingStaticSceneCtx.fillRect(0, 0, canvasWidth, canvasHeight);
+            staticEntries.forEach((entry) => {
+                renderEntry(mappingStaticSceneCtx, entry, canvasWidth, canvasHeight);
+            });
+            mappingStaticSceneDirty = false;
         }
 
         function renderMappingScene() {
@@ -3139,11 +3405,55 @@
             if (mappingAnimationEngine?.renderFrame) {
                 mappingAnimationEngine.renderFrame(performance.now());
             }
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.fillStyle = 'black';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            const staticEntries = [];
+            const dynamicEntries = [];
+            mappingRenderEntries.forEach((entry) => {
+                if (entryNeedsContinuousRender(entry)) {
+                    dynamicEntries.push(entry);
+                } else {
+                    staticEntries.push(entry);
+                }
+            });
 
-            mappingRenderableGroups.forEach(group => drawMappingGroup(ctx, group, canvas.width, canvas.height));
+            const staticSceneWasDirty = mappingStaticSceneDirty;
+            if (staticEntries.length) {
+                ensureStaticSceneLayer(canvas.width, canvas.height, staticEntries);
+                const dynamicBounds = dynamicEntries.length
+                    ? getCombinedEntryBounds(dynamicEntries, canvas.width, canvas.height)
+                    : null;
+                const canPatchDynamicRegion = (
+                    mappingMainCanvasPrimed
+                    && !mappingDirty
+                    && !staticSceneWasDirty
+                    && dynamicBounds
+                );
+                if (canPatchDynamicRegion) {
+                    ctx.drawImage(
+                        mappingStaticSceneCanvas,
+                        dynamicBounds.x,
+                        dynamicBounds.y,
+                        dynamicBounds.width,
+                        dynamicBounds.height,
+                        dynamicBounds.x,
+                        dynamicBounds.y,
+                        dynamicBounds.width,
+                        dynamicBounds.height,
+                    );
+                } else {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    ctx.drawImage(mappingStaticSceneCanvas, 0, 0);
+                    mappingMainCanvasPrimed = true;
+                }
+            } else {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = 'black';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                mappingMainCanvasPrimed = true;
+            }
+
+            dynamicEntries.forEach((entry) => {
+                renderEntry(ctx, entry, canvas.width, canvas.height);
+            });
         }
 
         function renderSharedSourceLayer(sourceKey, sourceBounds, media, group, mediaState) {
@@ -3194,6 +3504,75 @@
             }
 
             return layer;
+        }
+
+        function drawSharedSourceBatch(ctx, batchEntry) {
+            const representativeGroup = mappingRenderableGroupsById.get(batchEntry.representativeGroupId);
+            if (!representativeGroup) {
+                return false;
+            }
+
+            const mediaState = mappingMediaState.get(representativeGroup.id);
+            const media = mappingMediaCache.get(representativeGroup.id);
+            if (!mediaState || !media || !['animation', 'animation_list', 'video'].includes(mediaState.type)) {
+                return false;
+            }
+            if (mediaState.previousElement || mediaState.transitionStart) {
+                return false;
+            }
+            if (media.tagName === 'VIDEO' && media.readyState < 2) {
+                return false;
+            }
+
+            const allGroupsCompatible = batchEntry.groupIds.every((groupId) => {
+                const groupState = mappingMediaState.get(groupId);
+                const groupMedia = mappingMediaCache.get(groupId);
+                return (
+                    groupState
+                    && groupMedia === media
+                    && groupState.type === mediaState.type
+                    && !groupState.previousElement
+                    && !groupState.transitionStart
+                );
+            });
+            if (!allGroupsCompatible) {
+                return false;
+            }
+
+            const sharedSourceLayer = renderSharedSourceLayer(
+                batchEntry.sourceKey,
+                batchEntry.sourceBounds,
+                media,
+                representativeGroup,
+                mediaState
+            );
+            if (!sharedSourceLayer) {
+                return false;
+            }
+
+            const localWidth = Math.max(1, Math.round(batchEntry.bounds.width));
+            const localHeight = Math.max(1, Math.round(batchEntry.bounds.height));
+            if (!batchEntry.renderCanvas) {
+                batchEntry.renderCanvas = document.createElement('canvas');
+                batchEntry.renderCanvas.width = localWidth;
+                batchEntry.renderCanvas.height = localHeight;
+                batchEntry.renderCtx = batchEntry.renderCanvas.getContext('2d');
+            } else if (batchEntry.renderCanvas.width !== localWidth || batchEntry.renderCanvas.height !== localHeight) {
+                batchEntry.renderCanvas.width = localWidth;
+                batchEntry.renderCanvas.height = localHeight;
+                batchEntry.renderCtx = batchEntry.renderCanvas.getContext('2d');
+            }
+
+            const renderCtx = batchEntry.renderCtx;
+            renderCtx.clearRect(0, 0, localWidth, localHeight);
+            renderCtx.drawImage(
+                sharedSourceLayer.canvas,
+                Math.round((batchEntry.sourceBounds?.x || 0) - batchEntry.bounds.x),
+                Math.round((batchEntry.sourceBounds?.y || 0) - batchEntry.bounds.y)
+            );
+            applyLuminanceMasks(renderCtx, [], localWidth, localHeight, batchEntry.maskCanvas);
+            ctx.drawImage(batchEntry.renderCanvas, batchEntry.bounds.x, batchEntry.bounds.y);
+            return true;
         }
 
         function drawMappingGroup(ctx, group, canvasWidth, canvasHeight) {

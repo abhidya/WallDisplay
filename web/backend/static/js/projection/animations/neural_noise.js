@@ -19,6 +19,7 @@ class NeuralNoiseAnimation extends BaseAnimation {
         this.glCanvas = document.createElement('canvas');
         this.glCanvas.width = this.canvas.width;
         this.glCanvas.height = this.canvas.height;
+        this.renderElement = this.glCanvas;
         
         // Initialize WebGL
         this.initWebGL();
@@ -258,9 +259,6 @@ class NeuralNoiseAnimation extends BaseAnimation {
         // Draw to WebGL canvas
         this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
         
-        // Copy WebGL result to main canvas
-        // Note: The mask clipping will be applied by the parent class's animate() method
-        this.ctx.drawImage(this.glCanvas, 0, 0);
     }
     
     onDataUpdate() {

@@ -72,7 +72,10 @@
             });
         }
 
-        Promise.all(scriptPaths.map(loadScript))
+        scriptPaths.reduce(
+            (chain, src) => chain.then(() => loadScript(src)),
+            Promise.resolve()
+        )
             .then(() => {
                 const engine = new AnimationEngine();
                 const zone = {
@@ -102,6 +105,12 @@
                             count: 3,
                         },
                     });
+
+                    const render = (timestamp) => {
+                        engine.renderFrame(timestamp);
+                        requestAnimationFrame(render);
+                    };
+                    requestAnimationFrame(render);
                 }
             })
             .catch((error) => {

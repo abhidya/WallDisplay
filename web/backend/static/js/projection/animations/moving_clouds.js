@@ -31,7 +31,7 @@ class MovingCloudsAnimation extends BaseAnimation {
             this.clouds.push(cloud);
         }
     }
-    
+
     createProceduralCloud() {
         // Create a simple procedural cloud using canvas
         const cloudCanvas = document.createElement('canvas');
