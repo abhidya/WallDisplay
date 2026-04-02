@@ -1,0 +1,63 @@
+import { Pressable, StyleSheet, Text } from 'react-native';
+
+import { colors } from '../theme';
+
+interface ActionButtonProps {
+  label: string;
+  onPress: () => void;
+  variant?: 'primary' | 'secondary';
+  disabled?: boolean;
+}
+
+export function ActionButton({
+  label,
+  onPress,
+  variant = 'primary',
+  disabled = false,
+}: ActionButtonProps) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      disabled={disabled}
+      onPress={onPress}
+      style={[
+        styles.button,
+        variant === 'primary' ? styles.primary : styles.secondary,
+        disabled && styles.disabled,
+      ]}
+    >
+      <Text style={[styles.label, variant === 'primary' && styles.primaryLabel]}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+const styles = StyleSheet.create({
+  button: {
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  primary: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
+  },
+  secondary: {
+    backgroundColor: colors.elevatedPanel,
+  },
+  disabled: {
+    opacity: 0.6,
+  },
+  label: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  primaryLabel: {
+    color: '#07111a',
+  },
+});
