@@ -291,3 +291,4 @@ web/backend/uploads/structured_lighting/*/
 
 # Claude rules
 # .claude_rules.md - Keep this tracked for context restoration
+.omx/
