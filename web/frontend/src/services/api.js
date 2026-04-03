@@ -344,6 +344,11 @@ const streamingApi = {
   getStreamingHealth: () => api.get('/streaming/health'),
 };
 
+const diagnosticsApi = {
+  getServiceDiagnostics: (params = {}) => api.get('/diagnostics/service', { params }),
+  getIncidentDetail: (incidentId, params = {}) => api.get(`/diagnostics/incidents/${incidentId}`, { params }),
+};
+
 // Settings API (placeholder for future implementation)
 const settingsApi = {
   getSettings: () => Promise.resolve({ 
@@ -369,6 +374,7 @@ export {
   rendererApi, 
   depthApi, 
   streamingApi, 
+  diagnosticsApi,
   settingsApi,
   discoveryV2Api,
   overlayApi,

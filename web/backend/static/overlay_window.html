@@ -180,6 +180,21 @@
         .widget:hover .widget-handle {
             opacity: 1;
         }
+
+        body.capture-mode #controls,
+        body.capture-mode #widget-visibility-controls,
+        body.capture-mode .widget-handle,
+        body.capture-mode .loading {
+            display: none !important;
+        }
+
+        body.capture-mode .widget,
+        body.capture-mode .widget:hover,
+        body.capture-mode .lights-widget,
+        body.capture-mode .lights-widget:hover {
+            box-shadow: none;
+            transition: none;
+        }
         
         .widget-handle.rotate-handle {
             top: -30px;
@@ -1116,6 +1131,7 @@
         let initialUrlParams = new URLSearchParams(window.location.search);
         let currentConfigId = initialUrlParams.get('config_id');
         const widgetsHiddenByUrl = initialUrlParams.get('widgets') === 'hidden';
+        const captureMode = initialUrlParams.get('capture') === 'dlna';
         let currentConfigRevision = null;
         let refreshStatePollInterval = null;
         let widgetLayoutFrame = null;
@@ -1656,8 +1672,11 @@
                 params.get('ui') === 'hidden'
             );
 
-            if (hideControls) {
+            if (hideControls || captureMode) {
                 document.getElementById('controls').classList.add('hidden');
+            }
+            if (captureMode) {
+                document.body.classList.add('capture-mode');
             }
         }
 
@@ -1693,7 +1712,9 @@
             document.getElementById('video-rotation-value').textContent = videoTransform.rotation;
 
             createWidgets();
-            createVisibilityControls();
+            if (!captureMode) {
+                createVisibilityControls();
+            }
             startDataUpdates();
             startOverlayStatusPolling();
         }
@@ -3276,10 +3297,19 @@
             });
 
             if (animatedGroupCount >= 10) {
+                if (captureMode) {
+                    return 1000 / 12;
+                }
                 return MAPPING_HEAVY_TARGET_FRAME_MS;
             }
             if (animatedGroupCount >= 6) {
+                if (captureMode) {
+                    return 1000 / 15;
+                }
                 return MAPPING_MEDIUM_TARGET_FRAME_MS;
+            }
+            if (captureMode) {
+                return 1000 / 18;
             }
             return MAPPING_TARGET_FRAME_MS;
         }
@@ -3975,25 +4005,23 @@
                 }
                 
                 // Add resize handle
-                const resizeHandle = document.createElement('div');
-                resizeHandle.className = 'widget-handle resize-se';
-                widgetEl.appendChild(resizeHandle);
-                
-                // Add rotation handle (except for lights widget)
-                if (widget.type !== 'lights') {
-                    const rotateHandle = document.createElement('div');
-                    rotateHandle.className = 'widget-handle rotate-handle';
-                    rotateHandle.title = 'Drag to rotate';
-                    widgetEl.appendChild(rotateHandle);
-                    
-                    // Add event handler directly here
-                    rotateHandle.addEventListener('mousedown', startRotate);
+                if (!captureMode) {
+                    const resizeHandle = document.createElement('div');
+                    resizeHandle.className = 'widget-handle resize-se';
+                    widgetEl.appendChild(resizeHandle);
+
+                    if (widget.type !== 'lights') {
+                        const rotateHandle = document.createElement('div');
+                        rotateHandle.className = 'widget-handle rotate-handle';
+                        rotateHandle.title = 'Drag to rotate';
+                        widgetEl.appendChild(rotateHandle);
+                        rotateHandle.addEventListener('mousedown', startRotate);
+                    }
+
+                    widgetEl.addEventListener('mousedown', startDrag);
+                    resizeHandle.addEventListener('mousedown', startResize);
+                    widgetEl.addEventListener('click', () => selectWidget(widget.id));
                 }
-                
-                // Add event handlers
-                widgetEl.addEventListener('mousedown', startDrag);
-                resizeHandle.addEventListener('mousedown', startResize);
-                widgetEl.addEventListener('click', () => selectWidget(widget.id));
                 
                 container.appendChild(widgetEl);
                 registerWidgetElement(widget.type, widgetEl);
@@ -4548,11 +4576,17 @@
         }
         
         function toggleControls() {
+            if (captureMode) {
+                return;
+            }
             document.getElementById('controls').classList.toggle('hidden');
         }
         
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {
+            if (captureMode) {
+                return;
+            }
             const step = e.shiftKey ? 10 : 1;
             
             if (e.key === 'h' || e.key === 'H') {
@@ -4616,7 +4650,7 @@
             
             if ([...visibleWidgetTypes].some((type) => ['spotify', 'gmail', 'calendar', 'climate', 'steam', 'weather', 'transit'].includes(type))) {
                 updateLiveWidgets();
-                dataUpdateIntervals.liveWidgets = setInterval(updateLiveWidgets, 15000);
+                dataUpdateIntervals.liveWidgets = setInterval(updateLiveWidgets, captureMode ? 30000 : 15000);
             }
         }
 

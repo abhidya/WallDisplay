@@ -51,7 +51,7 @@ import {
   InfoOutlined as InfoIcon,
 } from '@mui/icons-material';
 import axios from 'axios';
-import { overlayApi } from '../services/api';
+import { diagnosticsApi, overlayApi } from '../services/api';
 
 const UI_PREFS_KEY = 'nanoDlnaUiPrefs';
 const DEFAULT_REDIRECT_TARGET = '/backend-static/overlay_window.html?config_id=5&controls=hidden';
@@ -129,6 +129,12 @@ function Settings() {
   });
   const [overlayConfigs, setOverlayConfigs] = useState([]);
   const [recentProjectorRequests, setRecentProjectorRequests] = useState([]);
+  const [serviceDiagnostics, setServiceDiagnostics] = useState(null);
+  const [selectedIncidentId, setSelectedIncidentId] = useState('');
+  const [selectedIncidentDetail, setSelectedIncidentDetail] = useState(null);
+  const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
+  const [incidentDetailLoading, setIncidentDetailLoading] = useState(false);
+  const [diagnosticsError, setDiagnosticsError] = useState('');
 
   const apiFieldHelp = {
     weather_api_key: 'Get your API key from openweathermap.org/api.',
@@ -205,6 +211,116 @@ function Settings() {
         console.error('Error loading recent projector requests:', error);
       });
   }, []);
+
+  const formatTimestamp = (value) => {
+    if (!value) {
+      return '—';
+    }
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      return value;
+    }
+    return parsed.toLocaleString();
+  };
+
+  const formatDuration = (seconds) => {
+    if (seconds == null || Number.isNaN(Number(seconds))) {
+      return '—';
+    }
+    const totalSeconds = Math.max(Math.floor(Number(seconds)), 0);
+    const days = Math.floor(totalSeconds / 86400);
+    const hours = Math.floor((totalSeconds % 86400) / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const remainingSeconds = totalSeconds % 60;
+    const parts = [];
+    if (days) parts.push(`${days}d`);
+    if (hours || parts.length) parts.push(`${hours}h`);
+    if (minutes || parts.length) parts.push(`${minutes}m`);
+    parts.push(`${remainingSeconds}s`);
+    return parts.join(' ');
+  };
+
+  const formatBytes = (bytes) => {
+    if (!bytes) {
+      return '0 B';
+    }
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let size = bytes;
+    let unitIndex = 0;
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size /= 1024;
+      unitIndex += 1;
+    }
+    return `${size.toFixed(size >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+  };
+
+  const loadServiceDiagnostics = async (preserveSelection = true) => {
+    try {
+      setDiagnosticsLoading(true);
+      setDiagnosticsError('');
+      const response = await diagnosticsApi.getServiceDiagnostics({
+        incident_limit: 8,
+        run_limit: 8,
+        supervisor_limit: 8,
+      });
+      const nextDiagnostics = response.data;
+      setServiceDiagnostics(nextDiagnostics);
+      const incidentIds = (nextDiagnostics?.recent_incidents || []).map((item) => item.incident_id);
+      setSelectedIncidentId((current) => {
+        if (preserveSelection && current && incidentIds.includes(current)) {
+          return current;
+        }
+        return incidentIds[0] || '';
+      });
+    } catch (error) {
+      console.error('Error loading service diagnostics:', error);
+      setDiagnosticsError('Could not load service diagnostics right now.');
+    } finally {
+      setDiagnosticsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadServiceDiagnostics(false);
+    const timerId = window.setInterval(() => {
+      loadServiceDiagnostics(true);
+    }, 30000);
+    return () => window.clearInterval(timerId);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedIncidentId) {
+      setSelectedIncidentDetail(null);
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const loadIncidentDetail = async () => {
+      try {
+        setIncidentDetailLoading(true);
+        const response = await diagnosticsApi.getIncidentDetail(selectedIncidentId, { context_minutes: 3 });
+        if (!cancelled) {
+          setSelectedIncidentDetail(response.data);
+        }
+      } catch (error) {
+        console.error('Error loading incident detail:', error);
+        if (!cancelled) {
+          setSelectedIncidentDetail(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setIncidentDetailLoading(false);
+        }
+      }
+    };
+
+    loadIncidentDetail();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedIncidentId]);
 
   const handleLoadConfig = async () => {
     try {
@@ -380,6 +496,12 @@ function Settings() {
     })),
   ];
 
+  const currentRun = serviceDiagnostics?.current_run || null;
+  const recentIncidents = serviceDiagnostics?.recent_incidents || [];
+  const recentRuns = serviceDiagnostics?.recent_runs || [];
+  const supervisorEvents = serviceDiagnostics?.supervisor_events || [];
+  const logFiles = serviceDiagnostics?.log_files || [];
+
   return (
     <Grid container spacing={3}>
       <Grid item xs={12}>
@@ -529,6 +651,264 @@ function Settings() {
                 </TableBody>
               </Table>
             </TableContainer>
+          </Stack>
+        </Paper>
+      </Grid>
+
+      <Grid item xs={12}>
+        <Paper sx={{ p: 2.5 }}>
+          <Stack spacing={2}>
+            <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} justifyContent="space-between" alignItems={{ xs: 'flex-start', md: 'center' }}>
+              <Box>
+                <Typography variant="h6">
+                  <RefreshIcon sx={{ verticalAlign: 'middle', mr: 1 }} />
+                  Service Diagnostics
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Track current uptime, recent restarts, and the traceback/log context that survived a crash.
+                </Typography>
+              </Box>
+              <Stack direction="row" spacing={1} alignItems="center">
+                <Chip
+                  size="small"
+                  color={currentRun?.status === 'running' ? 'success' : 'default'}
+                  label={currentRun?.status === 'running' ? 'Backend running' : 'Status unknown'}
+                />
+                <Button variant="outlined" startIcon={<RefreshIcon />} onClick={() => loadServiceDiagnostics(true)} disabled={diagnosticsLoading}>
+                  Refresh Diagnostics
+                </Button>
+              </Stack>
+            </Stack>
+
+            {diagnosticsError ? (
+              <Alert severity="warning">{diagnosticsError}</Alert>
+            ) : null}
+
+            <Grid container spacing={2}>
+              <Grid item xs={12} md={4}>
+                <Paper variant="outlined" sx={{ p: 2, height: '100%' }}>
+                  <Typography variant="subtitle2" color="text.secondary">Current uptime</Typography>
+                  <Typography variant="h5">{formatDuration(currentRun?.uptime_seconds)}</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Started {formatTimestamp(currentRun?.started_at)}
+                  </Typography>
+                </Paper>
+              </Grid>
+              <Grid item xs={12} md={4}>
+                <Paper variant="outlined" sx={{ p: 2, height: '100%' }}>
+                  <Typography variant="subtitle2" color="text.secondary">Last heartbeat</Typography>
+                  <Typography variant="h6">{formatTimestamp(currentRun?.last_heartbeat_at)}</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    PID {currentRun?.pid || '—'} on port {currentRun?.backend_port || '—'}
+                  </Typography>
+                </Paper>
+              </Grid>
+              <Grid item xs={12} md={4}>
+                <Paper variant="outlined" sx={{ p: 2, height: '100%' }}>
+                  <Typography variant="subtitle2" color="text.secondary">Restarts seen</Typography>
+                  <Typography variant="h5">{recentIncidents.length}</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {supervisorEvents.length} supervisor events cached
+                  </Typography>
+                </Paper>
+              </Grid>
+            </Grid>
+
+            <Grid container spacing={2}>
+              <Grid item xs={12} lg={5}>
+                <Stack spacing={2}>
+                  <Paper variant="outlined" sx={{ p: 2 }}>
+                    <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+                      <Typography variant="subtitle1">Recent restart incidents</Typography>
+                      <Chip size="small" label={`${recentIncidents.length} incidents`} />
+                    </Stack>
+                    <TableContainer>
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow>
+                            <TableCell>Failure time</TableCell>
+                            <TableCell>Uptime</TableCell>
+                            <TableCell>Cause</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {recentIncidents.length ? recentIncidents.map((incident) => (
+                            <TableRow
+                              key={incident.incident_id}
+                              hover
+                              selected={incident.incident_id === selectedIncidentId}
+                              onClick={() => setSelectedIncidentId(incident.incident_id)}
+                              sx={{ cursor: 'pointer' }}
+                            >
+                              <TableCell>{formatTimestamp(incident.failed_at)}</TableCell>
+                              <TableCell>{formatDuration(incident.duration_seconds)}</TableCell>
+                              <TableCell>{incident.failure_message || incident.reason || 'Unclean restart'}</TableCell>
+                            </TableRow>
+                          )) : (
+                            <TableRow>
+                              <TableCell colSpan={3}>
+                                <Typography variant="body2" color="text.secondary">
+                                  No restart incidents recorded yet.
+                                </Typography>
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  </Paper>
+
+                  <Paper variant="outlined" sx={{ p: 2 }}>
+                    <Typography variant="subtitle1" gutterBottom>Uptime history</Typography>
+                    <TableContainer>
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow>
+                            <TableCell>Started</TableCell>
+                            <TableCell>Ended</TableCell>
+                            <TableCell>Duration</TableCell>
+                            <TableCell>Result</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {recentRuns.length ? recentRuns.map((run, index) => (
+                            <TableRow key={`${run.run_id || run.started_at}-${index}`}>
+                              <TableCell>{formatTimestamp(run.started_at)}</TableCell>
+                              <TableCell>{formatTimestamp(run.ended_at)}</TableCell>
+                              <TableCell>{formatDuration(run.duration_seconds)}</TableCell>
+                              <TableCell>{run.ended_reason || (run.clean_shutdown ? 'Clean shutdown' : 'Unexpected stop')}</TableCell>
+                            </TableRow>
+                          )) : (
+                            <TableRow>
+                              <TableCell colSpan={4}>
+                                <Typography variant="body2" color="text.secondary">
+                                  No uptime history has been archived yet.
+                                </Typography>
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  </Paper>
+                </Stack>
+              </Grid>
+
+              <Grid item xs={12} lg={7}>
+                <Stack spacing={2}>
+                  <Paper variant="outlined" sx={{ p: 2 }}>
+                    <Typography variant="subtitle1" gutterBottom>Failure detail</Typography>
+                    {incidentDetailLoading ? (
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <CircularProgress size={18} />
+                        <Typography variant="body2" color="text.secondary">Loading incident detail…</Typography>
+                      </Stack>
+                    ) : selectedIncidentDetail?.incident ? (
+                      <Stack spacing={1.5}>
+                        <Typography variant="body2">
+                          <strong>Failed at:</strong> {formatTimestamp(selectedIncidentDetail.incident.failed_at)}
+                        </Typography>
+                        <Typography variant="body2">
+                          <strong>Recovered at:</strong> {formatTimestamp(selectedIncidentDetail.incident.recovered_at)}
+                        </Typography>
+                        <Typography variant="body2">
+                          <strong>Source:</strong> {selectedIncidentDetail.incident.failure_source || 'unknown'}
+                        </Typography>
+                        <Typography variant="body2">
+                          <strong>Summary:</strong> {selectedIncidentDetail.incident.failure_message || selectedIncidentDetail.incident.reason || 'Unclean restart'}
+                        </Typography>
+                        <Box
+                          component="pre"
+                          sx={{
+                            m: 0,
+                            p: 1.5,
+                            borderRadius: 1,
+                            bgcolor: 'grey.100',
+                            whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-word',
+                            maxHeight: 260,
+                            overflow: 'auto',
+                            fontSize: '0.8rem',
+                          }}
+                        >
+                          {selectedIncidentDetail.incident.traceback || 'No traceback was captured before the restart.'}
+                        </Box>
+                      </Stack>
+                    ) : (
+                      <Typography variant="body2" color="text.secondary">
+                        Pick a restart incident to inspect its traceback and nearby logs.
+                      </Typography>
+                    )}
+                  </Paper>
+
+                  <Paper variant="outlined" sx={{ p: 2 }}>
+                    <Typography variant="subtitle1" gutterBottom>Nearby logs</Typography>
+                    <Stack spacing={1.5}>
+                      {selectedIncidentDetail?.related_logs?.length ? selectedIncidentDetail.related_logs.map((entry, index) => (
+                        <Paper key={`${entry.log_file}-${entry.timestamp}-${index}`} variant="outlined" sx={{ p: 1.5 }}>
+                          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} justifyContent="space-between" sx={{ mb: 1 }}>
+                            <Chip size="small" label={entry.log_file} />
+                            <Typography variant="caption" color="text.secondary">{formatTimestamp(entry.timestamp)}</Typography>
+                          </Stack>
+                          <Box
+                            component="pre"
+                            sx={{
+                              m: 0,
+                              whiteSpace: 'pre-wrap',
+                              wordBreak: 'break-word',
+                              maxHeight: 180,
+                              overflow: 'auto',
+                              fontSize: '0.75rem',
+                            }}
+                          >
+                            {entry.text}
+                          </Box>
+                        </Paper>
+                      )) : (
+                        <Typography variant="body2" color="text.secondary">
+                          No related log window has been captured for this incident yet.
+                        </Typography>
+                      )}
+                    </Stack>
+                  </Paper>
+
+                  <Grid container spacing={2}>
+                    <Grid item xs={12} md={6}>
+                      <Paper variant="outlined" sx={{ p: 2, height: '100%' }}>
+                        <Typography variant="subtitle1" gutterBottom>Supervisor restart timeline</Typography>
+                        <Stack spacing={1}>
+                          {supervisorEvents.length ? supervisorEvents.map((event, index) => (
+                            <Box key={`${event.timestamp}-${index}`}>
+                              <Typography variant="body2">{formatTimestamp(event.timestamp)}</Typography>
+                              <Typography variant="caption" color="text.secondary">{event.message}</Typography>
+                            </Box>
+                          )) : (
+                            <Typography variant="body2" color="text.secondary">
+                              No supervisor events found yet.
+                            </Typography>
+                          )}
+                        </Stack>
+                      </Paper>
+                    </Grid>
+                    <Grid item xs={12} md={6}>
+                      <Paper variant="outlined" sx={{ p: 2, height: '100%' }}>
+                        <Typography variant="subtitle1" gutterBottom>Tracked log files</Typography>
+                        <Stack spacing={1}>
+                          {logFiles.map((file) => (
+                            <Box key={file.name}>
+                              <Typography variant="body2">{file.name}</Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                {file.exists ? `${formatBytes(file.size_bytes)} — ${file.path}` : 'Missing'}
+                              </Typography>
+                            </Box>
+                          ))}
+                        </Stack>
+                      </Paper>
+                    </Grid>
+                  </Grid>
+                </Stack>
+              </Grid>
+            </Grid>
           </Stack>
         </Paper>
       </Grid>

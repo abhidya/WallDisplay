@@ -4,6 +4,7 @@ Overlay/Extended Desktop discovery backend implementation.
 
 import asyncio
 import logging
+import subprocess
 import uuid
 import platform
 from typing import List, Dict, Any, Optional
@@ -21,6 +22,7 @@ except ImportError:
 from ..base import DiscoveryBackend, Device, CastingMethod, CastingSession, DeviceCapability
 
 logger = logging.getLogger(__name__)
+DISPLAY_DISCOVERY_TIMEOUT_SECONDS = 3
 
 
 class OverlayDiscoveryBackend(DiscoveryBackend):
@@ -125,17 +127,19 @@ class OverlayDiscoveryBackend(DiscoveryBackend):
         if system == "Darwin":  # macOS
             # Use system_profiler to get display info
             try:
-                import subprocess
                 result = subprocess.run(
                     ["system_profiler", "SPDisplaysDataType", "-json"],
                     capture_output=True,
-                    text=True
+                    text=True,
+                    timeout=DISPLAY_DISCOVERY_TIMEOUT_SECONDS,
                 )
                 if result.returncode == 0:
                     import json
                     data = json.loads(result.stdout)
                     # Parse display data (simplified)
                     logger.debug("Found displays via system_profiler")
+            except subprocess.TimeoutExpired:
+                logger.warning("Timed out while collecting macOS display info")
             except Exception as e:
                 logger.error(f"Failed to get macOS display info: {e}")
                 
@@ -150,15 +154,17 @@ class OverlayDiscoveryBackend(DiscoveryBackend):
         elif system == "Linux":
             # Use xrandr or similar
             try:
-                import subprocess
                 result = subprocess.run(
                     ["xrandr", "--query"],
                     capture_output=True,
-                    text=True
+                    text=True,
+                    timeout=DISPLAY_DISCOVERY_TIMEOUT_SECONDS,
                 )
                 if result.returncode == 0:
                     # Parse xrandr output (simplified)
                     logger.debug("Found displays via xrandr")
+            except subprocess.TimeoutExpired:
+                logger.warning("Timed out while collecting Linux display info")
             except Exception as e:
                 logger.error(f"Failed to get Linux display info: {e}")
                 
