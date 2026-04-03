@@ -42,6 +42,34 @@ def test_service_diagnostics_archives_unclean_previous_run(tmp_path):
     assert runs[0]["clean_shutdown"] is False
 
 
+def test_service_diagnostics_archives_unclean_previous_run_without_failure_details(tmp_path):
+    service = ServiceDiagnosticsService(log_dir=str(tmp_path))
+    previous_started = datetime(2026, 4, 1, 6, 0, tzinfo=timezone.utc)
+    previous_heartbeat = previous_started + timedelta(minutes=12)
+    service._write_json(
+        service.state_path,
+        {
+            "run_id": "old-run",
+            "pid": 123,
+            "started_at": previous_started.isoformat(),
+            "last_heartbeat_at": previous_heartbeat.isoformat(),
+            "clean_shutdown": False,
+            "failure": None,
+        },
+    )
+
+    state = service.start_run()
+    incidents = _read_jsonl(service.incidents_path)
+    runs = _read_jsonl(service.runs_path)
+
+    assert state["run_id"] != "old-run"
+    assert incidents[0]["run_id"] == "old-run"
+    assert incidents[0]["failed_at"] == previous_heartbeat.isoformat()
+    assert incidents[0]["failure_message"] is None
+    assert runs[0]["run_id"] == "old-run"
+    assert runs[0]["clean_shutdown"] is False
+
+
 def test_service_diagnostics_marks_clean_shutdown_and_keeps_uptime_log(tmp_path):
     service = ServiceDiagnosticsService(log_dir=str(tmp_path))
     state = service.start_run()

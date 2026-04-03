@@ -348,8 +348,9 @@ class ServiceDiagnosticsService:
         return result
 
     def _archive_unclean_run(self, state: Dict[str, Any], recovered_at: datetime) -> None:
+        failure = self._get_failure_details(state)
         failed_at = (
-            _parse_iso(state.get("failure", {}).get("captured_at"))
+            _parse_iso(failure.get("captured_at"))
             or _parse_iso(state.get("last_heartbeat_at"))
             or _parse_iso(state.get("started_at"))
             or recovered_at
@@ -364,10 +365,10 @@ class ServiceDiagnosticsService:
             "reason": "unclean_restart",
             "clean_shutdown": False,
             "pid": state.get("pid"),
-            "failure_source": state.get("failure", {}).get("source"),
-            "failure_message": state.get("failure", {}).get("message"),
-            "traceback": state.get("failure", {}).get("traceback"),
-            "captured_at": state.get("failure", {}).get("captured_at"),
+            "failure_source": failure.get("source"),
+            "failure_message": failure.get("message"),
+            "traceback": failure.get("traceback"),
+            "captured_at": failure.get("captured_at"),
             "last_heartbeat_at": state.get("last_heartbeat_at"),
             "shutdown_reason": state.get("shutdown_reason"),
         }
@@ -390,6 +391,11 @@ class ServiceDiagnosticsService:
             incident["failed_at"],
             state.get("last_heartbeat_at"),
         )
+
+    @staticmethod
+    def _get_failure_details(state: Dict[str, Any]) -> Dict[str, Any]:
+        failure = state.get("failure")
+        return failure if isinstance(failure, dict) else {}
 
     def _read_log_entries_in_window(
         self,
