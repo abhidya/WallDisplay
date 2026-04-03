@@ -5,9 +5,9 @@ This is the separate cross-platform rewrite shell for `nano-dlna`, built with Ex
 ## What it covers
 
 - overview of the current backend/web platform shape
-- device discovery and inventory via the existing FastAPI APIs
-- media library shell for indexed videos
-- operations/diagnostics surface for streaming and advanced feature migration
+- device discovery, selection, and control-mode/runtime actions via the existing FastAPI APIs
+- media inventory for videos, photos, directories, lists, and channels
+- operations/diagnostics surface for streaming, renderer, overlay, mapping, and projection workflows
 - backend URL configuration for simulator, emulator, and LAN-device use
 
 ## Backend contract
@@ -21,7 +21,11 @@ Primary API groups:
 - `/api/devices/discover`
 - `/api/videos`
 - `/api/streaming/analytics`
-- future targets: `/api/renderer`, `/api/overlay`, `/api/mappings`, `/api/projection`
+- `/api/renderer`
+- `/api/overlay`
+- `/api/mappings`
+- `/api/projection`
+- `/api/media-library`
 
 ## Local development
 

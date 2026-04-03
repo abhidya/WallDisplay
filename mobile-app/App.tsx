@@ -1,44 +1,26 @@
 import { StatusBar } from 'expo-status-bar';
-import { useMemo, useState } from 'react';
 import { Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 
 import { ScreenLayout } from './src/components/ScreenLayout';
-import { colors } from './src/theme';
+import { useAppShell, tabs } from './src/features/app/useAppShell';
 import { DevicesScreen } from './src/screens/DevicesScreen';
 import { MediaScreen } from './src/screens/MediaScreen';
 import { OperationsScreen } from './src/screens/OperationsScreen';
 import { OverviewScreen } from './src/screens/OverviewScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
-import {
-  DEFAULT_API_BASE_URL,
-  NanoDlnaApiClient,
-  normalizeApiBaseUrl,
-} from './src/services/api';
-
-type TabKey = 'overview' | 'devices' | 'media' | 'operations' | 'settings';
-
-interface TabDefinition {
-  key: TabKey;
-  label: string;
-}
-
-const tabs: TabDefinition[] = [
-  { key: 'overview', label: 'Overview' },
-  { key: 'devices', label: 'Devices' },
-  { key: 'media', label: 'Media' },
-  { key: 'operations', label: 'Ops' },
-  { key: 'settings', label: 'Settings' },
-];
+import { colors } from './src/theme';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<TabKey>('overview');
-  const [apiBaseUrl, setApiBaseUrl] = useState(DEFAULT_API_BASE_URL);
-
-  const client = useMemo(() => new NanoDlnaApiClient(apiBaseUrl), [apiBaseUrl]);
-
-  const handleApplyApiBaseUrl = (value: string) => {
-    setApiBaseUrl(normalizeApiBaseUrl(value));
-  };
+  const {
+    activeTab,
+    apiBaseUrl,
+    client,
+    selectedDeviceId,
+    selectedDeviceLabel,
+    setActiveTab,
+    applyApiBaseUrl,
+    selectDevice,
+  } = useAppShell();
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -49,13 +31,23 @@ export default function App() {
             <Text style={styles.eyebrow}>nano-dlna mobile rewrite</Text>
             <Text style={styles.title}>Cross-platform operator console</Text>
             <Text style={styles.subtitle}>
-              Separate Expo app for iOS and Android, backed by the existing FastAPI
-              media-control APIs.
+              Separate Expo app for iOS and Android, backed by the existing FastAPI media-control
+              APIs.
             </Text>
           </View>
-          <View style={styles.endpointChip}>
-            <Text style={styles.endpointLabel}>API</Text>
-            <Text style={styles.endpointValue}>{apiBaseUrl}</Text>
+          <View style={styles.headerMetaRow}>
+            <View style={styles.endpointChip}>
+              <Text style={styles.endpointLabel}>API</Text>
+              <Text style={styles.endpointValue}>{apiBaseUrl}</Text>
+            </View>
+            {selectedDeviceLabel ? (
+              <View style={styles.selectionChip}>
+                <Text style={styles.selectionChipLabel}>Target</Text>
+                <Text style={styles.selectionChipValue}>
+                  {selectedDeviceLabel} ({String(selectedDeviceId)})
+                </Text>
+              </View>
+            ) : null}
           </View>
         </View>
 
@@ -69,9 +61,7 @@ export default function App() {
                 onPress={() => setActiveTab(tab.key)}
                 style={[styles.tabButton, isActive && styles.activeTabButton]}
               >
-                <Text style={[styles.tabLabel, isActive && styles.activeTabLabel]}>
-                  {tab.label}
-                </Text>
+                <Text style={[styles.tabLabel, isActive && styles.activeTabLabel]}>{tab.label}</Text>
               </Pressable>
             );
           })}
@@ -79,17 +69,25 @@ export default function App() {
 
         {activeTab === 'overview' && (
           <ScreenLayout>
-            <OverviewScreen apiBaseUrl={apiBaseUrl} />
+            <OverviewScreen apiBaseUrl={apiBaseUrl} client={client} />
           </ScreenLayout>
         )}
         {activeTab === 'devices' && (
           <ScreenLayout>
-            <DevicesScreen client={client} />
+            <DevicesScreen
+              client={client}
+              selectedDeviceId={selectedDeviceId}
+              onSelectDevice={selectDevice}
+            />
           </ScreenLayout>
         )}
         {activeTab === 'media' && (
           <ScreenLayout>
-            <MediaScreen client={client} />
+            <MediaScreen
+              client={client}
+              selectedDeviceId={selectedDeviceId}
+              selectedDeviceLabel={selectedDeviceLabel}
+            />
           </ScreenLayout>
         )}
         {activeTab === 'operations' && (
@@ -101,7 +99,8 @@ export default function App() {
           <ScreenLayout>
             <SettingsScreen
               apiBaseUrl={apiBaseUrl}
-              onApplyApiBaseUrl={handleApplyApiBaseUrl}
+              client={client}
+              onApplyApiBaseUrl={applyApiBaseUrl}
             />
           </ScreenLayout>
         )}
@@ -148,6 +147,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
   },
+  headerMetaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
   endpointChip: {
     alignSelf: 'flex-start',
     backgroundColor: colors.background,
@@ -165,6 +169,27 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   endpointValue: {
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  selectionChip: {
+    alignSelf: 'flex-start',
+    backgroundColor: colors.accentMuted,
+    borderWidth: 1,
+    borderColor: colors.accent,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 4,
+  },
+  selectionChipLabel: {
+    color: colors.accent,
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  selectionChipValue: {
     color: colors.text,
     fontSize: 12,
     fontWeight: '600',

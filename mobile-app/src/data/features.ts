@@ -59,8 +59,14 @@ export const mobileModules: FeatureCardData[] = [
   {
     title: 'Operations',
     description:
-      'Renderer, overlay, mapping, projection, and streaming analytics planning surface.',
-    endpoints: ['/api/streaming/analytics', '/api/overlay', '/api/renderer'],
+      'Renderer, overlay, mapping, projection, and streaming diagnostics operator console.',
+    endpoints: [
+      '/api/streaming/analytics',
+      '/api/overlay',
+      '/api/renderer',
+      '/api/mappings',
+      '/api/projection',
+    ],
   },
 ];
 
