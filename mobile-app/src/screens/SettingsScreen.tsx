@@ -46,10 +46,11 @@ export function SettingsScreen({
         <TextInput
           autoCapitalize="none"
           autoCorrect={false}
-          defaultValue={apiBaseUrl}
+          keyboardType="url"
           onChangeText={setDraftValue}
           placeholder="http://127.0.0.1:8000/api"
           placeholderTextColor={colors.mutedText}
+          returnKeyType="done"
           style={styles.input}
           value={draftValue}
         />

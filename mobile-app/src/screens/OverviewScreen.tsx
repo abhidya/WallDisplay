@@ -5,6 +5,7 @@ import {
   mobileModules,
   mobileRewritePrinciples,
 } from '../data/features';
+import { ActionButton } from '../components/ActionButton';
 import { Panel } from '../components/Panel';
 import { useOverviewController } from '../features/overview/useOverviewController';
 import { NanoDlnaApiClient } from '../services/api';
@@ -73,9 +74,12 @@ export function OverviewScreen({ apiBaseUrl, client }: OverviewScreenProps) {
           <Text style={styles.body}>
             Bandwidth Mbps: {formatValue(streaming?.total_bandwidth_mbps, 'n/a')}
           </Text>
-          <Text style={styles.refreshText} onPress={() => void load()}>
-            {loading ? 'Refreshing…' : 'Refresh'}
-          </Text>
+          <ActionButton
+            label={loading ? 'Refreshing…' : 'Refresh'}
+            onPress={() => void load()}
+            disabled={loading}
+            variant="secondary"
+          />
         </View>
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
       </Panel>
@@ -139,11 +143,6 @@ const styles = StyleSheet.create({
     color: colors.accent,
     fontSize: 13,
     fontWeight: '600',
-  },
-  refreshText: {
-    color: colors.accent,
-    fontSize: 13,
-    fontWeight: '700',
   },
   metricGrid: {
     flexDirection: 'row',
