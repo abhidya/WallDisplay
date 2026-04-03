@@ -14,7 +14,17 @@ import {
 } from '../../control-plane/localState.ts';
 import { normalizeApiBaseUrl } from '../../services/api.ts';
 
-export type TabKey = 'overview' | 'devices' | 'media' | 'operations' | 'settings';
+export type TabKey =
+  | 'overview'
+  | 'devices'
+  | 'media'
+  | 'operations'
+  | 'lighting'
+  | 'depth'
+  | 'projection'
+  | 'overlay'
+  | 'logs'
+  | 'settings';
 
 export interface TabDefinition {
   key: TabKey;
@@ -40,6 +50,11 @@ export const tabs: TabDefinition[] = [
   { key: 'devices', label: 'Devices' },
   { key: 'media', label: 'Media' },
   { key: 'operations', label: 'Ops' },
+  { key: 'lighting', label: 'Lighting' },
+  { key: 'depth', label: 'Depth' },
+  { key: 'projection', label: 'Projection' },
+  { key: 'overlay', label: 'Overlay' },
+  { key: 'logs', label: 'Logs' },
   { key: 'settings', label: 'Settings' },
 ];
 

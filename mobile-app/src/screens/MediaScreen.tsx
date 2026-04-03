@@ -80,17 +80,32 @@ export function MediaScreen({
     actionMessage,
     advanceChannel,
     channels,
+    createMediaChannel,
+    createMediaList,
+    createPhotoList,
+    createDirectory,
+    createPhoto,
+    createVideo,
+    deleteMediaChannel,
+    deleteDirectory,
+    deleteMediaList,
+    deletePhoto,
+    deletePhotoList,
+    deleteVideo,
     directories,
     error,
     lists,
     load,
     loading,
     photos,
+    photoLists,
     playVideo,
     playingVideoId,
     scanDirectory,
+    uploadPhoto,
+    uploadVideo,
     videos,
-  } = useMediaController(client, { selectedDeviceId });
+  } = useMediaController(client, { apiBaseUrl: client.apiBaseUrl, selectedDeviceId });
 
   const metricCards = useMemo(
     () => [
@@ -119,6 +134,22 @@ export function MediaScreen({
             onPress={() => void load()}
             disabled={loading}
           />
+          {appMode === 'remote' ? (
+            <>
+              <ActionButton
+                label="Upload video"
+                onPress={() => void uploadVideo()}
+                disabled={loading}
+                variant="secondary"
+              />
+              <ActionButton
+                label="Upload photo"
+                onPress={() => void uploadPhoto()}
+                disabled={loading}
+                variant="secondary"
+              />
+            </>
+          ) : null}
         </View>
         <View style={styles.metricGrid}>
           {metricCards.map((metric) => (
@@ -159,15 +190,25 @@ export function MediaScreen({
             <View key={cardKey} style={styles.itemCard}>
               <View style={styles.itemHeader}>
                 <Text style={styles.itemTitle}>{describeVideo(video)}</Text>
-                <ActionButton
-                  label={playLoading ? 'Starting...' : 'Play on target'}
-                  onPress={() => {
-                    if (videoId !== null && videoId !== undefined) {
-                      void playVideo(videoId);
-                    }
-                  }}
-                  disabled={playDisabled || playLoading}
-                />
+                <View style={styles.inlineActions}>
+                  <ActionButton
+                    label={playLoading ? 'Starting...' : 'Play on target'}
+                    onPress={() => {
+                      if (videoId !== null && videoId !== undefined) {
+                        void playVideo(videoId);
+                      }
+                    }}
+                    disabled={playDisabled || playLoading}
+                  />
+                  {appMode === 'remote' && videoId !== null && videoId !== undefined ? (
+                    <ActionButton
+                      label="Delete"
+                      onPress={() => void deleteVideo(videoId)}
+                      disabled={actionLoadingKey === `delete-video-${String(videoId)}`}
+                      variant="secondary"
+                    />
+                  ) : null}
+                </View>
               </View>
               {video.duration ? (
                 <Text style={styles.detailText}>Duration: {String(video.duration)}</Text>
@@ -183,6 +224,21 @@ export function MediaScreen({
             </View>
           );
         })}
+        {appMode === 'remote' ? (
+          <View style={styles.actionsWrap}>
+            <ActionButton
+              label="Create quick video"
+              onPress={() =>
+                void createVideo({
+                  name: `Mobile video ${videos.length + 1}`,
+                  path: `/tmp/mobile-video-${videos.length + 1}.mp4`,
+                })
+              }
+              disabled={loading}
+              variant="secondary"
+            />
+          </View>
+        ) : null}
       </Panel>
 
       <Panel
@@ -199,12 +255,43 @@ export function MediaScreen({
         ) : null}
         {photos.slice(0, 6).map((photo) => (
           <View key={String(photo.id ?? describePhoto(photo))} style={styles.itemCard}>
-            <Text style={styles.itemTitle}>{describePhoto(photo)}</Text>
+            <View style={styles.itemHeader}>
+              <Text style={styles.itemTitle}>{describePhoto(photo)}</Text>
+              {appMode === 'remote' && photo.id !== null && photo.id !== undefined ? (
+                <ActionButton
+                  label="Delete"
+                  onPress={() => {
+                    const photoId = photo.id;
+                    if (photoId !== null && photoId !== undefined) {
+                      void deletePhoto(photoId);
+                    }
+                  }}
+                  disabled={actionLoadingKey === `delete-photo-${String(photo.id)}`}
+                  variant="secondary"
+                />
+              ) : null}
+            </View>
             <Text style={styles.detailText}>Category: {formatValue(photo.category)}</Text>
             <Text style={styles.detailText}>Resolution: {formatValue(photo.resolution)}</Text>
             <Text style={styles.detailText}>Format: {formatValue(photo.format)}</Text>
           </View>
         ))}
+        {appMode === 'remote' ? (
+          <View style={styles.actionsWrap}>
+            <ActionButton
+              label="Create quick photo"
+              onPress={() =>
+                void createPhoto({
+                  name: `Mobile photo ${photos.length + 1}`,
+                  path: `/tmp/mobile-photo-${photos.length + 1}.png`,
+                  category: 'background',
+                })
+              }
+              disabled={loading}
+              variant="secondary"
+            />
+          </View>
+        ) : null}
 
         <Text style={styles.sectionTitle}>Media directories</Text>
         {directories.length === 0 && !loading ? (
@@ -232,12 +319,41 @@ export function MediaScreen({
                 }
                 variant="secondary"
               />
+              {appMode === 'remote' && directory.id !== null && directory.id !== undefined ? (
+                <ActionButton
+                  label="Delete"
+                  onPress={() => {
+                    const directoryId = directory.id;
+                    if (directoryId !== null && directoryId !== undefined) {
+                      void deleteDirectory(directoryId);
+                    }
+                  }}
+                  disabled={actionLoadingKey === `delete-directory-${String(directory.id)}`}
+                  variant="secondary"
+                />
+              ) : null}
             </View>
             <Text style={styles.detailText}>Category: {formatValue(directory.category)}</Text>
             <Text style={styles.detailText}>Enabled: {formatValue(directory.enabled)}</Text>
             <Text style={styles.detailText}>Scan mode: {formatValue(directory.scan_mode)}</Text>
           </View>
         ))}
+        {appMode === 'remote' ? (
+          <View style={styles.actionsWrap}>
+            <ActionButton
+              label="Create quick directory"
+              onPress={() =>
+                void createDirectory({
+                  name: `Mobile dir ${directories.length + 1}`,
+                  path: `/tmp/mobile-media-${directories.length + 1}`,
+                  category: 'background',
+                })
+              }
+              disabled={loading}
+              variant="secondary"
+            />
+          </View>
+        ) : null}
 
         <Text style={styles.sectionTitle}>Media lists</Text>
         {lists.length === 0 && !loading ? (
@@ -245,13 +361,50 @@ export function MediaScreen({
         ) : null}
         {lists.slice(0, 6).map((list) => (
           <View key={String(list.id ?? describeList(list))} style={styles.itemCard}>
-            <Text style={styles.itemTitle}>{describeList(list)}</Text>
+            <View style={styles.itemHeader}>
+              <Text style={styles.itemTitle}>{describeList(list)}</Text>
+              {appMode === 'remote' && list.id !== null && list.id !== undefined ? (
+                <ActionButton
+                  label="Delete"
+                  onPress={() => {
+                    const listId = list.id;
+                    if (listId !== null && listId !== undefined) {
+                      void deleteMediaList(listId);
+                    }
+                  }}
+                  disabled={actionLoadingKey === `delete-media-list-${String(list.id)}`}
+                  variant="secondary"
+                />
+              ) : null}
+            </View>
             <Text style={styles.detailText}>Category: {formatValue(list.category)}</Text>
             <Text style={styles.detailText}>
               Playback mode: {formatValue(list.playback_mode)}
             </Text>
           </View>
         ))}
+        {appMode === 'remote' ? (
+          <View style={styles.actionsWrap}>
+            <ActionButton
+              label="Create quick media list"
+              onPress={() =>
+                void createMediaList({
+                  name: `Mobile list ${lists.length + 1}`,
+                  category: 'background',
+                  video_ids: videos
+                    .slice(0, 3)
+                    .map((video) => video.id)
+                    .filter((value) => value !== null && value !== undefined),
+                  playback_mode: 'sequence',
+                  shuffle: false,
+                  loop: true,
+                })
+              }
+              disabled={loading}
+              variant="secondary"
+            />
+          </View>
+        ) : null}
 
         <Text style={styles.sectionTitle}>Media channels</Text>
         {channels.length === 0 && !loading ? (
@@ -261,24 +414,39 @@ export function MediaScreen({
           <View key={String(channel.id ?? describeChannel(channel))} style={styles.itemCard}>
             <View style={styles.itemHeader}>
               <Text style={styles.itemTitle}>{describeChannel(channel)}</Text>
-              <ActionButton
-                label={
-                  actionLoadingKey === `advance-channel-${String(channel.id)}`
-                    ? 'Advancing...'
-                    : 'Advance'
-                }
-                onPress={() => {
-                  if (channel.id !== null && channel.id !== undefined) {
-                    void advanceChannel(channel.id);
+              <View style={styles.inlineActions}>
+                <ActionButton
+                  label={
+                    actionLoadingKey === `advance-channel-${String(channel.id)}`
+                      ? 'Advancing...'
+                      : 'Advance'
                   }
-                }}
-                disabled={
-                  channel.id === null ||
-                  channel.id === undefined ||
-                  actionLoadingKey === `advance-channel-${String(channel.id)}`
-                }
-                variant="secondary"
-              />
+                  onPress={() => {
+                    if (channel.id !== null && channel.id !== undefined) {
+                      void advanceChannel(channel.id);
+                    }
+                  }}
+                  disabled={
+                    channel.id === null ||
+                    channel.id === undefined ||
+                    actionLoadingKey === `advance-channel-${String(channel.id)}`
+                  }
+                  variant="secondary"
+                />
+                {appMode === 'remote' && channel.id !== null && channel.id !== undefined ? (
+                  <ActionButton
+                    label="Delete"
+                    onPress={() => {
+                      const channelId = channel.id;
+                      if (channelId !== null && channelId !== undefined) {
+                        void deleteMediaChannel(channelId);
+                      }
+                    }}
+                    disabled={actionLoadingKey === `delete-media-channel-${String(channel.id)}`}
+                    variant="secondary"
+                  />
+                ) : null}
+              </View>
             </View>
             <Text style={styles.detailText}>
               List ID: {formatValue(channel.media_list_id)}
@@ -291,6 +459,70 @@ export function MediaScreen({
             </Text>
           </View>
         ))}
+        {appMode === 'remote' ? (
+          <View style={styles.actionsWrap}>
+            <ActionButton
+              label="Create quick channel"
+              onPress={() =>
+                void createMediaChannel({
+                  name: `Mobile channel ${channels.length + 1}`,
+                  media_list_id: lists[0]?.id ?? '',
+                  current_index: 0,
+                })
+              }
+              disabled={loading || lists.length === 0}
+              variant="secondary"
+            />
+          </View>
+        ) : null}
+
+        <Text style={styles.sectionTitle}>Photo lists</Text>
+        {photoLists.length === 0 && !loading ? (
+          <Text style={styles.emptyText}>No photo lists configured.</Text>
+        ) : null}
+        {photoLists.slice(0, 6).map((list) => (
+          <View key={String(list.id ?? 'photo-list')} style={styles.itemCard}>
+            <View style={styles.itemHeader}>
+              <Text style={styles.itemTitle}>{formatValue(list.name, 'Photo list')}</Text>
+              {appMode === 'remote' && list.id !== null && list.id !== undefined ? (
+                <ActionButton
+                  label="Delete"
+                  onPress={() => void deletePhotoList(String(list.id))}
+                  disabled={actionLoadingKey === `delete-photo-list-${String(list.id)}`}
+                  variant="secondary"
+                />
+              ) : null}
+            </View>
+            <Text style={styles.detailText}>
+              Photos: {Array.isArray(list.photo_ids) ? list.photo_ids.length : 0}
+            </Text>
+            <Text style={styles.detailText}>
+              Playback mode: {formatValue(list.playback_mode)}
+            </Text>
+          </View>
+        ))}
+        {appMode === 'remote' ? (
+          <View style={styles.actionsWrap}>
+            <ActionButton
+              label="Create quick photo list"
+              onPress={() =>
+                void createPhotoList({
+                  name: `Mobile photo list ${photoLists.length + 1}`,
+                  category: 'background',
+                  photo_ids: photos
+                    .slice(0, 3)
+                    .map((photo) => photo.id)
+                    .filter((value) => value !== null && value !== undefined),
+                  playback_mode: 'sequence',
+                  shuffle: false,
+                  loop: true,
+                })
+              }
+              disabled={loading}
+              variant="secondary"
+            />
+          </View>
+        ) : null}
       </Panel>
     </>
   );
@@ -362,6 +594,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     gap: 12,
+  },
+  inlineActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
   },
   itemTitle: {
     flex: 1,

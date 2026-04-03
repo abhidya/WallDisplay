@@ -9,6 +9,7 @@ import { colors } from '../theme';
 import type {
   MappingSceneSummary,
   OverlayConfigSummary,
+  OverlayCastSessionSummary,
   ProjectionConfigSummary,
   RendererProjectorSummary,
   RendererSceneSummary,
@@ -61,6 +62,10 @@ function describeOverlayConfig(config: OverlayConfigSummary): string {
   );
 }
 
+function describeOverlayCastSession(session: OverlayCastSessionSummary): string {
+  return session.session_id || session.device_id || 'Overlay cast session';
+}
+
 function describeMappingScene(scene: MappingSceneSummary): string {
   return (
     (typeof scene.name === 'string' && scene.name) ||
@@ -95,6 +100,7 @@ export function OperationsScreen({ appMode, client }: OperationsScreenProps) {
     actionMessage,
     actionHistory,
     analytics,
+    streamingHealth,
     capabilities,
     deferredFeatures,
     error,
@@ -103,6 +109,7 @@ export function OperationsScreen({ appMode, client }: OperationsScreenProps) {
     launchSelectedProjection,
     mappingScenes,
     overlayConfigs,
+    overlayCastSessions,
     overlayStatus,
     projectors,
     projectionConfigs,
@@ -110,6 +117,7 @@ export function OperationsScreen({ appMode, client }: OperationsScreenProps) {
     rendererScenes,
     renderers,
     runOverlaySync,
+    runOverlayCastStop,
     runRendererPause,
     runRendererResume,
     runRendererStartDefault,
@@ -135,6 +143,8 @@ export function OperationsScreen({ appMode, client }: OperationsScreenProps) {
       label: 'Active sessions',
       value: analytics?.active_sessions ?? analytics?.session_count ?? 0,
     },
+    { label: 'Health', value: streamingHealth?.status ?? 'unknown' },
+    { label: 'Stalled', value: streamingHealth?.stalled_sessions ?? 0 },
     { label: 'Overlay sessions', value: analytics?.overlay_sessions ?? 0 },
     { label: 'Bandwidth Mbps', value: analytics?.total_bandwidth_mbps ?? 'n/a' },
     { label: 'Projectors', value: projectors.length },
@@ -240,10 +250,10 @@ export function OperationsScreen({ appMode, client }: OperationsScreenProps) {
 
   return (
     <>
-      <Panel
-        title="Operations and diagnostics"
-        subtitle="The mobile rewrite now acts as an operator console for runtime visibility plus high-value renderer, overlay, mapping, and projection actions."
-      >
+        <Panel
+          title="Operations and diagnostics"
+          subtitle="The mobile rewrite now acts as an operator console for runtime visibility plus high-value renderer, overlay, mapping, and projection actions."
+        >
         <View style={styles.actionsWrap}>
           <ActionButton
             label={loading ? 'Refreshing...' : 'Refresh operations'}
@@ -267,6 +277,75 @@ export function OperationsScreen({ appMode, client }: OperationsScreenProps) {
         </View>
         {actionMessage ? <Text style={styles.successText}>{actionMessage}</Text> : null}
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
+      </Panel>
+
+      <Panel
+        title="Streaming health"
+        subtitle="Remote mode now surfaces the backend streaming health summary and active overlay cast sessions from the legacy diagnostics pages."
+      >
+        <View style={styles.metricGrid}>
+          <View style={styles.metricCard}>
+            <Text style={styles.metricValue}>
+              {String(Math.round(streamingHealth?.health_score ?? 0))}
+            </Text>
+            <Text style={styles.metricLabel}>Health score</Text>
+          </View>
+          <View style={styles.metricCard}>
+            <Text style={styles.metricValue}>
+              {String(streamingHealth?.error_sessions ?? 0)}
+            </Text>
+            <Text style={styles.metricLabel}>Error sessions</Text>
+          </View>
+          <View style={styles.metricCard}>
+            <Text style={styles.metricValue}>
+              {String(overlayCastSessions.length)}
+            </Text>
+            <Text style={styles.metricLabel}>Overlay cast sessions</Text>
+          </View>
+        </View>
+
+        {overlayCastSessions.length === 0 ? (
+          <Text style={styles.emptyText}>No overlay cast sessions are currently active.</Text>
+        ) : null}
+
+        {overlayCastSessions.map((session) => (
+          <View key={String(session.session_id ?? describeOverlayCastSession(session))} style={styles.itemCard}>
+            <View style={styles.itemHeader}>
+              <Text style={styles.itemTitle}>{describeOverlayCastSession(session)}</Text>
+              {session.session_id ? (
+                <ActionButton
+                  label={
+                    actionLoadingKey === `stop-overlay-cast-${session.session_id}`
+                      ? 'Stopping...'
+                      : 'Stop cast'
+                  }
+                  onPress={() => void runOverlayCastStop(session.session_id!)}
+                  disabled={actionsBusy}
+                  variant="secondary"
+                />
+              ) : null}
+            </View>
+            <Text style={styles.detailText}>
+              Status: {formatValue(session.status)} • Step: {formatValue(session.current_step)}
+            </Text>
+            <Text style={styles.detailText}>
+              Clients: {formatValue(session.active_clients, '0')} • Speed:{' '}
+              {formatValue(
+                session.ffmpeg_speed !== null && session.ffmpeg_speed !== undefined
+                  ? `${session.ffmpeg_speed.toFixed(2)}x`
+                  : null,
+              )}
+            </Text>
+            <Text style={styles.detailText}>
+              FPS: {formatValue(session.ffmpeg_fps)} • Bitrate:{' '}
+              {formatValue(
+                session.ffmpeg_bitrate_kbps !== null && session.ffmpeg_bitrate_kbps !== undefined
+                  ? `${Math.round(session.ffmpeg_bitrate_kbps)} kbps`
+                  : null,
+              )}
+            </Text>
+          </View>
+        ))}
       </Panel>
 
       <Panel
@@ -649,6 +728,13 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderTopWidth: 1,
     borderTopColor: colors.border,
+  },
+  itemHeader: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 10,
   },
   cardActions: {
     flexDirection: 'row',

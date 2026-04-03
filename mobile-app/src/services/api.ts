@@ -1,3 +1,11 @@
+import {
+  createHttpClient,
+  DEFAULT_HTTP_BASE_URL,
+  normalizeApiBaseUrl,
+  type HttpClient,
+  type HttpRequestOptions,
+  type QueryRecord,
+} from './httpClient.ts';
 import type {
   DiscoveryBackendSummary,
   DiscoveryCapabilities,
@@ -14,6 +22,7 @@ import type {
   MediaDirectorySummary,
   MediaListSummary,
   OverlayConfigSummary,
+  OverlayCastSessionSummary,
   OverlayStatusResponse,
   OverlaySyncResponse,
   PhotoSummary,
@@ -26,52 +35,25 @@ import type {
   SceneControlPresetSummary,
   SceneRankSummary,
   StreamingAnalytics,
+  StreamingHealthResponse,
   StreamingSessionSummary,
   VideoSummary,
-} from '../types/api';
+} from '../types/api.ts';
 
-const rawDefaultBaseUrl =
-  process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:8000/api';
+export { normalizeApiBaseUrl } from './httpClient.ts';
 
-export const DEFAULT_API_BASE_URL = normalizeApiBaseUrl(rawDefaultBaseUrl);
+export const DEFAULT_API_BASE_URL = DEFAULT_HTTP_BASE_URL;
 
-function ensureApiSuffix(pathname: string): string {
-  const trimmed = pathname.replace(/\/+$/, '');
-  if (trimmed.endsWith('/api')) {
-    return trimmed;
-  }
-  return `${trimmed}/api`;
-}
+type UploadRequestOptions = Omit<HttpRequestOptions, 'body' | 'parseAs' | 'query'>;
 
-export function normalizeApiBaseUrl(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return DEFAULT_API_BASE_URL;
-  }
-
-  if (/^https?:\/\//i.test(trimmed)) {
-    const url = new URL(trimmed);
-    url.pathname = ensureApiSuffix(url.pathname || '');
-    url.search = '';
-    url.hash = '';
-    return url.toString().replace(/\/+$/, '');
-  }
-
-  if (trimmed.startsWith('/')) {
-    return ensureApiSuffix(trimmed);
-  }
-
-  return normalizeApiBaseUrl(`http://${trimmed}`);
-}
-
-async function parseJson<T>(response: Response): Promise<T> {
-  const text = await response.text();
-  if (!text.trim()) {
-    return {} as T;
-  }
-
-  return JSON.parse(text) as T;
-}
+const defaultSettings = {
+  autoDiscoverDevices: true,
+  defaultVideoDirectory: '/tmp/nanodlna/uploads',
+  enableLogging: true,
+  logLevel: 'info',
+  serverPort: 8000,
+  enableSubtitles: true,
+};
 
 function asArray<T>(value: unknown): T[] {
   if (Array.isArray(value)) {
@@ -117,62 +99,58 @@ function extractArray<T>(payload: unknown, keys: string[] = []): T[] {
   return [];
 }
 
-function appendQuery(
-  path: string,
-  query: Record<string, string | number | boolean | null | undefined>,
-): string {
-  const entries = Object.entries(query).filter(([, value]) => value !== undefined && value !== null);
-  if (entries.length === 0) {
-    return path;
+function normalizeVideoId(value: number | string): number | string {
+  if (typeof value === 'number') {
+    return value;
   }
 
-  const search = entries
-    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`)
-    .join('&');
-  return `${path}?${search}`;
+  const trimmed = value.trim();
+  return /^\d+$/.test(trimmed) ? Number(trimmed) : value;
+}
+
+function requestUpload<T>(
+  client: HttpClient,
+  path: string,
+  formData: FormData,
+  options: UploadRequestOptions = {},
+): Promise<T> {
+  return client.post<T>(path, {
+    ...options,
+    body: formData,
+  });
 }
 
 export class NanoDlnaApiClient {
   readonly apiBaseUrl: string;
   readonly rootBaseUrl: string;
+  private readonly apiHttp: HttpClient;
+  private readonly rootHttp: HttpClient;
 
   constructor(apiBaseUrl: string) {
     this.apiBaseUrl = normalizeApiBaseUrl(apiBaseUrl);
     this.rootBaseUrl = this.apiBaseUrl.replace(/\/api$/, '');
+    this.apiHttp = createHttpClient({ baseURL: this.apiBaseUrl, normalizeApiBase: false });
+    this.rootHttp = createHttpClient({ baseURL: this.rootBaseUrl, normalizeApiBase: false });
   }
 
-  private async requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-    const response = await fetch(`${this.apiBaseUrl}${path}`, {
-      headers: {
-        Accept: 'application/json',
-        ...(init?.headers ?? {}),
-      },
-      ...init,
-    });
+  buildApiUrl(path: string, query?: QueryRecord): string {
+    return this.apiHttp.buildUrl(path, query);
+  }
 
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(
-        `${response.status} ${response.statusText}${body ? ` - ${body}` : ''}`.trim(),
-      );
-    }
+  buildRootUrl(path: string, query?: QueryRecord): string {
+    return this.rootHttp.buildUrl(path, query);
+  }
 
-    return parseJson<T>(response);
+  private requestJson<T>(path: string, options: HttpRequestOptions = {}): Promise<T> {
+    return this.apiHttp.request<T>(path, options);
+  }
+
+  private requestRootJson<T>(path: string, options: HttpRequestOptions = {}): Promise<T> {
+    return this.rootHttp.request<T>(path, options);
   }
 
   async getHealth(): Promise<HealthResponse> {
-    const response = await fetch(`${this.rootBaseUrl}/health`, {
-      headers: { Accept: 'application/json' },
-    });
-
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(
-        `${response.status} ${response.statusText}${body ? ` - ${body}` : ''}`.trim(),
-      );
-    }
-
-    return parseJson<HealthResponse>(response);
+    return this.requestRootJson<HealthResponse>('/health');
   }
 
   async listDevices(): Promise<DeviceSummary[]> {
@@ -240,8 +218,11 @@ export class NanoDlnaApiClient {
   }
 
   async discoverDevices(timeoutSeconds = 5): Promise<JsonRecord> {
-    return this.requestJson<JsonRecord>(`/devices/discover?timeout=${timeoutSeconds}`, {
+    return this.requestJson<JsonRecord>('/devices/discover', {
       method: 'POST',
+      query: {
+        timeout: timeoutSeconds,
+      },
     });
   }
 
@@ -259,12 +240,12 @@ export class NanoDlnaApiClient {
     deviceId: number | string,
     options?: { reason?: string; expiresIn?: number },
   ): Promise<DeviceActionResponse> {
-    const path = appendQuery(`/devices/${deviceId}/control/manual`, {
-      reason: options?.reason ?? 'mobile_manual',
-      expires_in: options?.expiresIn,
-    });
-    return this.requestJson<DeviceActionResponse>(path, {
+    return this.requestJson<DeviceActionResponse>(`/devices/${deviceId}/control/manual`, {
       method: 'POST',
+      query: {
+        reason: options?.reason ?? 'mobile_manual',
+        expires_in: options?.expiresIn,
+      },
     });
   }
 
@@ -285,18 +266,15 @@ export class NanoDlnaApiClient {
     videoId: number | string,
     options?: { loop?: boolean; syncOverlays?: boolean },
   ): Promise<DeviceActionResponse> {
-    const path = appendQuery(`/devices/${deviceId}/play`, {
-      sync_overlays: options?.syncOverlays ?? false,
-    });
-    return this.requestJson<DeviceActionResponse>(path, {
+    return this.requestJson<DeviceActionResponse>(`/devices/${deviceId}/play`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
+      query: {
+        sync_overlays: options?.syncOverlays ?? false,
       },
-      body: JSON.stringify({
-        video_id: Number(videoId),
+      body: {
+        video_id: normalizeVideoId(videoId),
         loop: options?.loop ?? false,
-      }),
+      },
     });
   }
 
@@ -305,11 +283,8 @@ export class NanoDlnaApiClient {
     if (Array.isArray(payload)) {
       return payload as VideoSummary[];
     }
-    if (payload && typeof payload === 'object') {
-      const record = payload as JsonRecord;
-      return asArray<VideoSummary>(record.videos);
-    }
-    return [];
+    const record = asRecord(payload);
+    return record ? asArray<VideoSummary>(record.videos) : [];
   }
 
   async listPhotos(): Promise<PhotoSummary[]> {
@@ -357,6 +332,10 @@ export class NanoDlnaApiClient {
     return asArray<StreamingSessionSummary>(payload);
   }
 
+  async getStreamingHealth(): Promise<StreamingHealthResponse> {
+    return this.requestJson<StreamingHealthResponse>('/streaming/health');
+  }
+
   async completeStreamingSession(sessionId: string): Promise<JsonRecord> {
     return this.requestJson<JsonRecord>(`/streaming/sessions/${sessionId}/complete`, {
       method: 'POST',
@@ -400,34 +379,45 @@ export class NanoDlnaApiClient {
     return asArray<OverlayConfigSummary>(payload);
   }
 
+  async listOverlayCastSessions(): Promise<OverlayCastSessionSummary[]> {
+    const payload = await this.requestJson<unknown>('/overlay/cast/sessions');
+    return asArray<OverlayCastSessionSummary>(payload);
+  }
+
+  async stopOverlayCastSession(sessionId: string): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/overlay/cast/sessions/${sessionId}`, {
+      method: 'DELETE',
+    });
+  }
+
   async listRendererScenes(): Promise<RendererSceneSummary[]> {
     const payload = await this.requestJson<unknown>('/renderer/scenes');
     return extractArray<RendererSceneSummary>(payload, ['scenes']);
   }
 
-  async startRenderer(
-    projector: string,
-    scene: string,
-  ): Promise<RendererActionResponse> {
+  async getRendererStatus(projectorId: string): Promise<JsonRecord> {
+    const payload = await this.requestJson<unknown>(`/renderer/status/${projectorId}`);
+    const record = asRecord(payload);
+    return asRecord(record?.data) ?? record ?? {};
+  }
+
+  async startRenderer(projector: string, scene: string): Promise<RendererActionResponse> {
     return this.requestJson<RendererActionResponse>('/renderer/start', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
+      body: {
         projector,
         scene,
-      }),
+      },
     });
   }
 
   async startProjector(projectorId: string): Promise<RendererActionResponse> {
-    return this.requestJson<RendererActionResponse>(
-      appendQuery('/renderer/start_projector', { projector_id: projectorId }),
-      {
-        method: 'POST',
+    return this.requestJson<RendererActionResponse>('/renderer/start_projector', {
+      method: 'POST',
+      query: {
+        projector_id: projectorId,
       },
-    );
+    });
   }
 
   async pauseRenderer(projectorId: string): Promise<RendererActionResponse> {
@@ -445,12 +435,9 @@ export class NanoDlnaApiClient {
   async stopRenderer(projectorId: string): Promise<RendererActionResponse> {
     return this.requestJson<RendererActionResponse>('/renderer/stop', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
+      body: {
         projector: projectorId,
-      }),
+      },
     });
   }
 
@@ -458,18 +445,31 @@ export class NanoDlnaApiClient {
     return this.requestJson<OverlayStatusResponse>('/overlay/status');
   }
 
+  async discoverAirPlayDevices(): Promise<JsonRecord> {
+    const payload = await this.requestJson<unknown>('/renderer/airplay/discover');
+    return (asRecord(payload)?.data as JsonRecord) ?? asRecord(payload) ?? {};
+  }
+
+  async listAirPlayDevices(): Promise<JsonRecord> {
+    const payload = await this.requestJson<unknown>('/renderer/airplay/list');
+    return (asRecord(payload)?.data as JsonRecord) ?? asRecord(payload) ?? {};
+  }
+
+  async getAllAirPlayDevices(): Promise<JsonRecord> {
+    const payload = await this.requestJson<unknown>('/renderer/airplay/devices');
+    return (asRecord(payload)?.data as JsonRecord) ?? asRecord(payload) ?? {};
+  }
+
   async triggerOverlaySync(
     options?: { triggeredBy?: string; videoName?: string },
   ): Promise<OverlaySyncResponse> {
-    return this.requestJson<OverlaySyncResponse>(
-      appendQuery('/overlay/sync', {
+    return this.requestJson<OverlaySyncResponse>('/overlay/sync', {
+      method: 'POST',
+      query: {
         triggered_by: options?.triggeredBy ?? 'mobile_app',
         video_name: options?.videoName,
-      }),
-      {
-        method: 'POST',
       },
-    );
+    });
   }
 
   async listMappingScenes(): Promise<MappingSceneSummary[]> {
@@ -492,9 +492,7 @@ export class NanoDlnaApiClient {
     return asArray<ProjectionConfigSummary>(payload);
   }
 
-  async launchProjectionConfig(
-    configId: number | string,
-  ): Promise<ProjectionSessionSummary> {
+  async launchProjectionConfig(configId: number | string): Promise<ProjectionSessionSummary> {
     return this.requestJson<ProjectionSessionSummary>(`/projection/configs/${configId}/launch`, {
       method: 'POST',
     });
@@ -504,3 +502,377 @@ export class NanoDlnaApiClient {
     return this.requestJson<ProjectionSessionSummary>(`/projection/sessions/${sessionId}`);
   }
 }
+
+export function createServiceModules(apiBaseUrl: string = DEFAULT_API_BASE_URL) {
+  const client = new NanoDlnaApiClient(apiBaseUrl);
+  const api = createHttpClient({ baseURL: client.apiBaseUrl, normalizeApiBase: false });
+
+  const buildApiUrl = (path: string, query?: QueryRecord) => client.buildApiUrl(path, query);
+
+  const deviceApi = {
+    getDevices: async (params: QueryRecord = {}) => {
+      if (Object.keys(params).length === 0) {
+        return client.listDevices();
+      }
+      return api.get<unknown>('/devices/', { query: params });
+    },
+    getDevice: (id: number | string) => client.getDevice(id),
+    createDevice: (data: JsonRecord) => api.post<JsonRecord>('/devices/', { body: data }),
+    updateDevice: (id: number | string, data: JsonRecord) => api.put<JsonRecord>(`/devices/${id}`, { body: data }),
+    deleteDevice: (id: number | string) => api.delete<JsonRecord>(`/devices/${id}`),
+    discoverDevices: () => api.get<JsonRecord>('/devices/discover'),
+    playVideo: (
+      deviceId: number | string,
+      videoId: number | string,
+      loop = false,
+      syncOverlays = false,
+    ) => client.playVideoOnDevice(deviceId, videoId, { loop, syncOverlays }),
+    stopVideo: (deviceId: number | string) => client.stopDevicePlayback(deviceId),
+    pauseVideo: (deviceId: number | string) => client.pauseDevicePlayback(deviceId),
+    seekVideo: (deviceId: number | string, position: number) => api.post<DeviceActionResponse>(`/devices/${deviceId}/seek`, {
+      query: { position },
+    }),
+    loadConfig: (configFile: string) => api.post<JsonRecord>('/devices/load-config', {
+      query: { config_file: configFile },
+    }),
+    saveConfig: (configFile: string) => api.post<DeviceActionResponse>('/devices/save-config', {
+      query: { config_file: configFile },
+    }),
+    pauseDiscovery: () => client.pauseDiscovery(),
+    resumeDiscovery: () => client.resumeDiscovery(),
+    setDiscoveryInterval: (seconds: number) => api.post<DeviceActionResponse>('/devices/discovery/interval', {
+      query: { seconds },
+    }),
+    getDiscoveryStatus: () => client.getDiscoveryStatus(),
+    enableAutoMode: (deviceId: number | string) => client.enableAutoMode(deviceId),
+    enableManualMode: (deviceId: number | string, reason?: string, expiresIn?: number) =>
+      client.enableManualMode(deviceId, { reason, expiresIn }),
+    getControlMode: (deviceId: number | string) => client.getDeviceControlMode(deviceId),
+  };
+
+  const discoveryV2Api = {
+    getDevices: (params: QueryRecord = {}) => api.get<JsonRecord[]>('/v2/discovery/devices', { query: params }),
+    getDevice: (deviceId: string) => api.get<JsonRecord>(`/v2/discovery/devices/${deviceId}`),
+    triggerDiscovery: (backend: string | null = null, timeout = 30) => api.post<JsonRecord>('/v2/discovery/discover', {
+      query: { backend, timeout },
+    }),
+    getDeviceConfigs: () => api.get<JsonRecord[]>('/v2/discovery/config/devices'),
+    getDeviceConfig: (deviceName: string) => api.get<JsonRecord>(`/v2/discovery/config/devices/${deviceName}`),
+    updateDeviceConfig: (deviceName: string, config: JsonRecord) =>
+      api.put<JsonRecord>(`/v2/discovery/config/devices/${deviceName}`, { body: config }),
+    deleteDeviceConfig: (deviceName: string) => api.delete<JsonRecord>(`/v2/discovery/config/devices/${deviceName}`),
+    getGlobalConfig: () => api.get<JsonRecord>('/v2/discovery/config/global'),
+    updateGlobalConfig: (config: JsonRecord) => api.put<JsonRecord>('/v2/discovery/config/global', { body: config }),
+    getBackends: () => client.listDiscoveryBackends(),
+    enableBackend: (backendName: string) => client.enableDiscoveryBackend(backendName),
+    disableBackend: (backendName: string) => client.disableDiscoveryBackend(backendName),
+    startCast: (deviceId: string, contentUrl: string, options: JsonRecord = {}) => api.post<JsonRecord>('/v2/discovery/cast', {
+      body: {
+        device_id: deviceId,
+        content_url: contentUrl,
+        content_type: options.content_type ?? 'video/mp4',
+        metadata: options.metadata ?? null,
+      },
+    }),
+    stopCast: (sessionId: string) => api.post<JsonRecord>(`/v2/discovery/stop/${sessionId}`),
+    pauseCast: (sessionId: string) => api.post<JsonRecord>(`/v2/discovery/pause/${sessionId}`),
+    resumeCast: (sessionId: string) => api.post<JsonRecord>(`/v2/discovery/resume/${sessionId}`),
+    getActiveSessions: () => api.get<JsonRecord[]>('/v2/discovery/sessions'),
+    getSystemStatus: () => client.getUnifiedDiscoveryStatus(),
+  };
+
+  const overlayApi = {
+    listConfigs: (params: QueryRecord = {}) => {
+      if (Object.keys(params).length === 0) {
+        return client.listOverlayConfigs();
+      }
+      return api.get<JsonRecord[]>('/overlay/configs', { query: params });
+    },
+    getConfig: (configId: number | string) => api.get<JsonRecord>(`/overlay/configs/${configId}`),
+    createConfig: (payload: JsonRecord) => api.post<JsonRecord>('/overlay/configs', { body: payload }),
+    updateConfig: (configId: number | string, payload: JsonRecord) =>
+      api.put<JsonRecord>(`/overlay/configs/${configId}`, { body: payload }),
+    deleteConfig: (configId: number | string) =>
+      api.delete<JsonRecord>(`/overlay/configs/${configId}`),
+    duplicateConfig: (configId: number | string) =>
+      api.post<JsonRecord>(`/overlay/configs/${configId}/duplicate`),
+    getGlobalApiConfigs: () => api.get<JsonRecord>('/overlay/global-api-configs'),
+    updateGlobalApiConfigs: (payload: JsonRecord) => api.put<JsonRecord>('/overlay/global-api-configs', { body: payload }),
+    getProjectorRedirectConfig: () => api.get<JsonRecord>('/overlay/projector-redirect'),
+    updateProjectorRedirectConfig: (payload: JsonRecord) => api.put<JsonRecord>('/overlay/projector-redirect', { body: payload }),
+    getRecentProjectorRedirectRequests: (limit = 50) => api.get<JsonRecord[]>('/overlay/projector-redirect/recent', {
+      query: { limit },
+    }),
+    listTemplates: () => api.get<JsonRecord[]>('/overlay/templates'),
+    createConfigFromTemplate: (
+      templateId: number | string,
+      videoId: number | string,
+      name?: string,
+    ) =>
+      api.post<JsonRecord>(`/overlay/configs/from-template/${templateId}`, {
+        query: { video_id: videoId, name },
+      }),
+    getBrightness: () => api.get<JsonRecord>('/overlay/brightness'),
+    setBrightness: (brightness: number) =>
+      api.post<JsonRecord>('/overlay/brightness', { query: { brightness } }),
+    exportMp4: (payload: JsonRecord) => api.post<Blob>('/overlay/export', { body: payload, parseAs: 'blob', timeout: 0 }),
+    startCast: (payload: JsonRecord) => api.post<JsonRecord>('/overlay/cast', { body: payload }),
+    listCastSessions: () => api.get<JsonRecord[]>('/overlay/cast/sessions'),
+    stopCastSession: (sessionId: string) => api.delete<JsonRecord>(`/overlay/cast/sessions/${sessionId}`),
+  };
+
+  const structuredLightingApi = {
+    getCapabilities: () => api.get<JsonRecord>('/structured-lighting/capabilities'),
+    getStatus: () => api.get<JsonRecord>('/structured-lighting/status'),
+    startWorker: (payload: JsonRecord) => api.post<JsonRecord>('/structured-lighting/worker/start', { body: payload }),
+    stopWorker: () => api.post<JsonRecord>('/structured-lighting/worker/stop'),
+    confirmWorkerReady: (workerId: string) => api.post<JsonRecord>(`/structured-lighting/worker/${workerId}/confirm-ready`),
+    listSessions: () => api.get<JsonRecord[]>('/structured-lighting/sessions'),
+    createSession: (payload: JsonRecord) => api.post<JsonRecord>('/structured-lighting/sessions', { body: payload }),
+    deleteSession: (sessionId: string) => api.delete<JsonRecord>(`/structured-lighting/sessions/${sessionId}`),
+    getCapturePlan: (sessionId: string) => api.get<JsonRecord>(`/structured-lighting/sessions/${sessionId}/capture-plan`),
+    getRuntime: (sessionId: string) => api.get<JsonRecord>(`/structured-lighting/sessions/${sessionId}/runtime`),
+    listCaptures: (sessionId: string) => api.get<JsonRecord[]>(`/structured-lighting/sessions/${sessionId}/captures`),
+    decodeSession: (sessionId: string, payload: JsonRecord = {}) => api.post<JsonRecord>(`/structured-lighting/sessions/${sessionId}/decode`, { body: payload }),
+    runPreviewTuning: (sessionId: string, payload: JsonRecord = {}) => api.post<JsonRecord>(`/structured-lighting/sessions/${sessionId}/preview-tuning`, { body: payload }),
+    getPreviewTuning: (sessionId: string) => api.get<JsonRecord>(`/structured-lighting/sessions/${sessionId}/preview-tuning`),
+    runTuningSearch: (sessionId: string, payload: JsonRecord = {}) => api.post<JsonRecord>(`/structured-lighting/sessions/${sessionId}/tuning-search`, { body: payload }),
+    getTuningSearch: (sessionId: string) => api.get<JsonRecord>(`/structured-lighting/sessions/${sessionId}/tuning-search`),
+    getCalibration: (sessionId: string) => api.get<JsonRecord>(`/structured-lighting/sessions/${sessionId}/calibration`),
+    getArtifactReview: (sessionId: string) => api.get<JsonRecord>(`/structured-lighting/sessions/${sessionId}/artifacts/review`),
+    updateReview: (sessionId: string, payload: JsonRecord) => api.post<JsonRecord>(`/structured-lighting/sessions/${sessionId}/review`, { body: payload }),
+    startSession: (sessionId: string) => api.post<JsonRecord>(`/structured-lighting/sessions/${sessionId}/start`),
+    publishMappingScene: (sessionId: string, payload: JsonRecord = {}) => api.post<JsonRecord>(`/structured-lighting/sessions/${sessionId}/publish-mapping-scene`, { body: payload }),
+    getStepImageUrl: (sessionId: string, stepIndex: number | string) => buildApiUrl(`/structured-lighting/sessions/${sessionId}/steps/${stepIndex}/image`),
+    getCaptureImageUrl: (sessionId: string, stepIndex: number | string) => buildApiUrl(`/structured-lighting/sessions/${sessionId}/captures/${stepIndex}/image`),
+    getArtifactPreviewUrl: (sessionId: string, previewId: string) => buildApiUrl(`/structured-lighting/sessions/${sessionId}/artifacts/previews/${previewId}`),
+    getPreviewTuningPreviewUrl: (sessionId: string, candidateId: string, previewName: string) => buildApiUrl(`/structured-lighting/sessions/${sessionId}/preview-tuning/${candidateId}/previews/${previewName}`),
+    getTuningSearchPreviewUrl: (sessionId: string, candidateId: string, previewName: string) => buildApiUrl(`/structured-lighting/sessions/${sessionId}/tuning-search/${candidateId}/previews/${previewName}`),
+    getExportUrl: (sessionId: string) => buildApiUrl(`/structured-lighting/sessions/${sessionId}/export`),
+  };
+
+  const videoApi = {
+    getVideos: (params: QueryRecord = {}) => {
+      if (Object.keys(params).length === 0) {
+        return client.listVideos();
+      }
+      return api.get<JsonRecord[]>('/videos/', { query: params });
+    },
+    getVideo: (id: number | string) => api.get<JsonRecord>(`/videos/${id}`),
+    createVideo: (data: JsonRecord) => api.post<JsonRecord>('/videos/', { body: data }),
+    updateVideo: (id: number | string, data: JsonRecord) => api.put<JsonRecord>(`/videos/${id}`, { body: data }),
+    deleteVideo: (id: number | string) => api.delete<JsonRecord>(`/videos/${id}`),
+    uploadVideo: (formData: FormData, options: UploadRequestOptions = {}) => requestUpload<JsonRecord>(api, '/videos/upload', formData, options),
+    streamVideo: (id: number | string, serveIp: string) => api.post<JsonRecord>(`/videos/${id}/stream`, {
+      query: { serve_ip: serveIp },
+    }),
+    scanDirectory: (directory: string, category = 'background', sourceDirectoryId: number | string | null = null) =>
+      api.post<JsonRecord>('/videos/scan-directory', {
+        query: {
+          directory,
+          category,
+          source_directory_id: sourceDirectoryId,
+        },
+      }),
+  };
+
+  const photoApi = {
+    getPhotos: (params: QueryRecord = {}) => {
+      if (Object.keys(params).length === 0) {
+        return client.listPhotos();
+      }
+      return api.get<JsonRecord[]>('/photos/', { query: params });
+    },
+    getPhoto: (id: number | string) => api.get<JsonRecord>(`/photos/${id}`),
+    createPhoto: (data: JsonRecord) => api.post<JsonRecord>('/photos/', { body: data }),
+    updatePhoto: (id: number | string, data: JsonRecord) => api.put<JsonRecord>(`/photos/${id}`, { body: data }),
+    deletePhoto: (id: number | string) => api.delete<JsonRecord>(`/photos/${id}`),
+    uploadPhoto: (formData: FormData, options: UploadRequestOptions = {}) => requestUpload<JsonRecord>(api, '/photos/upload', formData, options),
+    scanDirectory: (directory: string, category = 'background', sourceDirectoryId: number | string | null = null) =>
+      api.post<JsonRecord>('/photos/scan-directory', {
+        query: {
+          directory,
+          category,
+          source_directory_id: sourceDirectoryId,
+        },
+      }),
+  };
+
+  const mappingsApi = {
+    listScenes: () => client.listMappingScenes(),
+    getScene: (id: number | string) => api.get<JsonRecord>(`/mappings/scenes/${id}`),
+    createScene: (data: JsonRecord) => api.post<JsonRecord>('/mappings/scenes', { body: data }),
+    updateScene: (id: number | string, data: JsonRecord) => api.put<JsonRecord>(`/mappings/scenes/${id}`, { body: data }),
+    deleteScene: (id: number | string) => api.delete<JsonRecord>(`/mappings/scenes/${id}`),
+    listRanks: () => client.listSceneRanks(),
+    getRank: (id: number | string) => api.get<JsonRecord>(`/mappings/ranks/${id}`),
+    createRank: (data: JsonRecord) => api.post<JsonRecord>('/mappings/ranks', { body: data }),
+    updateRank: (id: number | string, data: JsonRecord) => api.put<JsonRecord>(`/mappings/ranks/${id}`, { body: data }),
+    deleteRank: (id: number | string) => api.delete<JsonRecord>(`/mappings/ranks/${id}`),
+    listSceneControlPresets: () => client.listSceneControlPresets(),
+    getSceneControlPreset: (id: number | string) => api.get<JsonRecord>(`/mappings/scene-control-presets/${id}`),
+    createSceneControlPreset: (data: JsonRecord) => api.post<JsonRecord>('/mappings/scene-control-presets', { body: data }),
+    updateSceneControlPreset: (id: number | string, data: JsonRecord) => api.put<JsonRecord>(`/mappings/scene-control-presets/${id}`, { body: data }),
+    deleteSceneControlPreset: (id: number | string) => api.delete<JsonRecord>(`/mappings/scene-control-presets/${id}`),
+    importScene: (formData: FormData, options: UploadRequestOptions = {}) => requestUpload<JsonRecord>(api, '/mappings/scenes/import', formData, options),
+    getExportUrl: (id: number | string) => buildApiUrl(`/mappings/scenes/${id}/export`),
+    createPolygonMask: (id: number | string, data: JsonRecord) => api.post<JsonRecord>(`/mappings/scenes/${id}/masks/polygon`, { body: data }),
+    uploadMasks: (id: number | string, formData: FormData, options: UploadRequestOptions = {}) => requestUpload<JsonRecord>(api, `/mappings/scenes/${id}/masks/upload`, formData, options),
+    deleteMask: (sceneId: number | string, maskId: number | string) => api.delete<JsonRecord>(`/mappings/scenes/${sceneId}/masks/${maskId}`),
+  };
+
+  const mediaLibraryApi = {
+    listDirectories: () => client.listMediaDirectories(),
+    browseDirectories: (path: string | null = null) => api.get<JsonRecord[]>('/media-library/directories/browse', { query: { path } }),
+    createDirectory: (data: JsonRecord) => api.post<JsonRecord>('/media-library/directories', { body: data }),
+    updateDirectory: (id: number | string, data: JsonRecord) => api.put<JsonRecord>(`/media-library/directories/${id}`, { body: data }),
+    deleteDirectory: (id: number | string) => api.delete<JsonRecord>(`/media-library/directories/${id}`),
+    scanDirectory: (id: number | string) => client.scanMediaDirectory(id),
+    listMediaLists: () => client.listMediaLists(),
+    createMediaList: (data: JsonRecord) => api.post<JsonRecord>('/media-library/lists', { body: data }),
+    updateMediaList: (id: number | string, data: JsonRecord) => api.put<JsonRecord>(`/media-library/lists/${id}`, { body: data }),
+    deleteMediaList: (id: number | string) => api.delete<JsonRecord>(`/media-library/lists/${id}`),
+    listMediaChannels: () => client.listMediaChannels(),
+    createMediaChannel: (data: JsonRecord) => api.post<JsonRecord>('/media-library/channels', { body: data }),
+    updateMediaChannel: (id: number | string, data: JsonRecord) => api.put<JsonRecord>(`/media-library/channels/${id}`, { body: data }),
+    advanceMediaChannel: (id: number | string) => client.advanceMediaChannel(id),
+    deleteMediaChannel: (id: number | string) => api.delete<JsonRecord>(`/media-library/channels/${id}`),
+  };
+
+  const photoListApi = {
+    listPhotoLists: () => api.get<JsonRecord[]>('/photo-lists/'),
+    createPhotoList: (data: JsonRecord) => api.post<JsonRecord>('/photo-lists/', { body: data }),
+    updatePhotoList: (id: number | string, data: JsonRecord) => api.put<JsonRecord>(`/photo-lists/${id}`, { body: data }),
+    deletePhotoList: (id: number | string) => api.delete<JsonRecord>(`/photo-lists/${id}`),
+  };
+
+  const projectionApi = {
+    listAnimations: () => api.get<JsonRecord>('/projection/animations'),
+    listAnimationLists: () => api.get<JsonRecord[]>('/projection/animation-lists'),
+    getAnimationList: (id: number | string) => api.get<JsonRecord>(`/projection/animation-lists/${id}`),
+    createAnimationList: (data: JsonRecord) => api.post<JsonRecord>('/projection/animation-lists', { body: data }),
+    updateAnimationList: (id: number | string, data: JsonRecord) => api.put<JsonRecord>(`/projection/animation-lists/${id}`, { body: data }),
+    deleteAnimationList: (id: number | string) => api.delete<JsonRecord>(`/projection/animation-lists/${id}`),
+  };
+
+  const rendererApi = {
+    startRenderer: (scene: string, projector: string, options: JsonRecord = {}) => api.post<RendererActionResponse>('/renderer/start', {
+      body: { scene, projector, options },
+    }),
+    stopRenderer: (projector: string) => api.post<RendererActionResponse>('/renderer/stop', {
+      body: { projector },
+    }),
+    pauseRenderer: (projectorId: string) => client.pauseRenderer(projectorId),
+    resumeRenderer: (projectorId: string) => client.resumeRenderer(projectorId),
+    getRendererStatus: (projectorId: string) => api.get<JsonRecord>(`/renderer/status/${projectorId}`),
+    listRenderers: () => client.listRenderers(),
+    listProjectors: () => client.listProjectors(),
+    listScenes: () => client.listRendererScenes(),
+    startProjector: (projectorId: string) => client.startProjector(projectorId),
+    discoverAirPlayDevices: () => api.get<JsonRecord>('/renderer/airplay/discover'),
+    listAirPlayDevices: () => api.get<JsonRecord>('/renderer/airplay/list'),
+    getAllAirPlayDevices: () => api.get<JsonRecord>('/renderer/airplay/devices'),
+  };
+
+  const depthApi = {
+    uploadDepthMap: (formData: FormData, options: UploadRequestOptions = {}) => requestUpload<JsonRecord>(api, '/depth/upload', formData, options),
+    previewDepthMap: (depthId: number | string) => buildApiUrl(`/depth/preview/${depthId}`),
+    segmentDepthMap: (depthId: number | string, segmentationParams: JsonRecord) => api.post<JsonRecord>(`/depth/segment/${depthId}`, { body: segmentationParams }),
+    previewSegmentation: (depthId: number | string, alpha = 0.5) => buildApiUrl(`/depth/segmentation_preview/${depthId}`, { alpha }),
+    exportMasks: (depthId: number | string, segmentIds: Array<number | string>, cleanMask = true, minArea = 100, kernelSize = 3) => api.post<JsonRecord>(`/depth/export_masks/${depthId}`, {
+      body: {
+        segment_ids: segmentIds,
+        clean_mask: cleanMask,
+        min_area: minArea,
+        kernel_size: kernelSize,
+      },
+    }),
+    deleteDepthMap: (depthId: number | string) => api.delete<JsonRecord>(`/depth/${depthId}`),
+    getMask: (depthId: number | string, segmentId: number | string, clean = true, minArea = 100, kernelSize = 3) => buildApiUrl(`/depth/mask/${depthId}/${segmentId}`, {
+      clean,
+      min_area: minArea,
+      kernel_size: kernelSize,
+    }),
+    createProjection: (config: JsonRecord) => api.post<JsonRecord>('/depth/projection/create', { body: config }),
+    getProjection: (configId: number | string) => buildApiUrl(`/depth/projection/${configId}`),
+    deleteProjection: (configId: number | string) => api.delete<JsonRecord>(`/depth/projection/${configId}`),
+  };
+
+  const streamingApi = {
+    getStreamingStats: () => api.get<JsonRecord>('/streaming/'),
+    startStreaming: (deviceId: number | string, videoPath: string) => api.post<JsonRecord>('/streaming/start', {
+      body: { device_id: deviceId, video_path: videoPath },
+    }),
+    getSessions: () => client.listStreamingSessions(),
+    getSession: (sessionId: string) => api.get<JsonRecord>(`/streaming/sessions/${sessionId}`),
+    deleteSession: (sessionId: string) => client.stopStreamingSession(sessionId),
+    getSessionsForDevice: (deviceName: string) => api.get<JsonRecord[]>(`/streaming/device/${deviceName}`),
+    completeSession: (sessionId: string) => client.completeStreamingSession(sessionId),
+    resetSession: (sessionId: string) => client.resetStreamingSession(sessionId),
+    getStreamingAnalytics: () => client.getStreamingAnalytics(),
+    getStreamingHealth: () => api.get<JsonRecord>('/streaming/health'),
+  };
+
+  const diagnosticsApi = {
+    getServiceDiagnostics: (params: QueryRecord = {}) => api.get<JsonRecord>('/diagnostics/service', { query: params }),
+    getIncidentDetail: (incidentId: string, params: QueryRecord = {}) => api.get<JsonRecord>(`/diagnostics/incidents/${incidentId}`, { query: params }),
+  };
+
+  const logsApi = {
+    getLogs: (params: QueryRecord = {}) => api.get<JsonRecord>('/logs', { query: params }),
+    getSources: () => api.get<JsonRecord>('/logs/sources'),
+    getLevels: () => api.get<JsonRecord>('/logs/levels'),
+    getStats: () => api.get<JsonRecord>('/logs/stats'),
+    tailSource: (source: string, lines = 100) =>
+      api.get<JsonRecord>(`/logs/tail/${encodeURIComponent(source)}`, { query: { lines } }),
+    exportLogs: (format: string, params: QueryRecord = {}) =>
+      api.get<Blob>('/logs/export', { query: { format, ...params }, parseAs: 'blob' }),
+  };
+
+  const settingsApi = {
+    getSettings: async () => ({ ...defaultSettings }),
+    updateSettings: async (settings: JsonRecord) => ({ ...defaultSettings, ...settings }),
+  };
+
+  return {
+    api,
+    client,
+    deviceApi,
+    discoveryV2Api,
+    overlayApi,
+    structuredLightingApi,
+    videoApi,
+    photoApi,
+    mappingsApi,
+    mediaLibraryApi,
+    photoListApi,
+    projectionApi,
+    rendererApi,
+    depthApi,
+    streamingApi,
+    diagnosticsApi,
+    logsApi,
+    settingsApi,
+  };
+}
+
+const defaultServices = createServiceModules(DEFAULT_API_BASE_URL);
+
+export const api = defaultServices.api;
+export const deviceApi = defaultServices.deviceApi;
+export const discoveryV2Api = defaultServices.discoveryV2Api;
+export const overlayApi = defaultServices.overlayApi;
+export const structuredLightingApi = defaultServices.structuredLightingApi;
+export const videoApi = defaultServices.videoApi;
+export const photoApi = defaultServices.photoApi;
+export const mappingsApi = defaultServices.mappingsApi;
+export const mediaLibraryApi = defaultServices.mediaLibraryApi;
+export const photoListApi = defaultServices.photoListApi;
+export const projectionApi = defaultServices.projectionApi;
+export const rendererApi = defaultServices.rendererApi;
+export const depthApi = defaultServices.depthApi;
+export const streamingApi = defaultServices.streamingApi;
+export const diagnosticsApi = defaultServices.diagnosticsApi;
+export const logsApi = defaultServices.logsApi;
+export const settingsApi = defaultServices.settingsApi;
+export const serviceModules = defaultServices;

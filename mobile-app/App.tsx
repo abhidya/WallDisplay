@@ -4,10 +4,15 @@ import { Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 import { ScreenLayout } from './src/components/ScreenLayout';
 import { useAppShell, tabs } from './src/features/app/useAppShell';
 import { DevicesScreen } from './src/screens/DevicesScreen';
+import { DepthProcessingScreen } from './src/screens/DepthProcessingScreen';
 import { MediaScreen } from './src/screens/MediaScreen';
+import { LogsScreen } from './src/screens/LogsScreen';
 import { OperationsScreen } from './src/screens/OperationsScreen';
+import { OverlayProjectionScreen } from './src/screens/OverlayProjectionScreen';
 import { OverviewScreen } from './src/screens/OverviewScreen';
+import { ProjectionAnimationScreen } from './src/screens/ProjectionAnimationScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
+import { StructuredLightingScreen } from './src/screens/StructuredLightingScreen';
 import { colors } from './src/theme';
 
 export default function App() {
@@ -104,6 +109,31 @@ export default function App() {
         {activeTab === 'operations' && (
           <ScreenLayout>
             <OperationsScreen appMode={appMode} client={client} />
+          </ScreenLayout>
+        )}
+        {activeTab === 'lighting' && (
+          <ScreenLayout>
+            <StructuredLightingScreen apiBaseUrl={apiBaseUrl} appMode={appMode} />
+          </ScreenLayout>
+        )}
+        {activeTab === 'depth' && (
+          <ScreenLayout>
+            <DepthProcessingScreen apiBaseUrl={apiBaseUrl} appMode={appMode} />
+          </ScreenLayout>
+        )}
+        {activeTab === 'projection' && (
+          <ScreenLayout>
+            <ProjectionAnimationScreen apiBaseUrl={apiBaseUrl} appMode={appMode} />
+          </ScreenLayout>
+        )}
+        {activeTab === 'overlay' && (
+          <ScreenLayout>
+            <OverlayProjectionScreen apiBaseUrl={apiBaseUrl} appMode={appMode} />
+          </ScreenLayout>
+        )}
+        {activeTab === 'logs' && (
+          <ScreenLayout>
+            <LogsScreen apiBaseUrl={apiBaseUrl} appMode={appMode} />
           </ScreenLayout>
         )}
         {activeTab === 'settings' && (

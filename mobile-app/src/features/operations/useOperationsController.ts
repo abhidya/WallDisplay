@@ -8,6 +8,7 @@ import type {
   LocalCapabilitySummary,
   MappingSceneSummary,
   OverlayConfigSummary,
+  OverlayCastSessionSummary,
   OverlayStatusResponse,
   ProjectionConfigSummary,
   ProjectionSessionSummary,
@@ -17,6 +18,7 @@ import type {
   SceneControlPresetSummary,
   SceneRankSummary,
   StreamingAnalytics,
+  StreamingHealthResponse,
   StreamingSessionSummary,
 } from '../../types/api';
 
@@ -25,6 +27,7 @@ export interface OperationsController {
   actionMessage: string | null;
   actionHistory: ActionHistoryEntry[];
   analytics: StreamingAnalytics | null;
+  streamingHealth: StreamingHealthResponse | null;
   capabilities: LocalCapabilitySummary[];
   deferredFeatures: DeferredFeatureSummary[];
   error: string | null;
@@ -33,6 +36,7 @@ export interface OperationsController {
   mappingScenes: MappingSceneSummary[];
   overlayConfigs: OverlayConfigSummary[];
   overlayStatus: OverlayStatusResponse | null;
+  overlayCastSessions: OverlayCastSessionSummary[];
   projectors: RendererProjectorSummary[];
   projectionConfigs: ProjectionConfigSummary[];
   recentProjectionSession: ProjectionSessionSummary | null;
@@ -50,6 +54,7 @@ export interface OperationsController {
   load: () => Promise<void>;
   launchSelectedProjection: () => Promise<void>;
   runOverlaySync: () => Promise<void>;
+  runOverlayCastStop: (sessionId: string) => Promise<void>;
   runRendererPause: () => Promise<void>;
   runRendererResume: () => Promise<void>;
   runRendererStartDefault: () => Promise<void>;
@@ -76,12 +81,14 @@ export function useOperationsController(client: ControlPlaneClient): OperationsC
   const [actionHistory, setActionHistory] = useState<ActionHistoryEntry[]>([]);
   const [deferredFeatures, setDeferredFeatures] = useState<DeferredFeatureSummary[]>([]);
   const [analytics, setAnalytics] = useState<StreamingAnalytics | null>(null);
+  const [streamingHealth, setStreamingHealth] = useState<StreamingHealthResponse | null>(null);
   const [sessions, setSessions] = useState<StreamingSessionSummary[]>([]);
   const [renderers, setRenderers] = useState<RendererInstanceSummary[]>([]);
   const [projectors, setProjectors] = useState<RendererProjectorSummary[]>([]);
   const [rendererScenes, setRendererScenes] = useState<RendererSceneSummary[]>([]);
   const [overlayConfigs, setOverlayConfigs] = useState<OverlayConfigSummary[]>([]);
   const [overlayStatus, setOverlayStatus] = useState<OverlayStatusResponse | null>(null);
+  const [overlayCastSessions, setOverlayCastSessions] = useState<OverlayCastSessionSummary[]>([]);
   const [mappingScenes, setMappingScenes] = useState<MappingSceneSummary[]>([]);
   const [sceneRanks, setSceneRanks] = useState<SceneRankSummary[]>([]);
   const [sceneControlPresets, setSceneControlPresets] = useState<SceneControlPresetSummary[]>([]);
@@ -126,12 +133,14 @@ export function useOperationsController(client: ControlPlaneClient): OperationsC
       if (client.mode === 'local') {
         const [
           analyticsPayload,
+          streamingHealthPayload,
           sessionsPayload,
           capabilityPayload,
           actionHistoryPayload,
           deferredPayload,
         ] = await Promise.all([
           client.getStreamingAnalytics(),
+          client.getStreamingHealth(),
           client.listStreamingSessions(),
           client.listCapabilities(),
           client.listActionHistory(),
@@ -143,6 +152,7 @@ export function useOperationsController(client: ControlPlaneClient): OperationsC
         }
 
         setAnalytics(analyticsPayload);
+        setStreamingHealth(streamingHealthPayload);
         setSessions(sessionsPayload);
         setCapabilities(capabilityPayload);
         setActionHistory(actionHistoryPayload);
@@ -152,6 +162,7 @@ export function useOperationsController(client: ControlPlaneClient): OperationsC
         setRendererScenes([]);
         setOverlayConfigs([]);
         setOverlayStatus(null);
+        setOverlayCastSessions([]);
         setMappingScenes([]);
         setSceneRanks([]);
         setSceneControlPresets([]);
@@ -164,24 +175,28 @@ export function useOperationsController(client: ControlPlaneClient): OperationsC
 
       const [
         analyticsPayload,
+        streamingHealthPayload,
         sessionsPayload,
         renderersPayload,
         projectorsPayload,
         rendererScenesPayload,
         overlayPayload,
         overlayStatusPayload,
+        overlayCastSessionsPayload,
         mappingScenesPayload,
         sceneRanksPayload,
         sceneControlPresetsPayload,
         projectionConfigsPayload,
       ] = await Promise.all([
         client.getStreamingAnalytics(),
+        client.getStreamingHealth(),
         client.listStreamingSessions(),
         client.listRenderers(),
         client.listProjectors(),
         client.listRendererScenes(),
         client.listOverlayConfigs(),
         client.getOverlayStatus(),
+        client.listOverlayCastSessions(),
         client.listMappingScenes(),
         client.listSceneRanks(),
         client.listSceneControlPresets(),
@@ -193,12 +208,14 @@ export function useOperationsController(client: ControlPlaneClient): OperationsC
       }
 
       setAnalytics(analyticsPayload);
+      setStreamingHealth(streamingHealthPayload);
       setSessions(sessionsPayload);
       setRenderers(renderersPayload);
       setProjectors(projectorsPayload);
       setRendererScenes(rendererScenesPayload);
       setOverlayConfigs(overlayPayload);
       setOverlayStatus(overlayStatusPayload);
+      setOverlayCastSessions(overlayCastSessionsPayload);
       setMappingScenes(mappingScenesPayload);
       setSceneRanks(sceneRanksPayload);
       setSceneControlPresets(sceneControlPresetsPayload);
@@ -341,6 +358,22 @@ export function useOperationsController(client: ControlPlaneClient): OperationsC
     );
   }, [client, runAction]);
 
+  const runOverlayCastStop = useCallback(
+    async (sessionId: string) => {
+      await runAction(
+        `stop-overlay-cast-${sessionId}`,
+        async () => ({
+          message: describeActionMessage(
+            await client.stopOverlayCastSession(sessionId),
+            `Overlay cast session ${sessionId} stopped.`,
+          ),
+        }),
+        { successMessage: `Overlay cast session ${sessionId} stopped.` },
+      );
+    },
+    [client, describeActionMessage, runAction],
+  );
+
   const runStreamingSessionComplete = useCallback(
     async (sessionId: string) => {
       await runAction(
@@ -444,6 +477,7 @@ export function useOperationsController(client: ControlPlaneClient): OperationsC
       actionMessage,
       actionHistory,
       analytics,
+      streamingHealth,
       capabilities,
       deferredFeatures,
       error,
@@ -453,6 +487,7 @@ export function useOperationsController(client: ControlPlaneClient): OperationsC
       launchSelectedProjection,
       mappingScenes,
       overlayConfigs,
+      overlayCastSessions,
       overlayStatus,
       projectors,
       projectionConfigs,
@@ -460,6 +495,7 @@ export function useOperationsController(client: ControlPlaneClient): OperationsC
       rendererScenes,
       renderers,
       runOverlaySync,
+      runOverlayCastStop,
       runRendererPause,
       runRendererResume,
       runRendererStartDefault,
@@ -483,6 +519,7 @@ export function useOperationsController(client: ControlPlaneClient): OperationsC
       actionMessage,
       actionHistory,
       analytics,
+      streamingHealth,
       capabilities,
       deferredFeatures,
       error,
@@ -492,6 +529,7 @@ export function useOperationsController(client: ControlPlaneClient): OperationsC
       mode,
       mappingScenes,
       overlayConfigs,
+      overlayCastSessions,
       overlayStatus,
       projectors,
       projectionConfigs,
@@ -499,6 +537,7 @@ export function useOperationsController(client: ControlPlaneClient): OperationsC
       rendererScenes,
       renderers,
       runOverlaySync,
+      runOverlayCastStop,
       runRendererPause,
       runRendererResume,
       runRendererStartDefault,

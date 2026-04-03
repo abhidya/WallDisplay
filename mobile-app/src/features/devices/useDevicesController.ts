@@ -91,6 +91,7 @@ export function useDevicesController(
   const mountedRef = useRef(true);
   const loadRequestRef = useRef(0);
   const detailRequestRef = useRef(0);
+  const reportedSelectionRef = useRef<{ deviceId: string; label: string | null } | null>(null);
 
   useEffect(() => {
     return () => {
@@ -249,16 +250,49 @@ export function useDevicesController(
   );
 
   useEffect(() => {
-    if (
-      sharedSelectedDeviceId !== undefined &&
-      String(sharedSelectedDeviceId) !== String(selectedDeviceId)
-    ) {
-      setSelectedDeviceId(sharedSelectedDeviceId);
+    if (sharedSelectedDeviceId === undefined) {
+      return;
     }
-  }, [sharedSelectedDeviceId, selectedDeviceId]);
+
+    setSelectedDeviceId((current) =>
+      String(current) === String(sharedSelectedDeviceId) ? current : sharedSelectedDeviceId,
+    );
+  }, [sharedSelectedDeviceId]);
+
+  const selectDevice = useCallback(
+    (deviceId: number | string | null) => {
+      setSelectedDeviceId((current) => (String(current) === String(deviceId) ? current : deviceId));
+      const nextSummary =
+        devices.find((device) => String(device.id) === String(deviceId)) ?? null;
+      const nextLabel = nextSummary ? describeDevice(nextSummary) : null;
+      reportedSelectionRef.current = {
+        deviceId: String(deviceId),
+        label: nextLabel,
+      };
+      onSelectionChange?.(deviceId, nextLabel);
+    },
+    [devices, onSelectionChange],
+  );
 
   useEffect(() => {
-    onSelectionChange?.(selectedDeviceId, selectedSummary ? describeDevice(selectedSummary) : null);
+    if (!onSelectionChange) {
+      return;
+    }
+
+    const nextSelection = {
+      deviceId: String(selectedDeviceId),
+      label: selectedSummary ? describeDevice(selectedSummary) : null,
+    };
+
+    if (
+      reportedSelectionRef.current?.deviceId === nextSelection.deviceId &&
+      reportedSelectionRef.current?.label === nextSelection.label
+    ) {
+      return;
+    }
+
+    reportedSelectionRef.current = nextSelection;
+    onSelectionChange(selectedDeviceId, nextSelection.label);
   }, [onSelectionChange, selectedDeviceId, selectedSummary]);
 
   const activeDeviceId = selectedSummary?.id ?? selectedDeviceId;
@@ -319,7 +353,7 @@ export function useDevicesController(
     selectedDeviceId,
     unifiedDiscoveryCapabilities,
     unifiedDiscoveryStatus,
-    selectDevice: setSelectedDeviceId,
+    selectDevice,
     load,
     discover,
     refreshSelectedDevice,

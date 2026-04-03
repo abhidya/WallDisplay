@@ -29,6 +29,36 @@ export const currentProductAreas: FeatureCardData[] = [
       'Renderer, overlay, mapping, and projection flows remain explicitly deferred until a mobile-safe design is approved.',
     endpoints: ['local://deferred/renderer', '/api/renderer', '/api/projection'],
   },
+  {
+    title: 'Structured lighting',
+    description:
+      'Backend worker/session orchestration for projector-camera calibration is now surfaced as a remote operator slice in mobile.',
+    endpoints: ['/api/structured-lighting', '/api/v2/discovery/devices', '/api/mappings'],
+  },
+  {
+    title: 'Depth processing',
+    description:
+      'Remote depth upload, segmentation, mask export, and projection creation are now available through the mobile operator app.',
+    endpoints: ['/api/depth/upload', '/api/depth/segment', '/api/depth/projection/create'],
+  },
+  {
+    title: 'Projection animation',
+    description:
+      'Remote animation library and saved animation-list management now live in the mobile operator app.',
+    endpoints: ['/api/projection/animations', '/api/projection/animation-lists'],
+  },
+  {
+    title: 'Overlay projection',
+    description:
+      'Remote overlay config selection, export, sync, and cast-session control are now available in the mobile operator app.',
+    endpoints: ['/api/overlay/configs', '/api/overlay/cast', '/api/overlay/export'],
+  },
+  {
+    title: 'Log viewer',
+    description:
+      'Remote aggregated log history, source stats, and tailed source output are now visible in the mobile operator app.',
+    endpoints: ['/api/logs', '/api/logs/stats', '/api/logs/tail'],
+  },
 ];
 
 export const mobileRewritePrinciples: string[] = [
@@ -62,6 +92,36 @@ export const mobileModules: FeatureCardData[] = [
     description:
       'Reduced local-safe diagnostics, capability matrix, action history, and explicit deferred advanced features.',
     endpoints: ['local://history', 'local://capabilities', '/api/streaming/analytics'],
+  },
+  {
+    title: 'Structured lighting',
+    description:
+      'Remote structured-lighting capability, session inventory, and runtime inspection backed by the existing FastAPI services.',
+    endpoints: ['/api/structured-lighting/status', '/api/structured-lighting/sessions', '/api/v2/discovery/devices'],
+  },
+  {
+    title: 'Depth processing',
+    description:
+      'Remote depth-processing parity for upload, segmentation previews, mask export, and projection creation.',
+    endpoints: ['/api/depth/upload', '/api/depth/segment', '/api/depth/projection/create'],
+  },
+  {
+    title: 'Projection animation',
+    description:
+      'Remote animation-library parity for previewable projection sources and reusable animation-list editing.',
+    endpoints: ['/api/projection/animations', '/api/projection/animation-lists'],
+  },
+  {
+    title: 'Overlay projection',
+    description:
+      'Remote overlay-projection parity for config inventory, MP4 export, overlay sync, and DLNA cast session control.',
+    endpoints: ['/api/overlay/configs', '/api/overlay/cast/sessions', '/api/overlay/export'],
+  },
+  {
+    title: 'Log viewer',
+    description:
+      'Remote log-viewer parity for aggregated logs, sources, levels, stats, and tailed source output.',
+    endpoints: ['/api/logs', '/api/logs/sources', '/api/logs/tail'],
   },
 ];
 

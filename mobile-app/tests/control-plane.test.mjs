@@ -21,11 +21,13 @@ afterEach(async () => {
 test('local control plane boots with useful defaults and no backend dependency', async () => {
   const client = await freshLocalClient();
 
-  const [health, devices, capabilities, deferred] = await Promise.all([
+  const [health, devices, capabilities, deferred, streamingHealth, overlaySessions] = await Promise.all([
     client.getHealth(),
     client.listDevices(),
     client.listCapabilities(),
     client.listDeferredFeatures(),
+    client.getStreamingHealth(),
+    client.listOverlayCastSessions(),
   ]);
 
   assert.equal(client.mode, 'local');
@@ -33,6 +35,8 @@ test('local control plane boots with useful defaults and no backend dependency',
   assert.ok(devices.length >= 2, 'expected seeded local device profiles');
   assert.ok(capabilities.some((item) => item.key === 'local-mode' && item.status === 'ready'));
   assert.ok(deferred.some((item) => item.id === 'deferred-renderer'));
+  assert.equal(streamingHealth.status, 'healthy');
+  assert.deepEqual(overlaySessions, []);
 });
 
 test('local control plane persists playback and action history updates', async () => {

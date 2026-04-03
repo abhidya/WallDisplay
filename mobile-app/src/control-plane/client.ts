@@ -17,6 +17,7 @@ import type {
   MediaDirectorySummary,
   MediaListSummary,
   OverlayConfigSummary,
+  OverlayCastSessionSummary,
   OverlayStatusResponse,
   OverlaySyncResponse,
   PhotoSummary,
@@ -29,6 +30,7 @@ import type {
   SceneControlPresetSummary,
   SceneRankSummary,
   StreamingAnalytics,
+  StreamingHealthResponse,
   StreamingSessionSummary,
   VideoSummary,
   DeferredFeatureSummary,
@@ -86,11 +88,18 @@ export interface ControlPlaneClient {
   advanceMediaChannel(channelId: number | string): Promise<MediaChannelSummary>;
   getStreamingAnalytics(): Promise<StreamingAnalytics>;
   listStreamingSessions(): Promise<StreamingSessionSummary[]>;
+  getStreamingHealth(): Promise<StreamingHealthResponse>;
   completeStreamingSession(sessionId: string): Promise<JsonRecord>;
   resetStreamingSession(sessionId: string): Promise<JsonRecord>;
   stopStreamingSession(sessionId: string): Promise<JsonRecord>;
+  listOverlayCastSessions(): Promise<OverlayCastSessionSummary[]>;
+  stopOverlayCastSession(sessionId: string): Promise<JsonRecord>;
   listRenderers(): Promise<RendererInstanceSummary[]>;
   listProjectors(): Promise<RendererProjectorSummary[]>;
+  getRendererStatus(projectorId: string): Promise<JsonRecord>;
+  discoverAirPlayDevices(): Promise<JsonRecord>;
+  listAirPlayDevices(): Promise<JsonRecord>;
+  getAllAirPlayDevices(): Promise<JsonRecord>;
   listOverlayConfigs(): Promise<OverlayConfigSummary[]>;
   listRendererScenes(): Promise<RendererSceneSummary[]>;
   startRenderer(projector: string, scene: string): Promise<RendererActionResponse>;
@@ -152,11 +161,18 @@ class RemoteControlPlaneAdapter implements ControlPlaneClient {
   advanceMediaChannel(channelId: number | string) { return this.client.advanceMediaChannel(channelId); }
   getStreamingAnalytics() { return this.client.getStreamingAnalytics(); }
   listStreamingSessions() { return this.client.listStreamingSessions(); }
+  getStreamingHealth() { return this.client.getStreamingHealth(); }
   completeStreamingSession(sessionId: string) { return this.client.completeStreamingSession(sessionId); }
   resetStreamingSession(sessionId: string) { return this.client.resetStreamingSession(sessionId); }
   stopStreamingSession(sessionId: string) { return this.client.stopStreamingSession(sessionId); }
+  listOverlayCastSessions() { return this.client.listOverlayCastSessions(); }
+  stopOverlayCastSession(sessionId: string) { return this.client.stopOverlayCastSession(sessionId); }
   listRenderers() { return this.client.listRenderers(); }
   listProjectors() { return this.client.listProjectors(); }
+  getRendererStatus(projectorId: string) { return this.client.getRendererStatus(projectorId); }
+  discoverAirPlayDevices() { return this.client.discoverAirPlayDevices(); }
+  listAirPlayDevices() { return this.client.listAirPlayDevices(); }
+  getAllAirPlayDevices() { return this.client.getAllAirPlayDevices(); }
   listOverlayConfigs() { return this.client.listOverlayConfigs(); }
   listRendererScenes() { return this.client.listRendererScenes(); }
   startRenderer(projector: string, scene: string) { return this.client.startRenderer(projector, scene); }
@@ -712,6 +728,27 @@ class LocalControlPlaneClient implements ControlPlaneClient {
     return state.sessions;
   }
 
+  async getStreamingHealth(): Promise<StreamingHealthResponse> {
+    const state = await loadLocalControlPlaneState();
+    return {
+      status: 'healthy',
+      health_score: 100,
+      stalled_sessions: 0,
+      error_sessions: 0,
+      total_active_sessions: state.sessions.length,
+      sessions_by_stream_type: state.sessions.reduce<Record<string, number>>((acc, session) => {
+        const streamType =
+          typeof session.stream_type === 'string' && session.stream_type.length > 0
+            ? session.stream_type
+            : 'unknown';
+        acc[streamType] = (acc[streamType] ?? 0) + 1;
+        return acc;
+      }, {}),
+      stalled_by_stream_type: {},
+      error_by_stream_type: {},
+    };
+  }
+
   async completeStreamingSession(sessionId: string): Promise<JsonRecord> {
     await updateLocalControlPlaneState((state) => {
       state.sessions = state.sessions.map((session) =>
@@ -757,12 +794,49 @@ class LocalControlPlaneClient implements ControlPlaneClient {
     return { success: true, message: 'Local streaming session removed.' };
   }
 
+  async listOverlayCastSessions(): Promise<OverlayCastSessionSummary[]> {
+    return [];
+  }
+
+  async stopOverlayCastSession(sessionId: string): Promise<JsonRecord> {
+    await updateLocalControlPlaneState((state) =>
+      appendActionHistory(state, {
+        title: 'Overlay cast stop deferred',
+        detail: `Overlay cast session ${sessionId} is not available in local mode.`,
+        status: 'deferred',
+        mode: 'local',
+      }),
+    );
+
+    return {
+      status: 'deferred',
+      message: 'Overlay cast sessions are deferred in local mode.',
+      session_id: sessionId,
+    };
+  }
+
   async listRenderers(): Promise<RendererInstanceSummary[]> {
     return [];
   }
 
   async listProjectors(): Promise<RendererProjectorSummary[]> {
     return [];
+  }
+
+  async getRendererStatus(_projectorId: string): Promise<JsonRecord> {
+    return { status: 'deferred', message: 'Renderer status is deferred in local mode.' };
+  }
+
+  async discoverAirPlayDevices(): Promise<JsonRecord> {
+    return { devices: [], status: 'deferred' };
+  }
+
+  async listAirPlayDevices(): Promise<JsonRecord> {
+    return { devices: [], status: 'deferred' };
+  }
+
+  async getAllAirPlayDevices(): Promise<JsonRecord> {
+    return { devices: [], status: 'deferred' };
   }
 
   async listOverlayConfigs(): Promise<OverlayConfigSummary[]> {

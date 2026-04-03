@@ -129,6 +129,9 @@ export interface StreamingAnalytics extends JsonRecord {
   session_count?: number;
   overlay_sessions?: number;
   total_bandwidth_mbps?: number;
+  total_bandwidth_bps?: number;
+  active_sessions_by_stream_type?: Record<string, number>;
+  active_sessions_by_consumer_prefix?: Record<string, number>;
 }
 
 export interface StreamingSessionSummary extends JsonRecord {
@@ -137,6 +140,42 @@ export interface StreamingSessionSummary extends JsonRecord {
   consumer_id?: string;
   stream_type?: string;
   status?: string;
+}
+
+export interface StreamingHealthResponse extends JsonRecord {
+  status?: string;
+  health_score?: number;
+  stalled_sessions?: number;
+  error_sessions?: number;
+  total_active_sessions?: number;
+  sessions_by_stream_type?: Record<string, number>;
+  stalled_by_stream_type?: Record<string, number>;
+  error_by_stream_type?: Record<string, number>;
+}
+
+export interface OverlayCastSessionSummary extends JsonRecord {
+  session_id?: string;
+  device_id?: string;
+  config_id?: number;
+  overlay_url?: string;
+  relay_url?: string;
+  stream_port?: number;
+  status?: string;
+  archived?: boolean;
+  current_step?: string;
+  debug_log?: string[];
+  active_clients?: number;
+  ffmpeg_speed?: number | null;
+  ffmpeg_fps?: number | null;
+  ffmpeg_bitrate_kbps?: number | null;
+  encoder?: string | null;
+  last_client_connected_at?: string | null;
+  last_client_disconnected_at?: string | null;
+  last_client_activity_at?: string | null;
+  started_at?: string;
+  updated_at?: string;
+  error?: string | null;
+  discovery_session_id?: string | null;
 }
 
 export interface RendererActionResponse extends JsonRecord {

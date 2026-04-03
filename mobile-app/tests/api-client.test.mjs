@@ -143,6 +143,8 @@ test('NanoDlnaApiClient normalizes nested backend payloads into mobile-friendly 
     jsonResponse({ data: { scenes: [{ id: 'scene-1', name: 'Grid' }] } }),
     jsonResponse({ photos: [{ id: 3, name: 'Poster' }] }),
     jsonResponse([{ id: 8, name: 'Main list' }]),
+    jsonResponse({ status: 'healthy', health_score: 100 }),
+    jsonResponse([{ session_id: 'cast-1', active_clients: 2 }]),
   ]);
 
   const client = new NanoDlnaApiClient('http://controller.local:8000/api');
@@ -157,6 +159,8 @@ test('NanoDlnaApiClient normalizes nested backend payloads into mobile-friendly 
   assert.deepEqual(await client.listRendererScenes(), [{ id: 'scene-1', name: 'Grid' }]);
   assert.deepEqual(await client.listPhotos(), [{ id: 3, name: 'Poster' }]);
   assert.deepEqual(await client.listMediaLists(), [{ id: 8, name: 'Main list' }]);
+  assert.deepEqual(await client.getStreamingHealth(), { status: 'healthy', health_score: 100 });
+  assert.deepEqual(await client.listOverlayCastSessions(), [{ session_id: 'cast-1', active_clients: 2 }]);
 });
 
 test('NanoDlnaApiClient surfaces backend error payloads for operator diagnostics', async () => {
