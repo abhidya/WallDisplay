@@ -73,7 +73,9 @@ export function MediaScreen({
   selectedDeviceLabel,
 }: MediaScreenProps) {
   const {
+    actionLoadingKey,
     actionMessage,
+    advanceChannel,
     channels,
     directories,
     error,
@@ -83,6 +85,7 @@ export function MediaScreen({
     photos,
     playVideo,
     playingVideoId,
+    scanDirectory,
     videos,
   } = useMediaController(client, { selectedDeviceId });
 
@@ -198,7 +201,27 @@ export function MediaScreen({
         ) : null}
         {directories.slice(0, 6).map((directory) => (
           <View key={String(directory.id ?? describeDirectory(directory))} style={styles.itemCard}>
-            <Text style={styles.itemTitle}>{describeDirectory(directory)}</Text>
+            <View style={styles.itemHeader}>
+              <Text style={styles.itemTitle}>{describeDirectory(directory)}</Text>
+              <ActionButton
+                label={
+                  actionLoadingKey === `scan-directory-${String(directory.id)}`
+                    ? 'Scanning...'
+                    : 'Scan'
+                }
+                onPress={() => {
+                  if (directory.id !== null && directory.id !== undefined) {
+                    void scanDirectory(directory.id);
+                  }
+                }}
+                disabled={
+                  directory.id === null ||
+                  directory.id === undefined ||
+                  actionLoadingKey === `scan-directory-${String(directory.id)}`
+                }
+                variant="secondary"
+              />
+            </View>
             <Text style={styles.detailText}>Category: {formatValue(directory.category)}</Text>
             <Text style={styles.detailText}>Enabled: {formatValue(directory.enabled)}</Text>
             <Text style={styles.detailText}>Scan mode: {formatValue(directory.scan_mode)}</Text>
@@ -225,7 +248,27 @@ export function MediaScreen({
         ) : null}
         {channels.slice(0, 6).map((channel) => (
           <View key={String(channel.id ?? describeChannel(channel))} style={styles.itemCard}>
-            <Text style={styles.itemTitle}>{describeChannel(channel)}</Text>
+            <View style={styles.itemHeader}>
+              <Text style={styles.itemTitle}>{describeChannel(channel)}</Text>
+              <ActionButton
+                label={
+                  actionLoadingKey === `advance-channel-${String(channel.id)}`
+                    ? 'Advancing...'
+                    : 'Advance'
+                }
+                onPress={() => {
+                  if (channel.id !== null && channel.id !== undefined) {
+                    void advanceChannel(channel.id);
+                  }
+                }}
+                disabled={
+                  channel.id === null ||
+                  channel.id === undefined ||
+                  actionLoadingKey === `advance-channel-${String(channel.id)}`
+                }
+                variant="secondary"
+              />
+            </View>
             <Text style={styles.detailText}>
               List ID: {formatValue(channel.media_list_id)}
             </Text>

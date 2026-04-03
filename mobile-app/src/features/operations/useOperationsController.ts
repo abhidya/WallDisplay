@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { NanoDlnaApiClient } from '../../services/api';
 import type {
+  JsonRecord,
   MappingSceneSummary,
   OverlayConfigSummary,
   OverlayStatusResponse,
@@ -47,6 +48,9 @@ export interface OperationsController {
   runRendererStartDefault: () => Promise<void>;
   runRendererStartWithScene: () => Promise<void>;
   runRendererStop: () => Promise<void>;
+  runStreamingSessionComplete: (sessionId: string) => Promise<void>;
+  runStreamingSessionReset: (sessionId: string) => Promise<void>;
+  runStreamingSessionStop: (sessionId: string) => Promise<void>;
 }
 
 function ensureCurrentSelection(
@@ -89,6 +93,19 @@ export function useOperationsController(client: NanoDlnaApiClient): OperationsCo
     return () => {
       mountedRef.current = false;
     };
+  }, []);
+
+  const describeActionMessage = useCallback((payload: JsonRecord, fallback: string): string => {
+    if (typeof payload.message === 'string' && payload.message) {
+      return payload.message;
+    }
+    if (typeof payload.status === 'string' && payload.status) {
+      return payload.status;
+    }
+    if (typeof payload.detail === 'string' && payload.detail) {
+      return payload.detail;
+    }
+    return fallback;
   }, []);
 
   const load = useCallback(async () => {
@@ -265,6 +282,54 @@ export function useOperationsController(client: NanoDlnaApiClient): OperationsCo
     );
   }, [client, runAction]);
 
+  const runStreamingSessionComplete = useCallback(
+    async (sessionId: string) => {
+      await runAction(
+        `complete-streaming-session-${sessionId}`,
+        async () => ({
+          message: describeActionMessage(
+            await client.completeStreamingSession(sessionId),
+            `Session ${sessionId} marked complete.`,
+          ),
+        }),
+        { successMessage: `Session ${sessionId} marked complete.` },
+      );
+    },
+    [client, describeActionMessage, runAction],
+  );
+
+  const runStreamingSessionReset = useCallback(
+    async (sessionId: string) => {
+      await runAction(
+        `reset-streaming-session-${sessionId}`,
+        async () => ({
+          message: describeActionMessage(
+            await client.resetStreamingSession(sessionId),
+            `Session ${sessionId} reset.`,
+          ),
+        }),
+        { successMessage: `Session ${sessionId} reset.` },
+      );
+    },
+    [client, describeActionMessage, runAction],
+  );
+
+  const runStreamingSessionStop = useCallback(
+    async (sessionId: string) => {
+      await runAction(
+        `stop-streaming-session-${sessionId}`,
+        async () => ({
+          message: describeActionMessage(
+            await client.stopStreamingSession(sessionId),
+            `Session ${sessionId} stopped.`,
+          ),
+        }),
+        { successMessage: `Session ${sessionId} stopped.` },
+      );
+    },
+    [client, describeActionMessage, runAction],
+  );
+
   const launchSelectedProjection = useCallback(async () => {
     if (selectedProjectionConfigId === null || selectedProjectionConfigId === undefined) {
       setError('Select a projection config first.');
@@ -337,6 +402,9 @@ export function useOperationsController(client: NanoDlnaApiClient): OperationsCo
       runRendererStartDefault,
       runRendererStartWithScene,
       runRendererStop,
+      runStreamingSessionComplete,
+      runStreamingSessionReset,
+      runStreamingSessionStop,
       sceneControlPresets,
       sceneRanks,
       selectProjectionConfig,
@@ -369,6 +437,9 @@ export function useOperationsController(client: NanoDlnaApiClient): OperationsCo
       runRendererStartDefault,
       runRendererStartWithScene,
       runRendererStop,
+      runStreamingSessionComplete,
+      runStreamingSessionReset,
+      runStreamingSessionStop,
       sceneControlPresets,
       sceneRanks,
       selectProjectionConfig,

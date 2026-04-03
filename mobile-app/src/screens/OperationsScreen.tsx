@@ -110,6 +110,9 @@ export function OperationsScreen({ client }: OperationsScreenProps) {
     runRendererStartDefault,
     runRendererStartWithScene,
     runRendererStop,
+    runStreamingSessionComplete,
+    runStreamingSessionReset,
+    runStreamingSessionStop,
     sceneControlPresets,
     sceneRanks,
     selectProjectionConfig,
@@ -314,6 +317,40 @@ export function OperationsScreen({ client }: OperationsScreenProps) {
             <Text style={styles.detailText}>Type: {formatValue(session.stream_type)}</Text>
             <Text style={styles.detailText}>Device: {formatValue(session.device_name)}</Text>
             <Text style={styles.detailText}>Status: {formatValue(session.status)}</Text>
+            {session.session_id ? (
+              <View style={styles.cardActions}>
+                <ActionButton
+                  label={
+                    actionLoadingKey === `complete-streaming-session-${session.session_id}`
+                      ? 'Completing...'
+                      : 'Mark complete'
+                  }
+                  onPress={() => void runStreamingSessionComplete(session.session_id!)}
+                  disabled={actionsBusy}
+                  variant="secondary"
+                />
+                <ActionButton
+                  label={
+                    actionLoadingKey === `reset-streaming-session-${session.session_id}`
+                      ? 'Resetting...'
+                      : 'Reset'
+                  }
+                  onPress={() => void runStreamingSessionReset(session.session_id!)}
+                  disabled={actionsBusy}
+                  variant="secondary"
+                />
+                <ActionButton
+                  label={
+                    actionLoadingKey === `stop-streaming-session-${session.session_id}`
+                      ? 'Stopping...'
+                      : 'Remove'
+                  }
+                  onPress={() => void runStreamingSessionStop(session.session_id!)}
+                  disabled={actionsBusy}
+                  variant="secondary"
+                />
+              </View>
+            ) : null}
           </View>
         ))}
       </Panel>
@@ -513,6 +550,12 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderTopWidth: 1,
     borderTopColor: colors.border,
+  },
+  cardActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 4,
   },
   itemTitle: {
     color: colors.text,
