@@ -49,8 +49,8 @@ echo "Adding videos from configuration to the database..."
 "$NANODLNA_PYTHON_BIN" "$NANODLNA_ROOT_DIR/add_config_videos.py" "$CONFIG_PATH" "$NANODLNA_DB_PATH"
 
 mkdir -p "$NANODLNA_LOG_DIR"
-echo "Resetting dashboard log file..."
-echo "--- Dashboard started at $(date) ---" > "$NANODLNA_LOG_DIR/dashboard_run.log"
+echo "Appending dashboard session marker..."
+echo "--- Dashboard started at $(date) ---" >> "$NANODLNA_LOG_DIR/dashboard_run.log"
 
 echo "Starting the dashboard..."
 cd "$NANODLNA_ROOT_DIR/web"

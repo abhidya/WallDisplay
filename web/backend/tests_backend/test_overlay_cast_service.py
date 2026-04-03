@@ -33,6 +33,7 @@ async def test_start_cast_returns_after_relay_ready(monkeypatch):
     assert elapsed < 0.03
     assert session["status"] == "preparing"
     assert session["current_step"] == "queued"
+    assert "capture=dlna" in session["overlay_url"]
 
     await service.stop_cast(session["session_id"])
 
@@ -51,3 +52,32 @@ def test_latest_frame_overwrites_older_frame():
     session.latest_frame = b"frame-2"
 
     assert session.latest_frame == b"frame-2"
+
+
+def test_build_ffmpeg_command_prefers_videotoolbox_on_macos(monkeypatch):
+    service = OverlayCastService()
+
+    monkeypatch.setattr("web.backend.services.overlay_cast_service.sys.platform", "darwin")
+
+    encoder, command = service._build_ffmpeg_command(frame_rate=15, capture_width=960, capture_height=540)
+
+    assert encoder == "h264_videotoolbox"
+    assert "-realtime" in command
+    assert "-prio_speed" in command
+    assert "-allow_sw" in command
+    assert "2200k" in command
+    assert "500000" in command
+
+
+def test_build_ffmpeg_command_uses_low_latency_x264_elsewhere(monkeypatch):
+    service = OverlayCastService()
+
+    monkeypatch.setattr("web.backend.services.overlay_cast_service.sys.platform", "linux")
+
+    encoder, command = service._build_ffmpeg_command(frame_rate=8, capture_width=640, capture_height=360)
+
+    assert encoder == "libx264"
+    assert "-tune" in command
+    assert "zerolatency" in command
+    assert "-bf" in command
+    assert "900k" in command

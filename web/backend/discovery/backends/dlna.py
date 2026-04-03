@@ -3,6 +3,7 @@ DLNA/UPnP discovery backend implementation.
 """
 
 import asyncio
+from contextlib import asynccontextmanager
 import os
 import socket
 import struct
@@ -49,6 +50,7 @@ class DLNADiscoveryBackend(DiscoveryBackend):
         self.discovery_timeout = 5.0
         self._probe_failure_warning_active = False
         self._route_debug_logged = False
+        self._persistent_http_session: Optional[aiohttp.ClientSession] = None
 
     def _log_route_debug_once(self) -> None:
         if self._route_debug_logged:
@@ -132,89 +134,90 @@ class DLNADiscoveryBackend(DiscoveryBackend):
         probe_success_count = 0
         probe_error_samples = []
 
-        for candidate_host in candidate_hosts:
-            if candidate_host == "0.0.0.0":
-                probe_attempts = [("0.0.0.0", False)]
-            else:
-                probe_attempts = [
-                    (candidate_host, True),
-                    (candidate_host, False),
-                    ("0.0.0.0", False),
-                ]
+        async with self._session_scope() as session:
+            for candidate_host in candidate_hosts:
+                if candidate_host == "0.0.0.0":
+                    probe_attempts = [("0.0.0.0", False)]
+                else:
+                    probe_attempts = [
+                        (candidate_host, True),
+                        (candidate_host, False),
+                        ("0.0.0.0", False),
+                    ]
 
-            attempt_errors = []
-            for bind_host, set_multicast_if in probe_attempts:
-                probe_attempt_count += 1
-                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-                try:
-                    ttl = struct.pack("B", 4)
-                    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl)
-                    if set_multicast_if and bind_host != "0.0.0.0":
-                        sock.setsockopt(
-                            socket.IPPROTO_IP,
-                            socket.IP_MULTICAST_IF,
-                            socket.inet_aton(bind_host),
+                attempt_errors = []
+                for bind_host, set_multicast_if in probe_attempts:
+                    probe_attempt_count += 1
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+                    try:
+                        ttl = struct.pack("B", 4)
+                        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl)
+                        if set_multicast_if and bind_host != "0.0.0.0":
+                            sock.setsockopt(
+                                socket.IPPROTO_IP,
+                                socket.IP_MULTICAST_IF,
+                                socket.inet_aton(bind_host),
+                            )
+                        sock.bind((bind_host, 0))
+                        sock.settimeout(self.discovery_timeout)
+                        sock.sendto(
+                            SSDP_BROADCAST_MSG.encode("UTF-8"),
+                            (SSDP_BROADCAST_ADDR, SSDP_BROADCAST_PORT),
                         )
-                    sock.bind((bind_host, 0))
-                    sock.settimeout(self.discovery_timeout)
-                    sock.sendto(
-                        SSDP_BROADCAST_MSG.encode("UTF-8"),
-                        (SSDP_BROADCAST_ADDR, SSDP_BROADCAST_PORT),
-                    )
-                    successful_probe = True
-                    probe_success_count += 1
+                        successful_probe = True
+                        probe_success_count += 1
 
-                    while True:
-                        try:
-                            data, _addr = sock.recvfrom(1024)
-                            response = data.decode("UTF-8")
-                            ssdp_response_count += 1
+                        while True:
+                            try:
+                                data, _addr = sock.recvfrom(1024)
+                                response = data.decode("UTF-8")
+                                ssdp_response_count += 1
 
-                            headers = {}
-                            for line in response.split("\r\n")[1:]:
-                                if ":" in line:
-                                    key, value = line.split(":", 1)
-                                    headers[key.strip().lower()] = value.strip()
+                                headers = {}
+                                for line in response.split("\r\n")[1:]:
+                                    if ":" in line:
+                                        key, value = line.split(":", 1)
+                                        headers[key.strip().lower()] = value.strip()
 
-                            if "st" in headers and "AVTransport" in headers["st"]:
-                                avtransport_response_count += 1
-                                location = headers.get("location")
-                                if location and location not in device_locations:
-                                    device_locations.add(location)
-                                    device = await self._parse_device_description(location)
-                                    if device:
-                                        devices.append(device)
-                        except socket.timeout:
-                            break
-                        except Exception as e:
-                            logger.error(f"Error processing SSDP response: {e}")
-                    break
-                except OSError as exc:
-                    attempt_errors.append((bind_host, set_multicast_if, exc))
-                    if getattr(exc, "errno", None) == 65:
-                        self._log_route_debug_once()
-                    if len(probe_error_samples) < 5:
-                        probe_error_samples.append(
-                            {
-                                "candidate": candidate_host,
-                                "bind_host": bind_host,
-                                "set_multicast_if": set_multicast_if,
-                                "errno": getattr(exc, "errno", None),
-                                "error": str(exc),
-                            }
+                                if "st" in headers and "AVTransport" in headers["st"]:
+                                    avtransport_response_count += 1
+                                    location = headers.get("location")
+                                    if location and location not in device_locations:
+                                        device_locations.add(location)
+                                        device = await self._parse_device_description(location, session)
+                                        if device:
+                                            devices.append(device)
+                            except socket.timeout:
+                                break
+                            except Exception as e:
+                                logger.error(f"Error processing SSDP response: {e}")
+                        break
+                    except OSError as exc:
+                        attempt_errors.append((bind_host, set_multicast_if, exc))
+                        if getattr(exc, "errno", None) == 65:
+                            self._log_route_debug_once()
+                        if len(probe_error_samples) < 5:
+                            probe_error_samples.append(
+                                {
+                                    "candidate": candidate_host,
+                                    "bind_host": bind_host,
+                                    "set_multicast_if": set_multicast_if,
+                                    "errno": getattr(exc, "errno", None),
+                                    "error": str(exc),
+                                }
+                            )
+                        logger.debug(
+                            "Unified DLNA discovery send failed for candidate %s via bind=%s multicast_if=%s: %s",
+                            candidate_host,
+                            bind_host,
+                            set_multicast_if,
+                            exc,
                         )
-                    logger.debug(
-                        "Unified DLNA discovery send failed for candidate %s via bind=%s multicast_if=%s: %s",
-                        candidate_host,
-                        bind_host,
-                        set_multicast_if,
-                        exc,
-                    )
-                finally:
-                    sock.close()
+                    finally:
+                        sock.close()
 
-            if attempt_errors and not successful_probe:
-                logger.debug("Unified DLNA candidate %s failed in all socket modes", candidate_host)
+                if attempt_errors and not successful_probe:
+                    logger.debug("Unified DLNA candidate %s failed in all socket modes", candidate_host)
 
         if candidate_hosts and not successful_probe:
             if not self._probe_failure_warning_active:
@@ -240,14 +243,58 @@ class DLNADiscoveryBackend(DiscoveryBackend):
             )
         return devices
     
-    async def _parse_device_description(self, location_url: str) -> Optional[Device]:
+    def _create_http_session(self) -> aiohttp.ClientSession:
+        connect_timeout = min(self.discovery_timeout, 2.0)
+        timeout = aiohttp.ClientTimeout(total=self.discovery_timeout, connect=connect_timeout)
+        connector = aiohttp.TCPConnector(limit=10, limit_per_host=4, enable_cleanup_closed=True)
+        return aiohttp.ClientSession(timeout=timeout, connector=connector)
+
+    async def _ensure_persistent_http_session(self) -> aiohttp.ClientSession:
+        if self._persistent_http_session is None or self._persistent_http_session.closed:
+            self._persistent_http_session = self._create_http_session()
+        return self._persistent_http_session
+
+    async def _close_persistent_http_session(self) -> None:
+        if self._persistent_http_session is None:
+            return
+        if not self._persistent_http_session.closed:
+            await self._persistent_http_session.close()
+        self._persistent_http_session = None
+
+    @asynccontextmanager
+    async def _session_scope(self):
+        if self.discovery_running:
+            session = await self._ensure_persistent_http_session()
+            yield session
+            return
+
+        async with self._create_http_session() as session:
+            yield session
+
+    async def _post_action(
+        self,
+        session: aiohttp.ClientSession,
+        action_url: str,
+        soap_body: str,
+        headers: Dict[str, str],
+        *,
+        error_message: str,
+    ) -> None:
+        async with session.post(action_url, data=soap_body, headers=headers) as response:
+            if response.status != 200:
+                raise Exception(f"{error_message}: {response.status}")
+
+    async def _parse_device_description(
+        self,
+        location_url: str,
+        session: aiohttp.ClientSession,
+    ) -> Optional[Device]:
         """
         Parse device description from XML at location URL.
         """
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(location_url, timeout=aiohttp.ClientTimeout(total=5)) as response:
-                    xml_content = await response.text()
+            async with session.get(location_url) as response:
+                xml_content = await response.text()
                     
             # Remove namespace declarations for easier parsing
             xml_content = re.sub(r'\s(xmlns="[^"]+"|xmlns=\'[^\']+\')', '', xml_content, count=1)
@@ -361,13 +408,17 @@ class DLNADiscoveryBackend(DiscoveryBackend):
             "SOAPAction": '"urn:schemas-upnp-org:service:AVTransport:1#SetAVTransportURI"'
         }
         
-        async with aiohttp.ClientSession() as session:
-            async with session.post(device.action_url, data=soap_body, headers=headers) as response:
-                if response.status != 200:
-                    raise Exception(f"Failed to set URI: {response.status}")
-                    
-        # Send Play action
-        soap_body = f"""<?xml version="1.0" encoding="utf-8"?>
+        async with self._session_scope() as session:
+            await self._post_action(
+                session,
+                device.action_url,
+                soap_body,
+                headers,
+                error_message="Failed to set URI",
+            )
+                     
+            # Send Play action
+            soap_body = f"""<?xml version="1.0" encoding="utf-8"?>
 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
     <s:Body>
         <u:Play xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
@@ -376,13 +427,15 @@ class DLNADiscoveryBackend(DiscoveryBackend):
         </u:Play>
     </s:Body>
 </s:Envelope>"""
-        
-        headers["SOAPAction"] = '"urn:schemas-upnp-org:service:AVTransport:1#Play"'
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.post(device.action_url, data=soap_body, headers=headers) as response:
-                if response.status != 200:
-                    raise Exception(f"Failed to play: {response.status}")
+            
+            headers["SOAPAction"] = '"urn:schemas-upnp-org:service:AVTransport:1#Play"'
+            await self._post_action(
+                session,
+                device.action_url,
+                soap_body,
+                headers,
+                error_message="Failed to play",
+            )
                     
         # Create session
         casting_session = CastingSession(
@@ -416,10 +469,8 @@ class DLNADiscoveryBackend(DiscoveryBackend):
                 "SOAPAction": '"urn:schemas-upnp-org:service:AVTransport:1#Stop"'
             }
             
-            async with aiohttp.ClientSession() as http_session:
-                async with http_session.post(session.device.action_url, 
-                                           data=soap_body, 
-                                           headers=headers) as response:
+            async with self._session_scope() as http_session:
+                async with http_session.post(session.device.action_url, data=soap_body, headers=headers) as response:
                     success = response.status == 200
                     
             if success:
@@ -449,10 +500,8 @@ class DLNADiscoveryBackend(DiscoveryBackend):
                 "SOAPAction": '"urn:schemas-upnp-org:service:AVTransport:1#Pause"'
             }
             
-            async with aiohttp.ClientSession() as http_session:
-                async with http_session.post(session.device.action_url,
-                                           data=soap_body,
-                                           headers=headers) as response:
+            async with self._session_scope() as http_session:
+                async with http_session.post(session.device.action_url, data=soap_body, headers=headers) as response:
                     if response.status == 200:
                         session.is_paused = True
                         return True
@@ -493,10 +542,8 @@ class DLNADiscoveryBackend(DiscoveryBackend):
                 "SOAPAction": '"urn:schemas-upnp-org:service:AVTransport:1#Seek"'
             }
             
-            async with aiohttp.ClientSession() as http_session:
-                async with http_session.post(session.device.action_url,
-                                           data=soap_body,
-                                           headers=headers) as response:
+            async with self._session_scope() as http_session:
+                async with http_session.post(session.device.action_url, data=soap_body, headers=headers) as response:
                     if response.status == 200:
                         session.position = position
                         return True
@@ -524,10 +571,8 @@ class DLNADiscoveryBackend(DiscoveryBackend):
                 "SOAPAction": '"urn:schemas-upnp-org:service:AVTransport:1#GetPositionInfo"'
             }
             
-            async with aiohttp.ClientSession() as http_session:
-                async with http_session.post(session.device.action_url,
-                                           data=soap_body,
-                                           headers=headers) as response:
+            async with self._session_scope() as http_session:
+                async with http_session.post(session.device.action_url, data=soap_body, headers=headers) as response:
                     if response.status == 200:
                         content = await response.text()
                         # Parse response to extract position and duration
@@ -565,3 +610,11 @@ class DLNADiscoveryBackend(DiscoveryBackend):
         content_url = html.escape(content_url)
         
         return f"""&lt;DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/"&gt;&lt;item id="1" parentID="0" restricted="1"&gt;&lt;dc:title&gt;{title}&lt;/dc:title&gt;&lt;res protocolInfo="http-get:*:{content_type}:*"&gt;{content_url}&lt;/res&gt;&lt;upnp:class&gt;{upnp_class}&lt;/upnp:class&gt;&lt;/item&gt;&lt;/DIDL-Lite&gt;"""
+
+    async def start_discovery(self):
+        await self._ensure_persistent_http_session()
+        await super().start_discovery()
+
+    async def stop_discovery(self):
+        await super().stop_discovery()
+        await self._close_persistent_http_session()

@@ -28,6 +28,10 @@ logger = logging.getLogger(__name__)
 RELAY_IDLE_TIMEOUT_SECONDS = 15
 SESSION_HISTORY_LIMIT = 12
 DEFAULT_PRIMING_SECONDS = 6
+DEFAULT_CAST_CAPTURE_WIDTH = 960
+DEFAULT_CAST_CAPTURE_HEIGHT = 540
+DEFAULT_CAST_QUALITY = 28
+DEFAULT_CAST_FRAME_RATE = 10
 FFMPEG_SPEED_RE = re.compile(r"speed=\s*([0-9.]+)x")
 FFMPEG_FPS_RE = re.compile(r"fps=\s*([0-9.]+)")
 FFMPEG_BITRATE_RE = re.compile(r"bitrate=\s*([0-9.]+)kbits/s")
@@ -415,10 +419,10 @@ class OverlayCastService:
         controls_hidden: bool = True,
         viewport_width: int = 1280,
         viewport_height: int = 720,
-        capture_width: int = 640,
-        capture_height: int = 360,
-        quality: int = 22,
-        frame_rate: int = 3,
+        capture_width: int = DEFAULT_CAST_CAPTURE_WIDTH,
+        capture_height: int = DEFAULT_CAST_CAPTURE_HEIGHT,
+        quality: int = DEFAULT_CAST_QUALITY,
+        frame_rate: int = DEFAULT_CAST_FRAME_RATE,
         stream_port: Optional[int] = None,
     ) -> dict:
         with self._session_lock:
@@ -428,7 +432,12 @@ class OverlayCastService:
 
             relay_port = stream_port or self._reserve_free_port()
             relay_url = f"http://{self._get_local_ip()}:{relay_port}{OVERLAY_STREAM_PATH}"
-            overlay_url = self._build_overlay_url(overlay_base_url, config_id, controls_hidden)
+            overlay_url = self._build_overlay_url(
+                overlay_base_url,
+                config_id,
+                controls_hidden,
+                capture_mode="dlna",
+            )
             session_id = str(uuid.uuid4())
             session = OverlayCastSession(
                 session_id=session_id,
@@ -542,7 +551,11 @@ class OverlayCastService:
             await page.goto(session.overlay_url)
             self._log_step(session, "page_loaded", f"Overlay page loaded: {session.overlay_url}")
 
-            encoder, ffmpeg_cmd = self._build_ffmpeg_command(frame_rate)
+            encoder, ffmpeg_cmd = self._build_ffmpeg_command(
+                frame_rate=frame_rate,
+                capture_width=capture_width,
+                capture_height=capture_height,
+            )
             session.encoder = encoder
             self._log_step(session, "ffmpeg_start", f"Starting FFmpeg encoder with {encoder}")
             ffmpeg_proc = subprocess.Popen(
@@ -767,13 +780,22 @@ class OverlayCastService:
         session.pending_frame_b64 = None
         session.frame_decode_event.set()
 
-    def _build_overlay_url(self, overlay_base_url: str, config_id: int, controls_hidden: bool, hide_widgets: bool = False) -> str:
+    def _build_overlay_url(
+        self,
+        overlay_base_url: str,
+        config_id: int,
+        controls_hidden: bool,
+        hide_widgets: bool = False,
+        capture_mode: Optional[str] = None,
+    ) -> str:
         base = overlay_base_url.rstrip("/")
         params = {"config_id": config_id}
         if controls_hidden:
             params["controls"] = "hidden"
         if hide_widgets:
             params["widgets"] = "hidden"
+        if capture_mode:
+            params["capture"] = capture_mode
         return f"{base}/backend-static/overlay_window.html?{urlencode(params)}"
 
     def _get_local_ip(self) -> str:
@@ -904,22 +926,37 @@ class OverlayCastService:
         finally:
             relay_state.close()
 
-    def _build_ffmpeg_command(self, frame_rate: int) -> tuple[str, list[str]]:
-        encoder = "libx264"
-        encoder_options = [
-            "-preset",
-            "ultrafast",
-            "-tune",
-            "zerolatency",
-            "-threads",
-            "0",
-            "-profile:v",
-            "baseline",
-        ]
+    def _build_ffmpeg_command(self, frame_rate: int, capture_width: int, capture_height: int) -> tuple[str, list[str]]:
+        bitrate_kbps = self._select_cast_bitrate_kbps(frame_rate, capture_width, capture_height)
+        encoder = "h264_videotoolbox" if sys.platform == "darwin" else "libx264"
+        if encoder == "h264_videotoolbox":
+            encoder_options = [
+                "-realtime",
+                "1",
+                "-prio_speed",
+                "1",
+                "-allow_sw",
+                "1",
+                "-profile:v",
+                "baseline",
+            ]
+        else:
+            encoder_options = [
+                "-preset",
+                "ultrafast",
+                "-tune",
+                "zerolatency",
+                "-threads",
+                "0",
+                "-profile:v",
+                "baseline",
+            ]
         ffmpeg_cmd = [
             "ffmpeg",
             "-y",
             "-hide_banner",
+            "-loglevel",
+            "error",
             "-nostats",
             "-progress",
             "pipe:2",
@@ -933,11 +970,17 @@ class OverlayCastService:
             encoder,
             *encoder_options,
             "-b:v",
-            "500k",
+            f"{bitrate_kbps}k",
+            "-maxrate",
+            f"{bitrate_kbps}k",
+            "-bufsize",
+            f"{bitrate_kbps * 2}k",
             "-g",
             str(frame_rate),
             "-keyint_min",
             str(frame_rate),
+            "-bf",
+            "0",
             "-r",
             str(frame_rate),
             "-pix_fmt",
@@ -945,12 +988,20 @@ class OverlayCastService:
             "-movflags",
             "+frag_keyframe+empty_moov+default_base_moof",
             "-frag_duration",
-            "1000000",
+            "500000",
             "-f",
             "mp4",
             "pipe:1",
         ]
         return encoder, ffmpeg_cmd
+
+    def _select_cast_bitrate_kbps(self, frame_rate: int, capture_width: int, capture_height: int) -> int:
+        scaled_pixels = max(1, int(frame_rate)) * max(1, int(capture_width)) * max(1, int(capture_height))
+        if scaled_pixels <= 640 * 360 * 8:
+            return 900
+        if scaled_pixels <= 960 * 540 * 12:
+            return 1500
+        return 2200
 
     def _build_export_ffmpeg_command(self, frame_rate: int, bitrate_kbps: int, output_path: str) -> list[str]:
         return [

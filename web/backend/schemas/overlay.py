@@ -104,10 +104,10 @@ class OverlayCastStartRequest(BaseModel):
     controls_hidden: bool = True
     viewport_width: int = 1280
     viewport_height: int = 720
-    capture_width: int = 640
-    capture_height: int = 360
-    quality: int = 22
-    frame_rate: int = 3
+    capture_width: int = 960
+    capture_height: int = 540
+    quality: int = 28
+    frame_rate: int = 10
     stream_port: Optional[int] = None
 
 

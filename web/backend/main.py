@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import sys
@@ -16,6 +17,7 @@ from typing import List, Dict, Any, Optional
 
 from database.database import init_db, get_db, SessionLocal
 from routers import device_router, video_router, streaming_router, renderer_router, overlay_router, projection_router, log_router, mapping_router, media_library_router, structured_lighting_router, widget_router
+from routers.diagnostics_router import router as diagnostics_router
 from routers.photo_router import router as photo_router
 from routers.photo_list_router import router as photo_list_router
 from api.discovery_router import router as discovery_router
@@ -27,6 +29,7 @@ from services.mask_preprocessing_service import get_mask_preprocessing_service
 from services.video_preprocessing_service import get_video_preprocessing_service
 from services.overlay_service import OverlayService
 from services.projector_redirect_runtime import record_projector_request
+from services.service_diagnostics_service import get_service_diagnostics_service
 
 # Configure logging - check if already configured by run.py
 import logging.handlers
@@ -100,6 +103,8 @@ else:
 
 # Get logger for this module
 logger = logging.getLogger(__name__)
+service_diagnostics = get_service_diagnostics_service()
+service_diagnostics.install_exception_hooks()
 
 
 def _normalize_ip_candidate(value: str) -> str:
@@ -270,6 +275,7 @@ app.include_router(media_library_router)
 app.include_router(widget_router)
 app.include_router(structured_lighting_router.router)
 app.include_router(log_router.router)  # Log streaming router
+app.include_router(diagnostics_router)
 app.include_router(discovery_router)  # New unified discovery API (already has /api/v2/discovery prefix)
 
 # Try to include depth_router if dependencies are available
@@ -356,6 +362,9 @@ async def startup_event():
     global device_manager, streaming_service, streaming_registry, renderer_service, migration_adapter, video_preprocessing_service, mask_preprocessing_service
     
     logger.info("Starting nano-dlna Dashboard API")
+    service_diagnostics.start_run()
+    service_diagnostics.install_asyncio_exception_handler(asyncio.get_running_loop())
+    await service_diagnostics.start_heartbeat()
     
     # Initialize log aggregation service
     try:
@@ -485,6 +494,8 @@ async def startup_event():
 async def shutdown_event():
     global migration_adapter, video_preprocessing_service, mask_preprocessing_service
     logger.info("Shutting down nano-dlna Dashboard API")
+    service_diagnostics.mark_clean_shutdown("shutdown_event")
+    await service_diagnostics.stop_heartbeat()
     
     # Stop log aggregation service
     try:
