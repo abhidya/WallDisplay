@@ -18,11 +18,13 @@ export function ActionButton({
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityState={{ disabled }}
       disabled={disabled}
       onPress={onPress}
-      style={[
+      style={({ pressed }) => [
         styles.button,
         variant === 'primary' ? styles.primary : styles.secondary,
+        pressed && !disabled && styles.pressed,
         disabled && styles.disabled,
       ]}
     >
@@ -47,6 +49,9 @@ const styles = StyleSheet.create({
   },
   secondary: {
     backgroundColor: colors.elevatedPanel,
+  },
+  pressed: {
+    opacity: 0.85,
   },
   disabled: {
     opacity: 0.6,

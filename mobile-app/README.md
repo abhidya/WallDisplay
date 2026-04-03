@@ -82,6 +82,12 @@ npm run typecheck
 
 The current repo state provides TypeScript verification for the Expo shell. If you need broader coverage, add mobile-specific test/lint scripts here rather than reaching into `web/frontend` or backend source.
 
+## Next parity candidates
+
+- Add mobile-focused automated tests around controller data shaping and base-URL normalization.
+- Add a dedicated lint script for `mobile-app/` so code-quality checks stay local to the rewrite.
+- Expand media actions beyond video launch into richer operator playback/status flows once the current device selection path is stable.
+
 ## OMX team workflow
 
 oh-my-codex is installed and initialized in this repo. To continue the rewrite with durable team mode:
