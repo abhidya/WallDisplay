@@ -3,5 +3,6 @@
   "compilerOptions": {
     "allowImportingTsExtensions": true,
     "strict": true
-  }
+  },
+  "exclude": ["dist"]
 }

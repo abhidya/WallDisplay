@@ -123,7 +123,7 @@ export function DevicesScreen({
         title="Device control"
         subtitle={
           appMode === 'local'
-            ? 'Local mode keeps device state and operator actions on-device, with explicit limits where native discovery bindings are still pending.'
+            ? 'Local mode now uses on-device discovery for Bonjour/mDNS-class targets and keeps manual profiles for everything else.'
             : 'Remote mode still uses the FastAPI adapter for discovery, runtime state, and per-device actions.'
         }
       >

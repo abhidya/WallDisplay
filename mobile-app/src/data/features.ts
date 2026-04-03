@@ -8,7 +8,7 @@ export const currentProductAreas: FeatureCardData[] = [
   {
     title: 'Device discovery and control',
     description:
-      'Local-first device inventory, saved profiles, and direct control workflows with remote fallback available during migration.',
+      'Local-first device inventory with native Bonjour/mDNS discovery, saved profiles, and direct control workflows with remote fallback available during migration.',
     endpoints: ['local://devices', 'local://discovery', '/api/devices'],
   },
   {

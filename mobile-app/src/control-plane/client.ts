@@ -34,6 +34,11 @@ import type {
   DeferredFeatureSummary,
 } from '../types/api.ts';
 import {
+  classifyDiscoveryService,
+  DEFAULT_DISCOVERY_SERVICE_TYPES,
+  discoverNativeServices,
+} from './nativeDiscovery.ts';
+import {
   appendActionHistory,
   type AppMode,
   DEFAULT_REMOTE_API_BASE_URL,
@@ -205,6 +210,43 @@ class LocalControlPlaneClient implements ControlPlaneClient {
   readonly apiBaseUrl = 'local://control-plane';
   readonly rootBaseUrl = 'local://control-plane';
 
+  private async getLocalWritableDevice(deviceId: number | string) {
+    const state = await loadLocalControlPlaneState();
+    const device = state.devices.find((entry) => String(entry.id) === String(deviceId)) ?? null;
+    const supportsManualActions = Boolean(device?.config?.supports_manual_actions);
+    return {
+      device,
+      supportsManualActions,
+    };
+  }
+
+  private async unsupportedTransportResponse(
+    deviceId: number | string,
+    actionLabel: string,
+  ): Promise<DeviceActionResponse> {
+    const { device } = await this.getLocalWritableDevice(deviceId);
+    const deviceLabel =
+      (typeof device?.friendly_name === 'string' && device.friendly_name) ||
+      (typeof device?.device_name === 'string' && device.device_name) ||
+      (typeof device?.name === 'string' && device.name) ||
+      String(deviceId);
+
+    await updateLocalControlPlaneState((state) =>
+      appendActionHistory(state, {
+        title: `${actionLabel} deferred`,
+        detail: `${deviceLabel} was discovered successfully, but protocol-specific transport control is not wired for this target yet.`,
+        status: 'deferred',
+        mode: 'local',
+      }),
+    );
+
+    return {
+      success: false,
+      status: 'deferred',
+      message: `${deviceLabel} is discovery-only until protocol-specific sender transport is implemented.`,
+    };
+  }
+
   async getHealth(): Promise<HealthResponse> {
     const state = await loadLocalControlPlaneState();
     return state.health;
@@ -315,26 +357,94 @@ class LocalControlPlaneClient implements ControlPlaneClient {
   }
 
   async discoverDevices(timeoutSeconds = 5): Promise<JsonRecord> {
+    const nativeDiscovery = await discoverNativeServices({
+      serviceTypes: [...DEFAULT_DISCOVERY_SERVICE_TYPES],
+      timeoutMs: Math.max(1500, timeoutSeconds * 1000),
+    });
+
     const state = await updateLocalControlPlaneState((draft) => {
+      const discoveredDevices = nativeDiscovery.services.map((service) => ({
+        id: `native-${service.id}`,
+        friendly_name: service.name,
+        device_name: service.name,
+        type: classifyDiscoveryService(service),
+        manufacturer: 'Bonjour/mDNS',
+        location: service.hostName ?? 'local network',
+        status: 'discovered',
+        derived_status: 'native discovery',
+        playback_state: 'idle',
+        is_playing: false,
+        current_media_title: 'Ready',
+        action_url: `local://device/native-${service.id}`,
+        hostname: service.hostName,
+        config: {
+          transport: 'native-discovery',
+          supports_manual_actions: false,
+          service_type: service.serviceType,
+          domain: service.domain,
+          port: service.port,
+          addresses: service.addresses ?? [],
+        },
+        control_mode: {
+          mode: 'native-discovery',
+          reason: 'Resolved from the on-device Bonjour/mDNS discovery module.',
+          expires_at: null,
+        },
+      }));
+
+      const manualDevices = draft.devices.filter(
+        (device) => !String(device.id).startsWith('native-'),
+      );
+
+      draft.devices = [...discoveredDevices, ...manualDevices];
       draft.discoveryStatus.running = true;
       draft.discoveryStatus.paused = false;
       draft.unifiedDiscoveryStatus.discovery_running = true;
+      draft.unifiedDiscoveryStatus.total_devices = draft.devices.length;
+      draft.unifiedDiscoveryStatus.online_devices = discoveredDevices.length;
+      draft.discoveryCapabilities.casting_methods = [
+        ...new Set([
+          ...(draft.discoveryCapabilities.casting_methods ?? []),
+          ...nativeDiscovery.services.map((service) => classifyDiscoveryService(service)),
+        ]),
+      ];
       draft.discoveryBackends = draft.discoveryBackends.map((backend) =>
         backend.name === 'local'
           ? { ...backend, active: true, enabled: true, healthy: true, last_seen: new Date().toISOString() }
           : backend,
       );
+      draft.capabilities = draft.capabilities.map((capability) =>
+        capability.key === 'native-discovery'
+          ? {
+              ...capability,
+              status: nativeDiscovery.available ? 'ready' : 'deferred',
+              detail: nativeDiscovery.available
+                ? nativeDiscovery.services.length > 0
+                  ? `Native discovery found ${nativeDiscovery.services.length} Bonjour service${nativeDiscovery.services.length === 1 ? '' : 's'} (${nativeDiscovery.services
+                      .map((service) => service.name)
+                      .slice(0, 3)
+                      .join(', ')}).`
+                  : 'Native Bonjour discovery is wired but no matching services were found on the current network.'
+                : 'Native discovery module is unavailable in this runtime; local mode is using saved/manual device profiles.',
+            }
+          : capability,
+      );
       return appendActionHistory(draft, {
         title: 'Ran local discovery',
-        detail: `Local discovery refreshed saved/manual device profiles in ${timeoutSeconds}s budget.`,
+        detail: nativeDiscovery.available
+          ? `Local discovery scanned Bonjour/mDNS services and refreshed ${draft.devices.length} device entries in ${timeoutSeconds}s budget.`
+          : `Local discovery refreshed saved/manual device profiles in ${timeoutSeconds}s budget.`,
         status: 'ok',
         mode: 'local',
       });
     });
     return {
       success: true,
-      message: `Local discovery refreshed ${state.devices.length} device profiles.`,
+      message: nativeDiscovery.available
+        ? `Local discovery found ${nativeDiscovery.services.length} native service${nativeDiscovery.services.length === 1 ? '' : 's'} and refreshed ${state.devices.length} device entries.`
+        : `Local discovery refreshed ${state.devices.length} device profiles.`,
       devices: state.devices.map(summarizeDevice),
+      notes: nativeDiscovery.notes ?? [],
     };
   }
 
@@ -350,6 +460,11 @@ class LocalControlPlaneClient implements ControlPlaneClient {
   }
 
   async enableAutoMode(deviceId: number | string): Promise<DeviceActionResponse> {
+    const { supportsManualActions } = await this.getLocalWritableDevice(deviceId);
+    if (!supportsManualActions) {
+      return this.unsupportedTransportResponse(deviceId, 'Auto mode');
+    }
+
     await updateLocalControlPlaneState((state) => {
       state.devices = state.devices.map((device) =>
         String(device.id) === String(deviceId)
@@ -370,6 +485,11 @@ class LocalControlPlaneClient implements ControlPlaneClient {
     deviceId: number | string,
     options?: { reason?: string; expiresIn?: number },
   ): Promise<DeviceActionResponse> {
+    const { supportsManualActions } = await this.getLocalWritableDevice(deviceId);
+    if (!supportsManualActions) {
+      return this.unsupportedTransportResponse(deviceId, 'Manual mode');
+    }
+
     const expiresAt = options?.expiresIn
       ? new Date(Date.now() + options.expiresIn * 1000).toISOString()
       : null;
@@ -397,6 +517,11 @@ class LocalControlPlaneClient implements ControlPlaneClient {
   }
 
   async pauseDevicePlayback(deviceId: number | string): Promise<DeviceActionResponse> {
+    const { supportsManualActions } = await this.getLocalWritableDevice(deviceId);
+    if (!supportsManualActions) {
+      return this.unsupportedTransportResponse(deviceId, 'Pause playback');
+    }
+
     await updateLocalControlPlaneState((state) => {
       state.devices = state.devices.map((device) =>
         String(device.id) === String(deviceId)
@@ -419,6 +544,11 @@ class LocalControlPlaneClient implements ControlPlaneClient {
   }
 
   async stopDevicePlayback(deviceId: number | string): Promise<DeviceActionResponse> {
+    const { supportsManualActions } = await this.getLocalWritableDevice(deviceId);
+    if (!supportsManualActions) {
+      return this.unsupportedTransportResponse(deviceId, 'Stop playback');
+    }
+
     await updateLocalControlPlaneState((state) => {
       state.devices = state.devices.map((device) =>
         String(device.id) === String(deviceId)
@@ -452,6 +582,11 @@ class LocalControlPlaneClient implements ControlPlaneClient {
     videoId: number | string,
     options?: { loop?: boolean; syncOverlays?: boolean },
   ): Promise<DeviceActionResponse> {
+    const { supportsManualActions } = await this.getLocalWritableDevice(deviceId);
+    if (!supportsManualActions) {
+      return this.unsupportedTransportResponse(deviceId, 'Start playback');
+    }
+
     await updateLocalControlPlaneState((state) => {
       const video = state.videos.find((item) => String(item.id) === String(videoId));
       state.devices = state.devices.map((device) =>

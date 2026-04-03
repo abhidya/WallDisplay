@@ -75,3 +75,47 @@ test('local control plane persists shell preferences for mode and selected devic
   assert.equal(state.app.selectedDeviceId, 'saved-dlna-target');
   assert.equal(state.app.selectedDeviceLabel, 'Saved DLNA target');
 });
+
+test('remote control plane still uses the existing API adapter contract', async () => {
+  const client = createControlPlaneClient('remote', 'http://controller.local:8000');
+
+  assert.equal(client.mode, 'remote');
+  assert.equal(client.apiBaseUrl, 'http://controller.local:8000/api');
+  assert.equal(client.rootBaseUrl, 'http://controller.local:8000');
+
+  const history = await client.listActionHistory();
+  assert.match(history[0]?.detail ?? '', /controller\.local:8000\/api/);
+});
+
+test('native-discovered external devices stay discovery-only until sender transport exists', async () => {
+  const client = await freshLocalClient();
+
+  await updateLocalControlPlaneState((state) => {
+    state.devices.unshift({
+      id: 'native-sample',
+      friendly_name: 'Office TV',
+      device_name: 'Office TV',
+      type: 'google-cast',
+      status: 'discovered',
+      derived_status: 'native discovery',
+      playback_state: 'idle',
+      is_playing: false,
+      current_media_title: 'Ready',
+      config: {
+        transport: 'native-discovery',
+        supports_manual_actions: false,
+      },
+      control_mode: {
+        mode: 'native-discovery',
+        reason: 'Resolved from native discovery.',
+        expires_at: null,
+      },
+    });
+    return state;
+  });
+
+  const response = await client.playVideoOnDevice('native-sample', 'video-1');
+  assert.equal(response.success, false);
+  assert.equal(response.status, 'deferred');
+  assert.match(response.message ?? '', /discovery-only/i);
+});

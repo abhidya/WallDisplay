@@ -54,9 +54,13 @@ async function resolveStorage(): Promise<AsyncStorageLike> {
     }
 
     try {
-      const module = (await import('expo-sqlite/kv-store')) as {
+      const specifier = ['expo-sqlite', 'kv-store'].join('/');
+      const dynamicImport = new Function('s', 'return import(s)') as (
+        s: string,
+      ) => Promise<{
         default?: Partial<AsyncStorageLike>;
-      } & Partial<AsyncStorageLike>;
+      } & Partial<AsyncStorageLike>>;
+      const module = await dynamicImport(specifier);
       const candidate = (module.default ?? module) as Partial<AsyncStorageLike>;
       if (candidate && typeof candidate.getItem === 'function' && typeof candidate.setItem === 'function') {
         return {

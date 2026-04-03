@@ -13,7 +13,15 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocalNetworkUsageDescription": "nano-dlna uses your local network to discover nearby Cast and AirPlay targets directly from the app.",
+        "NSBonjourServices": [
+          "_googlecast._tcp",
+          "_airplay._tcp",
+          "_raop._tcp"
+        ]
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -21,7 +29,12 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.ACCESS_WIFI_STATE",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.CHANGE_WIFI_MULTICAST_STATE"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
