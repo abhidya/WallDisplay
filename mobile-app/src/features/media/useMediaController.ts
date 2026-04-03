@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { NanoDlnaApiClient } from '../../services/api';
 import type {
+  JsonRecord,
   MediaChannelSummary,
   MediaDirectorySummary,
   MediaListSummary,
@@ -10,6 +11,7 @@ import type {
 } from '../../types/api';
 
 export interface MediaController {
+  actionLoadingKey: string | null;
   actionMessage: string | null;
   channels: MediaChannelSummary[];
   directories: MediaDirectorySummary[];
@@ -19,8 +21,10 @@ export interface MediaController {
   photos: PhotoSummary[];
   playingVideoId: number | string | null;
   videos: VideoSummary[];
+  advanceChannel: (channelId: number | string) => Promise<void>;
   load: () => Promise<void>;
   playVideo: (videoId: number | string) => Promise<void>;
+  scanDirectory: (directoryId: number | string) => Promise<void>;
 }
 
 interface UseMediaControllerOptions {
@@ -31,6 +35,7 @@ export function useMediaController(
   client: NanoDlnaApiClient,
   options: UseMediaControllerOptions,
 ): MediaController {
+  const [actionLoadingKey, setActionLoadingKey] = useState<string | null>(null);
   const [videos, setVideos] = useState<VideoSummary[]>([]);
   const [photos, setPhotos] = useState<PhotoSummary[]>([]);
   const [directories, setDirectories] = useState<MediaDirectorySummary[]>([]);
@@ -40,6 +45,19 @@ export function useMediaController(
   const [playingVideoId, setPlayingVideoId] = useState<number | string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+
+  const describeActionMessage = (payload: JsonRecord, fallback: string): string => {
+    if (typeof payload.message === 'string' && payload.message) {
+      return payload.message;
+    }
+    if (typeof payload.status === 'string' && payload.status) {
+      return payload.status;
+    }
+    if (typeof payload.detail === 'string' && payload.detail) {
+      return payload.detail;
+    }
+    return fallback;
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -79,6 +97,7 @@ export function useMediaController(
       }
 
       setPlayingVideoId(videoId);
+      setActionLoadingKey(`play-video-${String(videoId)}`);
       setError(null);
       setActionMessage(null);
       try {
@@ -88,9 +107,52 @@ export function useMediaController(
         setError(playError instanceof Error ? playError.message : 'Failed to start playback.');
       } finally {
         setPlayingVideoId(null);
+        setActionLoadingKey(null);
       }
     },
     [client, options.selectedDeviceId],
+  );
+
+  const scanDirectory = useCallback(
+    async (directoryId: number | string) => {
+      setActionLoadingKey(`scan-directory-${String(directoryId)}`);
+      setError(null);
+      setActionMessage(null);
+      try {
+        const response = await client.scanMediaDirectory(directoryId);
+        setActionMessage(describeActionMessage(response, 'Directory scan started.'));
+        await load();
+      } catch (scanError) {
+        setError(scanError instanceof Error ? scanError.message : 'Failed to scan directory.');
+      } finally {
+        setActionLoadingKey(null);
+      }
+    },
+    [client, load],
+  );
+
+  const advanceChannel = useCallback(
+    async (channelId: number | string) => {
+      setActionLoadingKey(`advance-channel-${String(channelId)}`);
+      setError(null);
+      setActionMessage(null);
+      try {
+        const response = await client.advanceMediaChannel(channelId);
+        const nextVideoId =
+          response.current_video_id !== null && response.current_video_id !== undefined
+            ? ` Current video: ${String(response.current_video_id)}.`
+            : '';
+        setActionMessage(`Channel advanced.${nextVideoId}`);
+        await load();
+      } catch (advanceError) {
+        setError(
+          advanceError instanceof Error ? advanceError.message : 'Failed to advance channel.',
+        );
+      } finally {
+        setActionLoadingKey(null);
+      }
+    },
+    [client, load],
   );
 
   useEffect(() => {
@@ -99,7 +161,9 @@ export function useMediaController(
 
   return useMemo(
     () => ({
+      actionLoadingKey,
       actionMessage,
+      advanceChannel,
       channels,
       directories,
       error,
@@ -109,10 +173,13 @@ export function useMediaController(
       photos,
       playVideo,
       playingVideoId,
+      scanDirectory,
       videos,
     }),
     [
+      actionLoadingKey,
       actionMessage,
+      advanceChannel,
       channels,
       directories,
       error,
@@ -122,6 +189,7 @@ export function useMediaController(
       photos,
       playVideo,
       playingVideoId,
+      scanDirectory,
       videos,
     ],
   );
