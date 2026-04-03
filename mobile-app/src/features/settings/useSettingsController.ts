@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { NanoDlnaApiClient, normalizeApiBaseUrl } from '../../services/api';
+import type { ControlPlaneClient } from '../../control-plane/client.ts';
+import type { AppMode } from '../../control-plane/localState.ts';
+import { normalizeApiBaseUrl } from '../../services/api.ts';
 import type { DiscoverySystemStatus, HealthResponse } from '../../types/api';
 
 export interface SettingsController {
@@ -17,10 +19,11 @@ export interface SettingsController {
 
 interface UseSettingsControllerOptions {
   apiBaseUrl: string;
+  appMode: AppMode;
 }
 
 export function useSettingsController(
-  client: NanoDlnaApiClient,
+  client: ControlPlaneClient,
   options: UseSettingsControllerOptions,
 ): SettingsController {
   const [draftValue, setDraftValue] = useState(options.apiBaseUrl);
@@ -45,17 +48,23 @@ export function useSettingsController(
       ]);
       setHealth(healthPayload);
       setUnifiedDiscovery(discoveryPayload);
-      setActionMessage('Connection check succeeded.');
+      setActionMessage(
+        options.appMode === 'local'
+          ? 'Local control plane is ready.'
+          : 'Remote adapter reached the configured backend.',
+      );
     } catch (refreshError) {
       setError(
         refreshError instanceof Error
           ? refreshError.message
-          : 'Failed to reach the configured backend.',
+          : options.appMode === 'local'
+            ? 'Failed to initialize local control plane.'
+            : 'Failed to reach the configured backend.',
       );
     } finally {
       setLoading(false);
     }
-  }, [client]);
+  }, [client, options.appMode]);
 
   useEffect(() => {
     void refreshConnection();

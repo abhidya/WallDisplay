@@ -92,5 +92,19 @@
       "renderer": "chrome-visible"
     }
   },
+  "automations": {
+    "airplay_hccast_overlay": {
+      "enabled": true,
+      "projector_id": "proj-hccast",
+      "target_name_pattern": "hccast",
+      "overlay_config_id": 2,
+      "overlay_base_url": "http://localhost:8000",
+      "controls_hidden": true,
+      "display_mode": "extend",
+      "cooldown_seconds": 15,
+      "display_wait_seconds": 12,
+      "launch_stabilization_seconds": 1.5
+    }
+  },
   "health_check_interval": 10
 }

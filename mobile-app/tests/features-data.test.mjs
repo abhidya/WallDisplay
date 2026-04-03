@@ -7,14 +7,14 @@ import {
   mobileRewritePrinciples,
 } from '../src/data/features.ts';
 
-test('mobile rewrite principles keep the Expo app isolated and backend-backed', () => {
+test('mobile rewrite principles keep the Expo app isolated and local-first', () => {
   assert.ok(
     mobileRewritePrinciples.some((principle) => principle.includes('mobile-app/')),
     'expected an isolation rule for mobile-app/',
   );
   assert.ok(
-    mobileRewritePrinciples.some((principle) => principle.includes('FastAPI')),
-    'expected an explicit FastAPI control-plane rule',
+    mobileRewritePrinciples.some((principle) => principle.includes('on-device control plane')),
+    'expected an explicit local-first control-plane rule',
   );
   assert.ok(
     mobileRewritePrinciples.some((principle) => principle.includes('operator-first')),
@@ -22,35 +22,29 @@ test('mobile rewrite principles keep the Expo app isolated and backend-backed', 
   );
 });
 
-test('mobile modules cover the shared device, media, and operations endpoint groups', () => {
+test('mobile modules cover local-first overview, devices, media, and operations flows', () => {
   const overview = mobileModules.find((module) => module.title === 'Overview');
   const devices = mobileModules.find((module) => module.title === 'Devices');
   const media = mobileModules.find((module) => module.title === 'Media');
   const operations = mobileModules.find((module) => module.title === 'Operations');
 
-  assert.deepEqual(overview?.endpoints, ['/api/devices', '/api/videos', '/api/streaming']);
-  assert.deepEqual(devices?.endpoints, ['/api/devices', '/api/devices/discover']);
-  assert.deepEqual(media?.endpoints, ['/api/videos', '/api/media-library']);
-  assert.deepEqual(operations?.endpoints, [
-    '/api/streaming/analytics',
-    '/api/overlay',
-    '/api/renderer',
-    '/api/mappings',
-    '/api/projection',
-  ]);
+  assert.deepEqual(overview?.endpoints, ['local://health', 'local://capabilities', '/health']);
+  assert.deepEqual(devices?.endpoints, ['local://devices', 'local://discovery', '/api/devices']);
+  assert.deepEqual(media?.endpoints, ['local://media', 'local://media/channels', '/api/videos']);
+  assert.deepEqual(operations?.endpoints, ['local://history', 'local://capabilities', '/api/streaming/analytics']);
 });
 
-test('product area inventory still includes runtime diagnostics and renderer workflows', () => {
+test('product area inventory still acknowledges diagnostics and deferred advanced workflows', () => {
   assert.ok(
-    currentProductAreas.some((area) => area.endpoints.includes('/health')),
-    'expected diagnostics coverage via /health',
+    currentProductAreas.some((area) => area.endpoints.includes('local://health')),
+    'expected diagnostics coverage via local health',
   );
   assert.ok(
     currentProductAreas.some((area) => area.endpoints.includes('/api/renderer')),
-    'expected renderer workflow coverage',
+    'expected deferred renderer workflow visibility',
   );
   assert.ok(
-    currentProductAreas.some((area) => area.endpoints.includes('/api/media-library')),
-    'expected media library coverage',
+    currentProductAreas.some((area) => area.endpoints.includes('local://media')),
+    'expected local media workflow coverage',
   );
 });

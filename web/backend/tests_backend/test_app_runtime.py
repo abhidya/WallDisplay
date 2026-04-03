@@ -73,8 +73,13 @@ def test_app_runtime_start_and_stop_background_services(monkeypatch):
     manager = SimpleNamespace(discovery_coordinator=discovery)
     calls = []
     stopped = []
+    automation_calls = []
 
     migration_adapter = SimpleNamespace(stop_migration=lambda: stopped.append("migration"))
+    automation_service = SimpleNamespace(
+        start=lambda: automation_calls.append("start"),
+        stop=lambda: automation_calls.append("stop"),
+    )
 
     monkeypatch.setattr(
         runtime_module,
@@ -91,14 +96,17 @@ def test_app_runtime_start_and_stop_background_services(monkeypatch):
         runtime_registry_service="runtime_registry",
         playback_intent_service="playback_intent",
         device_manager=manager,
+        airplay_projection_automation_service=automation_service,
     )
 
     runtime.start_background_services()
-    assert calls == ["register_enabled_backends", "unified_start", "start"]
+    assert calls == ["register_enabled_backends", "start"]
+    assert automation_calls == ["start"]
     assert runtime.migration_adapter is migration_adapter
 
     runtime.stop_background_services()
-    assert calls == ["register_enabled_backends", "unified_start", "start", "stop", "unified_stop"]
+    assert calls == ["register_enabled_backends", "start", "stop", "unified_stop"]
+    assert automation_calls == ["start", "stop"]
     assert stopped == ["migration"]
     assert runtime.migration_adapter is None
 
@@ -197,6 +205,7 @@ def test_app_runtime_start_background_services_skips_legacy_discovery_in_unified
     unified_discovery = SimpleNamespace(register_enabled_backends=lambda: calls.append("register_enabled_backends"), is_running=True)
     unified_lifecycle = SimpleNamespace(start=lambda: calls.append("unified_start"), stop=lambda: calls.append("unified_stop"))
     manager = SimpleNamespace(discovery_coordinator=SimpleNamespace(start=lambda: calls.append("legacy_start")))
+    automation_calls = []
 
     monkeypatch.setenv("NANODLNA_DISCOVERY_AUTHORITY", "unified")
     monkeypatch.setattr(runtime_module, "_start_discovery_migration", lambda runtime: SimpleNamespace(stop_migration=lambda: None))
@@ -210,11 +219,13 @@ def test_app_runtime_start_background_services_skips_legacy_discovery_in_unified
         runtime_registry_service="runtime_registry",
         playback_intent_service="playback_intent",
         device_manager=manager,
+        airplay_projection_automation_service=SimpleNamespace(start=lambda: automation_calls.append("start"), stop=lambda: automation_calls.append("stop")),
     )
 
     runtime.start_background_services()
 
     assert calls == ["register_enabled_backends", "unified_start"]
+    assert automation_calls == ["start"]
 
 
 def test_app_runtime_discover_dlna_devices_uses_unified_authority(monkeypatch):

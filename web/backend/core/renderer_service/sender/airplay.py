@@ -4,7 +4,6 @@ AirPlay implementation of the Sender interface for screen mirroring.
 
 import os
 import subprocess
-import time
 import logging
 from typing import Dict, Optional
 
@@ -49,8 +48,9 @@ class AirPlaySender(Sender):
         self.process = None
         self.connected = False
         self.connect_timeout = config.get("connect_timeout", 10)
+        self.display_mode = config.get("display_mode", "mirror")
     
-    def connect(self, target_id: str) -> bool:
+    def connect(self, target_id: str, display_mode: Optional[str] = None) -> bool:
         """Connect to the AirPlay device by name.
         
         Args:
@@ -61,6 +61,7 @@ class AirPlaySender(Sender):
         """
         self.target_name = target_id
         self.logger.info(f"Connecting to AirPlay device: {target_id}")
+        requested_mode = str(display_mode or self.display_mode or "mirror").strip().lower()
         
         try:
             # Execute the AppleScript to start mirroring
@@ -68,25 +69,26 @@ class AirPlaySender(Sender):
                 "osascript", 
                 self.applescript_path, 
                 "start",
-                target_id
+                target_id,
+                requested_mode,
             ]
-            
-            self.process = subprocess.Popen(
-                cmd, 
-                stdout=subprocess.PIPE, 
-                stderr=subprocess.PIPE
+
+            result = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=self.connect_timeout,
             )
-            
-            # Wait briefly and check status
-            time.sleep(2)
-            if self.process.poll() is None:
+
+            if result.returncode == 0:
                 self.connected = True
+                self.process = None
                 self.logger.info(f"Successfully connected to AirPlay device: {target_id}")
                 return True
-            else:
-                stderr = self.process.stderr.read().decode('utf-8')
-                self.logger.error(f"AirPlay connection failed: {stderr}")
-                return False
+
+            stderr = result.stderr.decode('utf-8')
+            self.logger.error(f"AirPlay connection failed: {stderr}")
+            return False
                 
         except Exception as e:
             self.logger.error(f"Error connecting to AirPlay: {str(e)}")
@@ -156,15 +158,16 @@ class AirPlaySender(Sender):
             bool: True if connected, False otherwise
         """
         if not self.process:
-            return False
-            
-        # Check if the process is still running
-        is_running = self.process.poll() is None
-        if not is_running and self.connected:
+            return self.connected
+
+        if self.process.poll() is None:
+            return True
+
+        if self.connected:
             self.logger.info(f"AirPlay connection to {self.target_name} was lost")
             self.connected = False
-            
-        return self.connected
+
+        return False
     
     def get_status(self) -> Dict:
         """Get current status information.

@@ -8,71 +8,66 @@ export const currentProductAreas: FeatureCardData[] = [
   {
     title: 'Device discovery and control',
     description:
-      'Discover DLNA and related casting targets, inspect state, and control playback.',
-    endpoints: ['/api/devices', '/api/devices/discover', '/api/v2/discovery'],
+      'Local-first device inventory, saved profiles, and direct control workflows with remote fallback available during migration.',
+    endpoints: ['local://devices', 'local://discovery', '/api/devices'],
   },
   {
-    title: 'Media library',
+    title: 'Media inventory',
     description:
-      'Browse indexed videos, uploads, photos, and device-linked playback metadata.',
-    endpoints: ['/api/videos', '/api/photos', '/api/media-library'],
+      'On-device media state, bundled samples, and playback initiation against the selected target.',
+    endpoints: ['local://media', 'local://media/channels', '/api/videos'],
   },
   {
-    title: 'Streaming diagnostics',
+    title: 'Diagnostics and action history',
     description:
-      'Track session health, bandwidth, active streams, and runtime log events.',
-    endpoints: ['/api/streaming', '/api/logs', '/health'],
+      'Control-plane health, recent actions, active sessions, and operator-facing local diagnostics.',
+    endpoints: ['local://health', 'local://history', '/health'],
   },
   {
-    title: 'Renderer and overlay workflows',
+    title: 'Deferred advanced operations',
     description:
-      'Coordinate AirPlay/renderer targets, overlay casting, mapping scenes, and projection.',
-    endpoints: ['/api/renderer', '/api/overlay', '/api/mappings', '/api/projection'],
+      'Renderer, overlay, mapping, and projection flows remain explicitly deferred until a mobile-safe design is approved.',
+    endpoints: ['local://deferred/renderer', '/api/renderer', '/api/projection'],
   },
 ];
 
 export const mobileRewritePrinciples: string[] = [
   'Keep the rewrite isolated in mobile-app/ and leave the current React dashboard intact.',
-  'Treat FastAPI as the source of truth for devices, streaming, media, and diagnostics.',
-  'Expose operator-first screens before recreating advanced projection authoring UIs.',
-  'Use the same API groups the web app already relies on so the backend stays shared.',
+  'Default to an on-device control plane so the app stays useful with no backend running.',
+  'Expose operator-first local workflows before recreating advanced renderer or receiver features.',
+  'Keep one shared seam that can switch between local mode and the FastAPI remote adapter.',
 ];
 
 export const mobileModules: FeatureCardData[] = [
   {
     title: 'Overview',
     description:
-      'Architecture summary, existing platform capabilities, and rewrite boundaries.',
-    endpoints: ['/api/devices', '/api/videos', '/api/streaming'],
+      'Local-vs-remote control-plane summary, runtime health, and rewrite boundaries.',
+    endpoints: ['local://health', 'local://capabilities', '/health'],
   },
   {
     title: 'Devices',
     description:
-      'Live device inventory and discovery actions for playback-capable targets.',
-    endpoints: ['/api/devices', '/api/devices/discover'],
+      'Local device inventory, saved profiles, discovery refresh, and direct playback controls.',
+    endpoints: ['local://devices', 'local://discovery', '/api/devices'],
   },
   {
     title: 'Media',
-    description: 'Video-library oriented shell for media browsing and upcoming playback flows.',
-    endpoints: ['/api/videos', '/api/media-library'],
+    description:
+      'Local media inventory, bundled samples, and playback initiation against the selected target.',
+    endpoints: ['local://media', 'local://media/channels', '/api/videos'],
   },
   {
     title: 'Operations',
     description:
-      'Renderer, overlay, mapping, projection, and streaming diagnostics operator console.',
-    endpoints: [
-      '/api/streaming/analytics',
-      '/api/overlay',
-      '/api/renderer',
-      '/api/mappings',
-      '/api/projection',
-    ],
+      'Reduced local-safe diagnostics, capability matrix, action history, and explicit deferred advanced features.',
+    endpoints: ['local://history', 'local://capabilities', '/api/streaming/analytics'],
   },
 ];
 
 export const emulatorConnectionNotes = [
-  'iOS simulator can usually reach a local backend at http://127.0.0.1:8000/api.',
-  'Android emulator usually needs http://10.0.2.2:8000/api.',
-  'A physical device should use your Mac or backend host LAN IP, not localhost.',
-  'You can override the base URL with EXPO_PUBLIC_API_BASE_URL before starting Expo.',
+  'Local mode requires no backend server and is the default control-plane path for this rewrite.',
+  'iOS simulator can usually reach a remote fallback backend at http://127.0.0.1:8000/api.',
+  'Android emulator usually needs http://10.0.2.2:8000/api for remote fallback.',
+  'A physical device should use your Mac or backend host LAN IP, not localhost, when testing remote mode.',
 ];

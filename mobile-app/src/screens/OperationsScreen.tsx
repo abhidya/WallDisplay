@@ -2,8 +2,9 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ActionButton } from '../components/ActionButton';
 import { Panel } from '../components/Panel';
+import { type ControlPlaneClient } from '../control-plane/client';
+import type { AppMode } from '../control-plane/localState';
 import { useOperationsController } from '../features/operations/useOperationsController';
-import { NanoDlnaApiClient } from '../services/api';
 import { colors } from '../theme';
 import type {
   MappingSceneSummary,
@@ -17,7 +18,8 @@ import type {
 } from '../types/api';
 
 interface OperationsScreenProps {
-  client: NanoDlnaApiClient;
+  appMode: AppMode;
+  client: ControlPlaneClient;
 }
 
 function formatValue(value: unknown, fallback = '—'): string {
@@ -87,11 +89,14 @@ function describeProjectionConfig(config: ProjectionConfigSummary): string {
   );
 }
 
-export function OperationsScreen({ client }: OperationsScreenProps) {
+export function OperationsScreen({ appMode, client }: OperationsScreenProps) {
   const {
     actionLoadingKey,
     actionMessage,
+    actionHistory,
     analytics,
+    capabilities,
+    deferredFeatures,
     error,
     loading,
     load,
@@ -115,6 +120,7 @@ export function OperationsScreen({ client }: OperationsScreenProps) {
     runStreamingSessionStop,
     sceneControlPresets,
     sceneRanks,
+    mode,
     selectProjectionConfig,
     selectProjector,
     selectScene,
@@ -138,6 +144,99 @@ export function OperationsScreen({ client }: OperationsScreenProps) {
   ];
 
   const actionsBusy = loading || actionLoadingKey !== null;
+
+  if (mode === 'local' || appMode === 'local') {
+    return (
+      <>
+        <Panel
+          title="Local operations"
+          subtitle="Operations is intentionally narrowed in local mode so the app remains useful without pretending advanced backend-owned features are already on-device."
+        >
+          <View style={styles.actionsWrap}>
+            <ActionButton
+              label={loading ? 'Refreshing...' : 'Refresh local operations'}
+              onPress={() => void load()}
+              disabled={loading}
+            />
+          </View>
+          <View style={styles.metricGrid}>
+            {metricCards.slice(0, 3).map((metric) => (
+              <View key={metric.label} style={styles.metricCard}>
+                <Text style={styles.metricValue}>{String(metric.value)}</Text>
+                <Text style={styles.metricLabel}>{metric.label}</Text>
+              </View>
+            ))}
+          </View>
+          {actionMessage ? <Text style={styles.successText}>{actionMessage}</Text> : null}
+          {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        </Panel>
+
+        <Panel
+          title="Capability matrix"
+          subtitle="These are the operation capabilities that local mode currently owns on-device."
+        >
+          {capabilities.length === 0 ? (
+            <Text style={styles.emptyText}>No local capability data available yet.</Text>
+          ) : null}
+          {capabilities.map((capability) => (
+            <View key={capability.key} style={styles.itemCard}>
+              <Text style={styles.itemTitle}>{capability.label}</Text>
+              <Text style={styles.detailText}>Status: {capability.status}</Text>
+              <Text style={styles.detailText}>{capability.detail}</Text>
+            </View>
+          ))}
+        </Panel>
+
+        <Panel
+          title="Local session and diagnostics"
+          subtitle="Local mode keeps recent action history and any active sessions visible even when the backend is off."
+        >
+          {sessions.length === 0 ? (
+            <Text style={styles.emptyText}>No active local sessions.</Text>
+          ) : null}
+          {sessions.map((session) => (
+            <View key={session.session_id ?? describeSession(session)} style={styles.itemCard}>
+              <Text style={styles.itemTitle}>{describeSession(session)}</Text>
+              <Text style={styles.detailText}>Type: {formatValue(session.stream_type)}</Text>
+              <Text style={styles.detailText}>Status: {formatValue(session.status)}</Text>
+            </View>
+          ))}
+
+          <Text style={styles.sectionTitle}>Recent action history</Text>
+          {actionHistory.length === 0 ? (
+            <Text style={styles.emptyText}>No local actions recorded yet.</Text>
+          ) : null}
+          {actionHistory.slice(0, 8).map((entry) => (
+            <View key={entry.id} style={styles.itemCard}>
+              <Text style={styles.itemTitle}>{entry.title}</Text>
+              <Text style={styles.detailText}>{entry.detail}</Text>
+              <Text style={styles.detailText}>
+                {entry.status} • {formatValue(entry.created_at)}
+              </Text>
+            </View>
+          ))}
+        </Panel>
+
+        <Panel
+          title="Deferred advanced operations"
+          subtitle="Renderer, overlay, mapping, projection, and receiver-grade workflows remain explicit deferred states until a later local-native PRD approves them."
+        >
+          {deferredFeatures.length === 0 ? (
+            <Text style={styles.emptyText}>No deferred operation cards configured yet.</Text>
+          ) : null}
+          {deferredFeatures.map((feature) => (
+            <View key={feature.id} style={styles.itemCard}>
+              <Text style={styles.itemTitle}>{feature.title}</Text>
+              <Text style={styles.detailText}>{feature.detail}</Text>
+              {feature.next_step ? (
+                <Text style={styles.detailText}>Next step: {feature.next_step}</Text>
+              ) : null}
+            </View>
+          ))}
+        </Panel>
+      </>
+    );
+  }
 
   return (
     <>

@@ -2,13 +2,15 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ActionButton } from '../components/ActionButton';
 import { Panel } from '../components/Panel';
+import { type ControlPlaneClient } from '../control-plane/client';
+import type { AppMode } from '../control-plane/localState';
 import { useDevicesController } from '../features/devices/useDevicesController';
-import { NanoDlnaApiClient } from '../services/api';
 import { colors } from '../theme';
 import type { DeviceSummary } from '../types/api';
 
 interface DevicesScreenProps {
-  client: NanoDlnaApiClient;
+  appMode: AppMode;
+  client: ControlPlaneClient;
   selectedDeviceId?: number | string | null;
   onSelectDevice?: (deviceId: number | string | null, label: string | null) => void;
 }
@@ -73,6 +75,7 @@ const statusColors = {
 };
 
 export function DevicesScreen({
+  appMode,
   client,
   selectedDeviceId: sharedSelectedDeviceId,
   onSelectDevice,
@@ -118,7 +121,11 @@ export function DevicesScreen({
     <>
       <Panel
         title="Device control"
-        subtitle="This screen now expands the mobile rewrite into a real operator view for discovery, runtime state, and per-device actions."
+        subtitle={
+          appMode === 'local'
+            ? 'Local mode keeps device state and operator actions on-device, with explicit limits where native discovery bindings are still pending.'
+            : 'Remote mode still uses the FastAPI adapter for discovery, runtime state, and per-device actions.'
+        }
       >
         <View style={styles.actions}>
           <ActionButton
@@ -153,7 +160,11 @@ export function DevicesScreen({
 
       <Panel
         title="Unified discovery"
-        subtitle="The mobile app also reads the shared `/api/v2/discovery` control plane so operators can see backend health and capability coverage."
+        subtitle={
+          appMode === 'local'
+            ? 'Local mode surfaces on-device capability coverage and discovery readiness instead of assuming backend-owned discovery.'
+            : 'Remote mode reads the shared `/api/v2/discovery` control plane so operators can see backend health and capability coverage.'
+        }
       >
         <View style={styles.keyValueGrid}>
           <View style={styles.keyValueItem}>

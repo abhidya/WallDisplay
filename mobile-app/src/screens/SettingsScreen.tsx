@@ -1,16 +1,20 @@
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { ActionButton } from '../components/ActionButton';
 import { Panel } from '../components/Panel';
 import { emulatorConnectionNotes } from '../data/features';
 import { useSettingsController } from '../features/settings/useSettingsController';
-import { NanoDlnaApiClient } from '../services/api';
+import type { ControlPlaneClient } from '../control-plane/client';
+import type { AppMode } from '../control-plane/localState';
 import { colors } from '../theme';
 
 interface SettingsScreenProps {
   apiBaseUrl: string;
-  client: NanoDlnaApiClient;
+  appMode: AppMode;
+  client: ControlPlaneClient;
+  hydrated: boolean;
   onApplyApiBaseUrl: (value: string) => void;
+  onApplyAppMode: (mode: AppMode) => void;
 }
 
 function formatValue(value: unknown, fallback = '—'): string {
@@ -22,8 +26,11 @@ function formatValue(value: unknown, fallback = '—'): string {
 
 export function SettingsScreen({
   apiBaseUrl,
+  appMode,
   client,
+  hydrated,
   onApplyApiBaseUrl,
+  onApplyAppMode,
 }: SettingsScreenProps) {
   const {
     actionMessage,
@@ -35,13 +42,40 @@ export function SettingsScreen({
     refreshConnection,
     setDraftValue,
     unifiedDiscovery,
-  } = useSettingsController(client, { apiBaseUrl });
+  } = useSettingsController(client, { apiBaseUrl, appMode });
 
   return (
     <>
       <Panel
-        title="Backend connection"
-        subtitle="Set the FastAPI base URL used by the mobile rewrite. The app always normalizes the value to an /api endpoint."
+        title="Control-plane mode"
+        subtitle="Local mode keeps the app useful with no backend. Remote mode preserves the existing FastAPI adapter for fallback and migration."
+      >
+        <View style={styles.modeRow}>
+          {(['local', 'remote'] as AppMode[]).map((mode) => {
+            const active = mode === appMode;
+            return (
+              <Pressable
+                key={mode}
+                accessibilityRole="button"
+                onPress={() => onApplyAppMode(mode)}
+                style={[styles.modeCard, active && styles.modeCardActive]}
+              >
+                <Text style={[styles.modeTitle, active && styles.modeTitleActive]}>{mode}</Text>
+                <Text style={styles.modeBody}>
+                  {mode === 'local'
+                    ? 'On-device control plane, saved config, local-safe workflows, and no backend requirement.'
+                    : 'Use the existing FastAPI control plane through the migration adapter.'}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        {!hydrated ? <Text style={styles.noteText}>Restoring saved control-plane preferences…</Text> : null}
+      </Panel>
+
+      <Panel
+        title="Remote fallback target"
+        subtitle="Keep the backend URL ready for remote mode. The app normalizes the value to an /api endpoint."
       >
         <TextInput
           autoCapitalize="none"
@@ -58,7 +92,7 @@ export function SettingsScreen({
         <View style={styles.actionsRow}>
           <ActionButton label="Apply base URL" onPress={() => onApplyApiBaseUrl(draftValue)} />
           <ActionButton
-            label={loading ? 'Checking...' : 'Test connection'}
+            label={loading ? 'Checking...' : appMode === 'local' ? 'Check local mode' : 'Test remote mode'}
             onPress={() => void refreshConnection()}
             disabled={loading}
             variant="secondary"
@@ -69,8 +103,8 @@ export function SettingsScreen({
       </Panel>
 
       <Panel
-        title="Connection diagnostics"
-        subtitle="Use the current mobile API target to confirm backend health and unified discovery status before running device or operations workflows."
+        title="Control-plane diagnostics"
+        subtitle="Use the active mode to confirm local readiness or remote connectivity before running device, media, or operations workflows."
       >
         <View style={styles.metricGrid}>
           <View style={styles.metricCard}>
@@ -78,22 +112,16 @@ export function SettingsScreen({
             <Text style={styles.metricLabel}>Health</Text>
           </View>
           <View style={styles.metricCard}>
-            <Text style={styles.metricValue}>
-              {formatValue(unifiedDiscovery?.discovery_running)}
-            </Text>
-            <Text style={styles.metricLabel}>Discovery running</Text>
+            <Text style={styles.metricValue}>{formatValue(appMode)}</Text>
+            <Text style={styles.metricLabel}>Mode</Text>
           </View>
           <View style={styles.metricCard}>
-            <Text style={styles.metricValue}>
-              {formatValue(unifiedDiscovery?.online_devices)}
-            </Text>
-            <Text style={styles.metricLabel}>Online devices</Text>
+            <Text style={styles.metricValue}>{formatValue(unifiedDiscovery?.online_devices)}</Text>
+            <Text style={styles.metricLabel}>Devices</Text>
           </View>
           <View style={styles.metricCard}>
-            <Text style={styles.metricValue}>
-              {formatValue(unifiedDiscovery?.active_sessions)}
-            </Text>
-            <Text style={styles.metricLabel}>Discovery sessions</Text>
+            <Text style={styles.metricValue}>{formatValue(unifiedDiscovery?.active_sessions)}</Text>
+            <Text style={styles.metricLabel}>Sessions</Text>
           </View>
         </View>
         <Text style={styles.noteText}>
@@ -106,7 +134,7 @@ export function SettingsScreen({
 
       <Panel
         title="Connection notes"
-        subtitle="These defaults matter because localhost behaves differently on simulator, emulator, and physical hardware."
+        subtitle="Remote fallback still matters because simulator, emulator, and physical hardware resolve localhost differently."
       >
         {emulatorConnectionNotes.map((note) => (
           <View key={note} style={styles.noteRow}>
@@ -117,19 +145,49 @@ export function SettingsScreen({
       </Panel>
 
       <Panel
-        title="OMX team kickoff"
-        subtitle="Use the installed oh-my-codex runtime to continue the rewrite with a durable coordinated team."
+        title="Execution lane"
+        subtitle="This iteration follows the approved local-first plan: shared seam, local persistence, reduced operations subset, and deferred advanced receiver/rendering features."
       >
-        <Text style={styles.commandText}>
-          omx team 3:executor "Continue the nano-dlna mobile rewrite in mobile-app using the
-          existing FastAPI endpoints as the control plane."
-        </Text>
+        <Text style={styles.commandText}>Source of truth: .omx/plans/prd-local-control-plane-mobile-rewrite.md</Text>
       </Panel>
     </>
   );
 }
 
 const styles = StyleSheet.create({
+  modeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  modeCard: {
+    minWidth: 180,
+    flexGrow: 1,
+    backgroundColor: colors.elevatedPanel,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    padding: 14,
+    gap: 6,
+  },
+  modeCardActive: {
+    borderColor: colors.accent,
+    backgroundColor: colors.accentMuted,
+  },
+  modeTitle: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '700',
+    textTransform: 'capitalize',
+  },
+  modeTitleActive: {
+    color: colors.accent,
+  },
+  modeBody: {
+    color: colors.mutedText,
+    fontSize: 13,
+    lineHeight: 18,
+  },
   input: {
     backgroundColor: colors.elevatedPanel,
     borderWidth: 1,
@@ -179,6 +237,7 @@ const styles = StyleSheet.create({
     color: colors.accent,
     fontSize: 20,
     fontWeight: '700',
+    textTransform: 'capitalize',
   },
   metricLabel: {
     color: colors.mutedText,

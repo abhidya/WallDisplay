@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { NanoDlnaApiClient } from '../../services/api';
+import { type ControlPlaneClient } from '../../control-plane/client';
 import type {
   DiscoveryBackendSummary,
   DiscoveryCapabilities,
@@ -65,7 +65,7 @@ function describeDevice(device: DeviceSummary): string {
 }
 
 export function useDevicesController(
-  client: NanoDlnaApiClient,
+  client: ControlPlaneClient,
   options?: UseDevicesControllerOptions,
 ): DevicesController {
   const sharedSelectedDeviceId = options?.sharedSelectedDeviceId;

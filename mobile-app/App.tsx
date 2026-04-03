@@ -13,12 +13,15 @@ import { colors } from './src/theme';
 export default function App() {
   const {
     activeTab,
+    appMode,
     apiBaseUrl,
     client,
+    hydrated,
     selectedDeviceId,
     selectedDeviceLabel,
     setActiveTab,
     applyApiBaseUrl,
+    applyAppMode,
     selectDevice,
   } = useAppShell();
 
@@ -31,15 +34,21 @@ export default function App() {
             <Text style={styles.eyebrow}>nano-dlna mobile rewrite</Text>
             <Text style={styles.title}>Cross-platform operator console</Text>
             <Text style={styles.subtitle}>
-              Separate Expo app for iOS and Android, backed by the existing FastAPI media-control
-              APIs.
+              Local-first Expo app for iOS and Android. It can run with an on-device control plane
+              or fall back to the existing FastAPI runtime when needed.
             </Text>
           </View>
           <View style={styles.headerMetaRow}>
-            <View style={styles.endpointChip}>
-              <Text style={styles.endpointLabel}>API</Text>
-              <Text style={styles.endpointValue}>{apiBaseUrl}</Text>
+            <View style={[styles.endpointChip, appMode === 'local' && styles.localModeChip]}>
+              <Text style={styles.endpointLabel}>Mode</Text>
+              <Text style={styles.endpointValue}>{appMode}</Text>
             </View>
+            {appMode === 'remote' ? (
+              <View style={styles.endpointChip}>
+                <Text style={styles.endpointLabel}>Fallback API</Text>
+                <Text style={styles.endpointValue}>{apiBaseUrl}</Text>
+              </View>
+            ) : null}
             {selectedDeviceLabel ? (
               <View style={styles.selectionChip}>
                 <Text style={styles.selectionChipLabel}>Target</Text>
@@ -69,12 +78,13 @@ export default function App() {
 
         {activeTab === 'overview' && (
           <ScreenLayout>
-            <OverviewScreen apiBaseUrl={apiBaseUrl} client={client} />
+            <OverviewScreen apiBaseUrl={apiBaseUrl} appMode={appMode} client={client} />
           </ScreenLayout>
         )}
         {activeTab === 'devices' && (
           <ScreenLayout>
             <DevicesScreen
+              appMode={appMode}
               client={client}
               selectedDeviceId={selectedDeviceId}
               onSelectDevice={selectDevice}
@@ -84,6 +94,7 @@ export default function App() {
         {activeTab === 'media' && (
           <ScreenLayout>
             <MediaScreen
+              appMode={appMode}
               client={client}
               selectedDeviceId={selectedDeviceId}
               selectedDeviceLabel={selectedDeviceLabel}
@@ -92,15 +103,18 @@ export default function App() {
         )}
         {activeTab === 'operations' && (
           <ScreenLayout>
-            <OperationsScreen client={client} />
+            <OperationsScreen appMode={appMode} client={client} />
           </ScreenLayout>
         )}
         {activeTab === 'settings' && (
           <ScreenLayout>
             <SettingsScreen
               apiBaseUrl={apiBaseUrl}
+              appMode={appMode}
               client={client}
+              hydrated={hydrated}
               onApplyApiBaseUrl={applyApiBaseUrl}
+              onApplyAppMode={applyAppMode}
             />
           </ScreenLayout>
         )}
@@ -167,6 +181,10 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     textTransform: 'uppercase',
+  },
+  localModeChip: {
+    borderColor: colors.success,
+    backgroundColor: colors.elevatedPanel,
   },
   endpointValue: {
     color: colors.text,

@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { NanoDlnaApiClient } from '../../services/api';
+import { type ControlPlaneClient } from '../../control-plane/client';
 import type {
+  ActionHistoryEntry,
+  DeferredFeatureSummary,
   JsonRecord,
+  LocalCapabilitySummary,
   MappingSceneSummary,
   OverlayConfigSummary,
   OverlayStatusResponse,
@@ -20,9 +23,13 @@ import type {
 export interface OperationsController {
   actionLoadingKey: string | null;
   actionMessage: string | null;
+  actionHistory: ActionHistoryEntry[];
   analytics: StreamingAnalytics | null;
+  capabilities: LocalCapabilitySummary[];
+  deferredFeatures: DeferredFeatureSummary[];
   error: string | null;
   loading: boolean;
+  mode: 'local' | 'remote';
   mappingScenes: MappingSceneSummary[];
   overlayConfigs: OverlayConfigSummary[];
   overlayStatus: OverlayStatusResponse | null;
@@ -63,7 +70,11 @@ function ensureCurrentSelection(
   return candidates[0] ?? null;
 }
 
-export function useOperationsController(client: NanoDlnaApiClient): OperationsController {
+export function useOperationsController(client: ControlPlaneClient): OperationsController {
+  const mode = client.mode;
+  const [capabilities, setCapabilities] = useState<LocalCapabilitySummary[]>([]);
+  const [actionHistory, setActionHistory] = useState<ActionHistoryEntry[]>([]);
+  const [deferredFeatures, setDeferredFeatures] = useState<DeferredFeatureSummary[]>([]);
   const [analytics, setAnalytics] = useState<StreamingAnalytics | null>(null);
   const [sessions, setSessions] = useState<StreamingSessionSummary[]>([]);
   const [renderers, setRenderers] = useState<RendererInstanceSummary[]>([]);
@@ -112,6 +123,45 @@ export function useOperationsController(client: NanoDlnaApiClient): OperationsCo
     setLoading(true);
     setError(null);
     try {
+      if (client.mode === 'local') {
+        const [
+          analyticsPayload,
+          sessionsPayload,
+          capabilityPayload,
+          actionHistoryPayload,
+          deferredPayload,
+        ] = await Promise.all([
+          client.getStreamingAnalytics(),
+          client.listStreamingSessions(),
+          client.listCapabilities(),
+          client.listActionHistory(),
+          client.listDeferredFeatures(),
+        ]);
+
+        if (!mountedRef.current) {
+          return;
+        }
+
+        setAnalytics(analyticsPayload);
+        setSessions(sessionsPayload);
+        setCapabilities(capabilityPayload);
+        setActionHistory(actionHistoryPayload);
+        setDeferredFeatures(deferredPayload);
+        setRenderers([]);
+        setProjectors([]);
+        setRendererScenes([]);
+        setOverlayConfigs([]);
+        setOverlayStatus(null);
+        setMappingScenes([]);
+        setSceneRanks([]);
+        setSceneControlPresets([]);
+        setProjectionConfigs([]);
+        setSelectedProjectorId(null);
+        setSelectedSceneId(null);
+        setSelectedProjectionConfigId(null);
+        return;
+      }
+
       const [
         analyticsPayload,
         sessionsPayload,
@@ -153,6 +203,15 @@ export function useOperationsController(client: NanoDlnaApiClient): OperationsCo
       setSceneRanks(sceneRanksPayload);
       setSceneControlPresets(sceneControlPresetsPayload);
       setProjectionConfigs(projectionConfigsPayload);
+      setCapabilities(
+        await client.listCapabilities()
+      );
+      setActionHistory(
+        await client.listActionHistory()
+      );
+      setDeferredFeatures(
+        await client.listDeferredFeatures()
+      );
       setSelectedProjectorId((current) => {
         const next = ensureCurrentSelection(
           current,
@@ -383,9 +442,13 @@ export function useOperationsController(client: NanoDlnaApiClient): OperationsCo
     () => ({
       actionLoadingKey,
       actionMessage,
+      actionHistory,
       analytics,
+      capabilities,
+      deferredFeatures,
       error,
       loading,
+      mode,
       load,
       launchSelectedProjection,
       mappingScenes,
@@ -418,11 +481,15 @@ export function useOperationsController(client: NanoDlnaApiClient): OperationsCo
     [
       actionLoadingKey,
       actionMessage,
+      actionHistory,
       analytics,
+      capabilities,
+      deferredFeatures,
       error,
       launchSelectedProjection,
       load,
       loading,
+      mode,
       mappingScenes,
       overlayConfigs,
       overlayStatus,

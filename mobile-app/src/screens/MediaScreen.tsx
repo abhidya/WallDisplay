@@ -3,8 +3,9 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { ActionButton } from '../components/ActionButton';
 import { Panel } from '../components/Panel';
+import { type ControlPlaneClient } from '../control-plane/client';
+import type { AppMode } from '../control-plane/localState';
 import { useMediaController } from '../features/media/useMediaController';
-import { NanoDlnaApiClient } from '../services/api';
 import { colors } from '../theme';
 import type {
   MediaChannelSummary,
@@ -15,7 +16,8 @@ import type {
 } from '../types/api';
 
 interface MediaScreenProps {
-  client: NanoDlnaApiClient;
+  appMode: AppMode;
+  client: ControlPlaneClient;
   selectedDeviceId: number | string | null;
   selectedDeviceLabel: string | null;
 }
@@ -68,6 +70,7 @@ function describeChannel(channel: MediaChannelSummary): string {
 }
 
 export function MediaScreen({
+  appMode,
   client,
   selectedDeviceId,
   selectedDeviceLabel,
@@ -104,7 +107,11 @@ export function MediaScreen({
     <>
       <Panel
         title="Media inventory"
-        subtitle="This mobile slice now connects indexed media and media-library structures to the selected playback target from the Devices tab."
+        subtitle={
+          appMode === 'local'
+            ? 'Local mode keeps a lightweight on-device media inventory so operators can still test playback flows without the backend.'
+            : 'Remote mode still connects indexed media and media-library structures to the selected playback target.'
+        }
       >
         <View style={styles.actionsWrap}>
           <ActionButton
@@ -180,7 +187,11 @@ export function MediaScreen({
 
       <Panel
         title="Photos and library structures"
-        subtitle="Read-first parity for photos, directories, playlists, and channels uses the existing FastAPI media-library endpoints."
+        subtitle={
+          appMode === 'local'
+            ? 'Local mode exposes a persisted media shell first; richer backend-synced library features stay available in remote mode.'
+            : 'Read-first parity for photos, directories, playlists, and channels uses the existing FastAPI media-library endpoints.'
+        }
       >
         <Text style={styles.sectionTitle}>Photos</Text>
         {photos.length === 0 && !loading ? (

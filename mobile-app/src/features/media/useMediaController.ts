@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { NanoDlnaApiClient } from '../../services/api';
+import { type ControlPlaneClient } from '../../control-plane/client';
 import type {
   JsonRecord,
   MediaChannelSummary,
@@ -32,7 +32,7 @@ interface UseMediaControllerOptions {
 }
 
 export function useMediaController(
-  client: NanoDlnaApiClient,
+  client: ControlPlaneClient,
   options: UseMediaControllerOptions,
 ): MediaController {
   const [actionLoadingKey, setActionLoadingKey] = useState<string | null>(null);

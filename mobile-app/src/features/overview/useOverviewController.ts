@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { NanoDlnaApiClient } from '../../services/api';
+import { type ControlPlaneClient } from '../../control-plane/client.ts';
 import type {
   DiscoverySystemStatus,
   HealthResponse,
@@ -22,7 +22,7 @@ export interface OverviewController {
   load: () => Promise<void>;
 }
 
-export function useOverviewController(client: NanoDlnaApiClient): OverviewController {
+export function useOverviewController(client: ControlPlaneClient): OverviewController {
   const [devices, setDevices] = useState<DeviceSummary[]>([]);
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [streaming, setStreaming] = useState<StreamingAnalytics | null>(null);

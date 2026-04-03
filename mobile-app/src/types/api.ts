@@ -12,7 +12,7 @@ export interface DeviceSummary extends JsonRecord {
   derived_status?: string;
   playback_state?: string;
   is_playing?: boolean;
-  current_video?: string;
+  current_video?: string | null;
   current_media_title?: string;
   playback_position?: string;
   playback_duration?: string;
@@ -58,7 +58,7 @@ export interface DiscoveryBackendSummary extends JsonRecord {
   active?: boolean;
   enabled?: boolean;
   healthy?: boolean;
-  last_seen?: string;
+  last_seen?: string | null;
 }
 
 export interface DiscoverySystemStatus extends JsonRecord {
@@ -179,7 +179,7 @@ export interface OverlayConfigSummary extends JsonRecord {
 export interface OverlayStatusResponse extends JsonRecord {
   brightness?: number;
   sync?: JsonRecord | null;
-  server_time?: string;
+  server_time?: string | null;
 }
 
 export interface OverlaySyncResponse extends JsonRecord {
@@ -241,4 +241,41 @@ export interface ProjectionSessionSummary extends JsonRecord {
   maskId?: string;
   created_at?: string;
   zones?: JsonRecord[];
+}
+
+export interface CapabilitySummary extends JsonRecord {
+  id: string;
+  title: string;
+  status: 'ready' | 'limited' | 'deferred';
+  detail: string;
+}
+
+export interface ActionHistoryEntry extends JsonRecord {
+  id: string;
+  title: string;
+  detail: string;
+  created_at: string;
+  status: 'ok' | 'success' | 'info' | 'deferred';
+  mode?: 'local' | 'remote';
+}
+
+export interface DeferredFeatureCard extends JsonRecord {
+  id: string;
+  title: string;
+  detail: string;
+  next_step?: string;
+}
+
+export interface LocalCapabilitySummary extends JsonRecord {
+  key: string;
+  label: string;
+  status: 'ready' | 'limited' | 'deferred';
+  detail: string;
+}
+
+export interface DeferredFeatureSummary extends JsonRecord {
+  id: string;
+  title: string;
+  detail: string;
+  next_step?: string;
 }

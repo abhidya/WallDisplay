@@ -108,6 +108,100 @@ function addHexAlpha(color, alphaHex) {
   return normalized;
 }
 
+function normalizeIdArray(values, fallbackKey = null) {
+  if (Array.isArray(values)) {
+    return values.filter(Boolean).map((value) => String(value));
+  }
+  if (fallbackKey !== null && fallbackKey !== undefined && fallbackKey !== '') {
+    return [String(fallbackKey)];
+  }
+  return [];
+}
+
+function normalizeGroupTransform(transform) {
+  return {
+    scale: Number(transform?.scale) || 1,
+    offset_x: Number(transform?.offset_x) || 0,
+    offset_y: Number(transform?.offset_y) || 0,
+    rotation: Number(transform?.rotation) || 0,
+  };
+}
+
+function normalizeMask(mask = {}, index = 0) {
+  const fallbackName = mask.name || mask.file_name || `Mask ${index + 1}`;
+  return {
+    ...mask,
+    id: String(mask.id || `mask_${index + 1}`),
+    name: fallbackName,
+    file_name: mask.file_name || mask.name || `mask_${index + 1}.png`,
+    stored_path: mask.stored_path || '',
+    width: Number(mask.width) || 0,
+    height: Number(mask.height) || 0,
+    sort_order: Number(mask.sort_order) || index,
+  };
+}
+
+function normalizeGroup(group = {}, index = 0, masksById = {}) {
+  const maskIds = normalizeIdArray(
+    group.mask_ids
+      ?? group.maskIds
+      ?? (Array.isArray(group.masks) ? group.masks.map((mask) => (typeof mask === 'string' ? mask : mask?.id)) : null),
+    group.mask_id ?? group.maskId
+  );
+  const fallbackMaskName = maskIds.map((maskId) => masksById[maskId]?.name).find(Boolean);
+  return {
+    ...emptyGroup(),
+    ...group,
+    id: String(group.id || `group_${index + 1}`),
+    name: group.name || fallbackMaskName || `Group ${index + 1}`,
+    mask_ids: maskIds,
+    layout_scope: group.layout_scope || group.layoutScope || 'scene',
+    media_binding_type: group.media_binding_type || group.mediaBindingType || 'video',
+    animation_id: group.animation_id ?? group.animationId ?? '',
+    animation_list_id: group.animation_list_id ?? group.animationListId ?? '',
+    video_id: group.video_id ?? group.videoId ?? '',
+    photo_id: group.photo_id ?? group.photoId ?? '',
+    media_list_id: group.media_list_id ?? group.mediaListId ?? '',
+    photo_list_id: group.photo_list_id ?? group.photoListId ?? '',
+    media_channel_id: group.media_channel_id ?? group.mediaChannelId ?? '',
+    media_directory_id: group.media_directory_id ?? group.mediaDirectoryId ?? '',
+    media_directory_ids: normalizeNumericIdList(
+      group.media_directory_ids ?? group.mediaDirectoryIds ?? (group.media_directory_id ?? group.mediaDirectoryId ? [group.media_directory_id ?? group.mediaDirectoryId] : [])
+    ),
+    direct_url: group.direct_url ?? group.directUrl ?? '',
+    playlist_entries: Array.isArray(group.playlist_entries ?? group.playlistEntries)
+      ? [...(group.playlist_entries ?? group.playlistEntries)]
+      : [],
+    auto_advance: group.auto_advance ?? group.autoAdvance ?? true,
+    shuffle: Boolean(group.shuffle),
+    z_index: Number(group.z_index ?? group.zIndex) || 0,
+    visible: group.visible !== false,
+    transform: normalizeGroupTransform(group.transform),
+    fill_mode: group.fill_mode || group.fillMode || 'gradient',
+    color_a: group.color_a || group.colorA || '#b56a2d',
+    color_b: group.color_b || group.colorB || '#6a7f58',
+  };
+}
+
+export function normalizeScene(scene = {}) {
+  const masks = (Array.isArray(scene.masks) ? scene.masks : []).map((mask, index) => normalizeMask(mask, index));
+  const masksById = Object.fromEntries(masks.map((mask) => [mask.id, mask]));
+  const groups = (Array.isArray(scene.groups) ? scene.groups : []).map((group, index) => normalizeGroup(group, index, masksById));
+
+  return {
+    ...scene,
+    name: scene.name || 'Untitled Scene',
+    canvas_width: Number(scene.canvas_width) || 1280,
+    canvas_height: Number(scene.canvas_height) || 720,
+    mask_mode: scene.mask_mode || 'luminance',
+    masks,
+    groups,
+    render_settings: scene.render_settings && typeof scene.render_settings === 'object'
+      ? scene.render_settings
+      : {},
+  };
+}
+
 function Mappings() {
   const [searchParams, setSearchParams] = useSearchParams();
   const stageRef = useRef(null);
@@ -165,7 +259,7 @@ function Mappings() {
       projectionApi.listAnimations(),
       projectionApi.listAnimationLists(),
     ]).then(([sceneRes, videoRes, photoRes, mediaDirectoryRes, mediaListRes, photoListRes, mediaChannelRes, animationRes, animationListRes]) => {
-      const loadedScenes = sceneRes.data || [];
+      const loadedScenes = (sceneRes.data || []).map((scene) => normalizeScene(scene));
       setScenes(loadedScenes);
       setVideos(videoRes.data.videos || []);
       setPhotos(photoRes.data.photos || []);
@@ -217,28 +311,30 @@ function Mappings() {
   }, [sceneDraft]);
 
   const loadScene = (scene) => {
-    setSelectedSceneId(scene.id);
-    setSceneDraft(JSON.parse(JSON.stringify(scene)));
-    setSelectedGroupId(scene.groups?.[0]?.id || '');
+    const normalizedScene = normalizeScene(scene);
+    setSelectedSceneId(normalizedScene.id);
+    setSceneDraft(JSON.parse(JSON.stringify(normalizedScene)));
+    setSelectedGroupId(normalizedScene.groups?.[0]?.id || '');
     setSearchParams((current) => {
       const next = new URLSearchParams(current);
-      next.set('scene', String(scene.id));
+      next.set('scene', String(normalizedScene.id));
       return next;
     }, { replace: true });
   };
 
   const createSceneDraft = () => {
+    const firstGroup = emptyGroup();
     setSelectedSceneId('');
-    setSceneDraft({
+    setSceneDraft(normalizeScene({
       name: `Scene ${new Date().toLocaleString()}`,
       canvas_width: 1280,
       canvas_height: 720,
       mask_mode: 'luminance',
       masks: [],
-      groups: [emptyGroup()],
+      groups: [firstGroup],
       render_settings: { background: '#000000' },
-    });
-    setSelectedGroupId('');
+    }));
+    setSelectedGroupId(firstGroup.id);
   };
 
   const getMaskUrl = useCallback((mask) => {
@@ -307,7 +403,7 @@ function Mappings() {
         ? await mappingsApi.updateScene(selectedScene.id, payload)
         : await mappingsApi.createScene(payload);
 
-      const updatedScene = response.data;
+      const updatedScene = normalizeScene(response.data);
       setScenes((current) => {
         if (selectedScene) {
           return current.map((scene) => (scene.id === updatedScene.id ? updatedScene : scene));
@@ -354,7 +450,7 @@ function Mappings() {
 
     try {
       const response = await mappingsApi.uploadMasks(selectedScene.id, formData);
-      const updatedScene = response.data;
+      const updatedScene = normalizeScene(response.data);
       setScenes((current) => current.map((scene) => (scene.id === updatedScene.id ? updatedScene : scene)));
       loadScene(updatedScene);
       setMessage(`Uploaded ${event.target.files.length} masks`);
@@ -371,9 +467,9 @@ function Mappings() {
 
     try {
       const response = await mappingsApi.importScene(formData);
-      const importedScene = response.data;
+      const importedScene = normalizeScene(response.data);
       const scenesResponse = await mappingsApi.listScenes();
-      setScenes(scenesResponse.data);
+      setScenes((scenesResponse.data || []).map((scene) => normalizeScene(scene)));
       loadScene(importedScene);
       setMessage(`Imported scene "${importedScene.name}"`);
       setError('');
@@ -425,7 +521,7 @@ function Mappings() {
 
     try {
       const response = await mappingsApi.createPolygonMask(selectedScene.id, polygonDraft);
-      const updatedScene = response.data;
+      const updatedScene = normalizeScene(response.data);
       setScenes((current) => current.map((scene) => (scene.id === updatedScene.id ? updatedScene : scene)));
       loadScene(updatedScene);
       setPolygonDraft(null);
@@ -437,11 +533,11 @@ function Mappings() {
   };
 
   const updateSceneField = (field, value) => {
-    setSceneDraft((current) => ({ ...current, [field]: value }));
+    setSceneDraft((current) => normalizeScene({ ...current, [field]: value }));
   };
 
   const updateGroup = (groupId, patch) => {
-    setSceneDraft((current) => ({
+    setSceneDraft((current) => normalizeScene({
       ...current,
       groups: current.groups.map((group) => (group.id === groupId ? { ...group, ...patch } : group)),
     }));
@@ -449,7 +545,7 @@ function Mappings() {
 
   const addGroup = () => {
     const group = emptyGroup();
-    setSceneDraft((current) => ({
+    setSceneDraft((current) => normalizeScene({
       ...current,
       groups: [...(current.groups || []), group],
     }));
@@ -491,7 +587,7 @@ function Mappings() {
         { x: 0, y: sceneDraft.canvas_height },
       ],
     });
-    const updatedScene = response.data;
+    const updatedScene = normalizeScene(response.data);
     setScenes((current) => current.map((scene) => (scene.id === updatedScene.id ? updatedScene : scene)));
     loadScene(updatedScene);
     return (updatedScene.masks || []).find((mask) => String(mask.name || '').toLowerCase() === 'full')
@@ -523,7 +619,7 @@ function Mappings() {
         color_b: '#000000',
       };
 
-      setSceneDraft((current) => ({
+      setSceneDraft((current) => normalizeScene({
         ...current,
         groups: [backgroundGroup, ...maskGroups],
       }));
@@ -536,7 +632,7 @@ function Mappings() {
   };
 
   const removeGroup = (groupId) => {
-    setSceneDraft((current) => ({
+    setSceneDraft((current) => normalizeScene({
       ...current,
       groups: current.groups.filter((group) => group.id !== groupId),
     }));
@@ -552,7 +648,7 @@ function Mappings() {
     }
     try {
       const response = await mappingsApi.deleteMask(selectedScene.id, maskId);
-      const updatedScene = response.data;
+      const updatedScene = normalizeScene(response.data);
       setScenes((current) => current.map((scene) => (scene.id === updatedScene.id ? updatedScene : scene)));
       loadScene(updatedScene);
       setMessage('Mask deleted');
@@ -568,7 +664,7 @@ function Mappings() {
         return current;
       }
 
-      return {
+      return normalizeScene({
         ...current,
         groups: current.groups.map((group) => {
           if (group.id !== groupId) {
@@ -585,7 +681,7 @@ function Mappings() {
             mask_ids: nextMaskIds,
           };
         }),
-      };
+      });
     });
   };
 
@@ -731,7 +827,7 @@ function Mappings() {
                     {scenes.map((scene) => (
                       <ListItem key={scene.id} disablePadding>
                         <ListItemButton selected={selectedSceneId === scene.id} onClick={() => loadScene(scene)}>
-                          <ListItemText primary={scene.name} secondary={`${scene.masks.length} masks • ${scene.groups.length} groups`} />
+                          <ListItemText primary={scene.name || 'Untitled Scene'} secondary={`${(scene.masks || []).length} masks • ${(scene.groups || []).length} groups`} />
                         </ListItemButton>
                       </ListItem>
                     ))}
@@ -853,7 +949,7 @@ function Mappings() {
                                 )}
                               >
                                 <ListItemButton onClick={() => selectedGroup && toggleMaskForGroup(selectedGroup.id, mask.id)}>
-                                  <ListItemText primary={mask.file_name} secondary={`${mask.width}x${mask.height}`} />
+                                  <ListItemText primary={mask.file_name || mask.name || 'Unnamed mask'} secondary={`${mask.width || 0}x${mask.height || 0}`} />
                                   <Chip size="small" label={active ? 'On' : 'Off'} color={active ? 'primary' : 'default'} />
                                 </ListItemButton>
                               </ListItem>
@@ -889,7 +985,7 @@ function Mappings() {
             <Stack direction="row" spacing={1} sx={{ p: 1.5, bgcolor: 'rgba(248,243,233,0.96)', borderBottom: `1px solid ${CANVAS_FRAME}` }}>
               <Chip label={`${sceneDraft.masks?.length || 0} masks`} />
               <Chip label={`${sceneDraft.groups?.length || 0} groups`} />
-              <Chip label={selectedGroup ? `Selected: ${selectedGroup.name}` : 'No group selected'} color="primary" />
+              <Chip label={selectedGroup ? `Selected: ${selectedGroup.name || 'Unnamed group'}` : 'No group selected'} color="primary" />
             </Stack>
           )}
 
@@ -979,8 +1075,8 @@ function Mappings() {
                           }}
                         >
                           <ListItemText
-                            primary={group.name}
-                            secondary={`${group.mask_ids.length} masks • z ${group.z_index || 0}`}
+                            primary={group.name || 'Unnamed group'}
+                            secondary={`${(group.mask_ids || []).length} masks • z ${group.z_index || 0}`}
                             primaryTypographyProps={{ fontWeight: selectedGroupId === group.id ? 700 : 600 }}
                             secondaryTypographyProps={{ color: 'rgba(38, 31, 22, 0.78)' }}
                           />
@@ -1421,7 +1517,7 @@ function renderStage(canvas, sceneDraft, maskImages, selectedGroupId, polygonDra
     ctx.setLineDash([]);
     ctx.fillStyle = 'rgba(255,255,255,0.92)';
     ctx.font = selectedGroupId === group.id ? 'bold 15px sans-serif' : '14px sans-serif';
-    ctx.fillText(group.name, bounds.x + 8, Math.max(18, bounds.y + 18));
+    ctx.fillText(group.name || 'Unnamed group', bounds.x + 8, Math.max(18, bounds.y + 18));
   });
 
   if (polygonDraft?.points?.length) {

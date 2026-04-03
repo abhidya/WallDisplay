@@ -7,13 +7,15 @@ import {
 } from '../data/features';
 import { ActionButton } from '../components/ActionButton';
 import { Panel } from '../components/Panel';
+import { type ControlPlaneClient } from '../control-plane/client';
+import type { AppMode } from '../control-plane/localState';
 import { useOverviewController } from '../features/overview/useOverviewController';
-import { NanoDlnaApiClient } from '../services/api';
 import { colors } from '../theme';
 
 interface OverviewScreenProps {
+  appMode: AppMode;
   apiBaseUrl: string;
-  client: NanoDlnaApiClient;
+  client: ControlPlaneClient;
 }
 
 function formatValue(value: unknown, fallback = '—'): string {
@@ -23,7 +25,7 @@ function formatValue(value: unknown, fallback = '—'): string {
   return String(value);
 }
 
-export function OverviewScreen({ apiBaseUrl, client }: OverviewScreenProps) {
+export function OverviewScreen({ apiBaseUrl, appMode, client }: OverviewScreenProps) {
   const { devices, error, health, load, loading, projections, renderers, streaming, unifiedDiscovery } =
     useOverviewController(client);
 
@@ -40,19 +42,21 @@ export function OverviewScreen({ apiBaseUrl, client }: OverviewScreenProps) {
     <>
       <Panel
         title="Rewrite target"
-        subtitle="This mobile app mirrors the current product architecture instead of replacing the backend."
+        subtitle="This mobile app now targets a local-first control plane with the backend retained only as a migration fallback."
       >
         <Text style={styles.body}>
-          The existing system is a FastAPI control plane plus a React dashboard for device
-          discovery, media streaming, overlay/projection workflows, and runtime diagnostics. The
-          mobile rewrite consumes that same backend from a dedicated Expo source tree.
+          Local mode keeps the operator console usable with no backend server by moving workflow
+          state, saved configuration, and local-safe control flows on-device. Remote mode keeps the
+          existing FastAPI adapter available while the rewrite is still in flight.
         </Text>
-        <Text style={styles.apiLine}>Connected base URL: {apiBaseUrl}</Text>
+        <Text style={styles.apiLine}>
+          Active mode: {appMode} {appMode === 'remote' ? `• Fallback API: ${apiBaseUrl}` : ''}
+        </Text>
       </Panel>
 
       <Panel
         title="Live backend summary"
-        subtitle="Overview is now a live operator landing screen backed by the same control-plane APIs used elsewhere in the mobile rewrite."
+        subtitle="Overview now summarizes whichever control-plane mode is active, so the app stays useful even when the backend is off."
       >
         <View style={styles.actionsRow}>
           <Text style={styles.metaLine}>

@@ -68,6 +68,7 @@ class AppRuntime:
     discovery_coordinator: Optional[object] = None
     migration_adapter: Optional[object] = None
     legacy_streaming_issue_handler: Optional[object] = None
+    airplay_projection_automation_service: Optional[object] = None
 
     @property
     def discovery_authority(self) -> str:
@@ -122,6 +123,16 @@ class AppRuntime:
     def start_background_services(self) -> None:
         logger.info("Starting device discovery")
         self.discovery_manager.register_enabled_backends()
+        try:
+            if self.airplay_projection_automation_service is None:
+                from services.airplay_projection_automation_service import AirPlayProjectionAutomationService
+
+                self.airplay_projection_automation_service = AirPlayProjectionAutomationService(
+                    self.discovery_manager
+                )
+            self.airplay_projection_automation_service.start()
+        except Exception as exc:
+            logger.error(f"Failed to start AirPlay projection automation service: {exc}")
         if self.uses_unified_discovery_authority:
             self.unified_discovery_lifecycle_service.start()
             logger.info("Unified discovery authority enabled; skipping legacy discovery loop startup")
@@ -137,6 +148,11 @@ class AppRuntime:
                 logger.error(f"Failed to start discovery migration: {exc}")
 
     def stop_background_services(self) -> None:
+        if self.airplay_projection_automation_service is not None:
+            try:
+                self.airplay_projection_automation_service.stop()
+            except Exception as exc:
+                logger.error(f"Error stopping AirPlay projection automation service: {exc}")
         if not self.uses_unified_discovery_authority:
             discovery_controller = AppRuntime._get_discovery_controller(self)
             discovery_controller.stop()

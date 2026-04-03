@@ -1,10 +1,18 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import {
-  DEFAULT_API_BASE_URL,
-  NanoDlnaApiClient,
-  normalizeApiBaseUrl,
-} from '../../services/api';
+  createControlPlaneClient,
+  DEFAULT_REMOTE_API_BASE_URL,
+  type ControlPlaneClient,
+} from '../../control-plane/client.ts';
+import {
+  defaultAppState,
+  type AppMode,
+  loadLocalControlPlaneState,
+  updateLocalControlPlaneState,
+  updateSelectedDeviceInState,
+} from '../../control-plane/localState.ts';
+import { normalizeApiBaseUrl } from '../../services/api.ts';
 
 export type TabKey = 'overview' | 'devices' | 'media' | 'operations' | 'settings';
 
@@ -15,12 +23,15 @@ export interface TabDefinition {
 
 export interface AppShellController {
   activeTab: TabKey;
+  appMode: AppMode;
   apiBaseUrl: string;
-  client: NanoDlnaApiClient;
+  client: ControlPlaneClient;
+  hydrated: boolean;
   selectedDeviceId: number | string | null;
   selectedDeviceLabel: string | null;
   setActiveTab: (tab: TabKey) => void;
   applyApiBaseUrl: (value: string) => void;
+  applyAppMode: (mode: AppMode) => void;
   selectDevice: (deviceId: number | string | null, label: string | null) => void;
 }
 
@@ -34,29 +45,80 @@ export const tabs: TabDefinition[] = [
 
 export function useAppShell(): AppShellController {
   const [activeTab, setActiveTab] = useState<TabKey>('overview');
-  const [apiBaseUrl, setApiBaseUrl] = useState(DEFAULT_API_BASE_URL);
-  const [selectedDeviceId, setSelectedDeviceId] = useState<number | string | null>(null);
-  const [selectedDeviceLabel, setSelectedDeviceLabel] = useState<string | null>(null);
+  const [hydrated, setHydrated] = useState(false);
+  const [appMode, setAppMode] = useState<AppMode>(defaultAppState.mode);
+  const [apiBaseUrl, setApiBaseUrl] = useState(
+    normalizeApiBaseUrl(defaultAppState.apiBaseUrl || DEFAULT_REMOTE_API_BASE_URL),
+  );
+  const [selectedDeviceId, setSelectedDeviceId] = useState<number | string | null>(
+    defaultAppState.selectedDeviceId,
+  );
+  const [selectedDeviceLabel, setSelectedDeviceLabel] = useState<string | null>(
+    defaultAppState.selectedDeviceLabel,
+  );
 
-  const client = useMemo(() => new NanoDlnaApiClient(apiBaseUrl), [apiBaseUrl]);
+  useEffect(() => {
+    let cancelled = false;
+
+    void (async () => {
+      const state = await loadLocalControlPlaneState();
+      if (cancelled) {
+        return;
+      }
+      setAppMode(state.app.mode);
+      setApiBaseUrl(normalizeApiBaseUrl(state.app.apiBaseUrl || DEFAULT_REMOTE_API_BASE_URL));
+      setSelectedDeviceId(state.app.selectedDeviceId);
+      setSelectedDeviceLabel(state.app.selectedDeviceLabel);
+      setHydrated(true);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const client = useMemo(() => createControlPlaneClient(appMode, apiBaseUrl), [appMode, apiBaseUrl]);
 
   const applyApiBaseUrl = useCallback((value: string) => {
-    setApiBaseUrl(normalizeApiBaseUrl(value));
+    const normalized = normalizeApiBaseUrl(value);
+    setApiBaseUrl(normalized);
+    void updateLocalControlPlaneState((state) => ({
+      ...state,
+      app: {
+        ...state.app,
+        apiBaseUrl: normalized,
+      },
+    }));
+  }, []);
+
+  const applyAppMode = useCallback((mode: AppMode) => {
+    setAppMode(mode);
+    void updateLocalControlPlaneState((state) => ({
+      ...state,
+      app: {
+        ...state.app,
+        mode,
+      },
+    }));
   }, []);
 
   const selectDevice = useCallback((deviceId: number | string | null, label: string | null) => {
     setSelectedDeviceId(deviceId);
     setSelectedDeviceLabel(label);
+    void updateLocalControlPlaneState((state) => updateSelectedDeviceInState(state, deviceId, label));
   }, []);
 
   return {
     activeTab,
+    appMode,
     apiBaseUrl,
     client,
+    hydrated,
     selectedDeviceId,
     selectedDeviceLabel,
     setActiveTab,
     applyApiBaseUrl,
+    applyAppMode,
     selectDevice,
   };
 }
