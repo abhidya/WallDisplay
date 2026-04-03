@@ -68,6 +68,8 @@ export function useDevicesController(
   client: NanoDlnaApiClient,
   options?: UseDevicesControllerOptions,
 ): DevicesController {
+  const sharedSelectedDeviceId = options?.sharedSelectedDeviceId;
+  const onSelectionChange = options?.onSelectionChange;
   const [devices, setDevices] = useState<DeviceSummary[]>([]);
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [discoveryStatus, setDiscoveryStatus] = useState<DiscoveryStatus | null>(null);
@@ -248,19 +250,16 @@ export function useDevicesController(
 
   useEffect(() => {
     if (
-      options?.sharedSelectedDeviceId !== undefined &&
-      String(options.sharedSelectedDeviceId) !== String(selectedDeviceId)
+      sharedSelectedDeviceId !== undefined &&
+      String(sharedSelectedDeviceId) !== String(selectedDeviceId)
     ) {
-      setSelectedDeviceId(options.sharedSelectedDeviceId);
+      setSelectedDeviceId(sharedSelectedDeviceId);
     }
-  }, [options?.sharedSelectedDeviceId, selectedDeviceId]);
+  }, [sharedSelectedDeviceId, selectedDeviceId]);
 
   useEffect(() => {
-    options?.onSelectionChange?.(
-      selectedDeviceId,
-      selectedSummary ? describeDevice(selectedSummary) : null,
-    );
-  }, [options, selectedDeviceId, selectedSummary]);
+    onSelectionChange?.(selectedDeviceId, selectedSummary ? describeDevice(selectedSummary) : null);
+  }, [onSelectionChange, selectedDeviceId, selectedSummary]);
 
   const activeDeviceId = selectedSummary?.id ?? selectedDeviceId;
   const discoveryPaused = Boolean(discoveryStatus?.paused);
