@@ -12,6 +12,7 @@ class ShadertoySinglePassAnimation extends BaseAnimation {
         this.uniforms = {};
         this.channelStates = new Array(4).fill(null);
         this.channelResolutionData = new Float32Array(12);
+        this.channelDefinitions = [];
         this.shaderLoaded = false;
         this.loadShaderDefinition();
     }
@@ -34,17 +35,115 @@ class ShadertoySinglePassAnimation extends BaseAnimation {
         try {
             const response = await fetch(assetPath);
             const payload = await response.json();
-            const shader = Array.isArray(payload) ? payload[0] : null;
+            const shader = Array.isArray(payload) ? payload[0] : payload;
+            const commonCode = (shader?.renderpass || [])
+                .filter((pass) => pass.type === 'common' && pass.code)
+                .map((pass) => pass.code)
+                .join('\n');
             const imagePass = shader?.renderpass?.find((pass) => pass.type === 'image');
             if (!imagePass?.code) {
                 throw new Error('No image pass found');
             }
-            this.initWebGL(imagePass.code);
-            await this.loadChannels();
+
+            this.channelDefinitions = this.mergeChannelDefinitions(
+                this.getAutoChannelDefinitions(imagePass),
+                this.getChannelDefinitions()
+            );
+            this.initWebGL(`${commonCode}\n${imagePass.code}`);
+            await this.loadChannels(this.channelDefinitions);
             this.shaderLoaded = true;
         } catch (error) {
             console.error('Failed to load Shadertoy shader asset', assetPath, error);
         }
+    }
+
+    getAutoChannelDefinitions(pass) {
+        return (pass?.inputs || [])
+            .map((input) => this.resolveInputDefinition(input))
+            .filter(Boolean);
+    }
+
+    mergeChannelDefinitions(autoDefinitions, manualDefinitions) {
+        const merged = new Map();
+        autoDefinitions.forEach((definition) => {
+            merged.set(definition.channel, definition);
+        });
+        manualDefinitions.forEach((definition) => {
+            merged.set(definition.channel, definition);
+        });
+        return Array.from(merged.values());
+    }
+
+    resolveInputDefinition(input) {
+        const channel = input?.channel;
+        if (channel == null || channel < 0 || channel > 3) {
+            return null;
+        }
+
+        const sampler = input.sampler || {};
+        if (input.type === 'texture') {
+            return {
+                channel,
+                kind: 'image',
+                src: this.resolveMediaSource(input.filepath),
+                fallbackSrc: this.resolveRemoteSource(input.filepath),
+                filter: this.normalizeSamplerFilter(sampler.filter),
+                wrap: this.normalizeSamplerWrap(sampler.wrap),
+                vflip: this.normalizeSamplerBoolean(sampler.vflip),
+            };
+        }
+
+        if (input.type === 'music' || input.type === 'musicstream' || input.type === 'mic') {
+            return {
+                channel,
+                kind: 'audio',
+                filter: this.normalizeSamplerFilter(sampler.filter),
+                wrap: this.normalizeSamplerWrap(sampler.wrap),
+                seed: channel + 1.37,
+            };
+        }
+
+        if (input.type === 'keyboard') {
+            return {
+                channel,
+                kind: 'keyboard',
+            };
+        }
+
+        return null;
+    }
+
+    resolveMediaSource(filepath) {
+        if (!filepath) {
+            return null;
+        }
+        if (/^https?:\/\//.test(filepath)) {
+            return filepath;
+        }
+        const filename = filepath.split('/').pop();
+        return filename ? `/backend-static/assets/shadertoy/media/${filename}` : null;
+    }
+
+    resolveRemoteSource(filepath) {
+        if (!filepath || /^https?:\/\//.test(filepath) || filepath.startsWith('/presets/')) {
+            return null;
+        }
+        return `https://www.shadertoy.com${filepath}`;
+    }
+
+    normalizeSamplerFilter(filter) {
+        if (filter === 'nearest' || filter === 'mipmap') {
+            return filter;
+        }
+        return 'linear';
+    }
+
+    normalizeSamplerWrap(wrap) {
+        return wrap === 'repeat' ? 'repeat' : 'clamp';
+    }
+
+    normalizeSamplerBoolean(value) {
+        return value === true || value === 'true' || value === 1 || value === '1';
     }
 
     initWebGL(shaderCode) {
@@ -148,14 +247,19 @@ class ShadertoySinglePassAnimation extends BaseAnimation {
         }
     }
 
-    async loadChannels() {
-        const channelDefinitions = this.getChannelDefinitions();
+    async loadChannels(channelDefinitions = this.channelDefinitions) {
         if (!this.gl || !channelDefinitions.length) {
             this.ensureFallbackChannels();
             return;
         }
 
-        await Promise.all(channelDefinitions.map((definition) => this.loadChannel(definition)));
+        await Promise.all(
+            channelDefinitions.map((definition) =>
+                this.loadChannel(definition).catch((error) => {
+                    console.warn('Failed to load Shadertoy channel', definition, error);
+                })
+            )
+        );
         this.ensureFallbackChannels();
     }
 
@@ -172,16 +276,16 @@ class ShadertoySinglePassAnimation extends BaseAnimation {
 
         if (definition.kind === 'audio') {
             this.channelStates[channel] = this.createAudioTexture(definition);
+            return;
+        }
+
+        if (definition.kind === 'keyboard') {
+            this.channelStates[channel] = this.createKeyboardTexture();
         }
     }
 
     async loadImageChannel(definition) {
-        const image = await new Promise((resolve, reject) => {
-            const element = new Image();
-            element.onload = () => resolve(element);
-            element.onerror = reject;
-            element.src = definition.src;
-        });
+        const image = await this.loadImageWithFallback(definition.src, definition.fallbackSrc);
 
         const texture = this.gl.createTexture();
         this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
@@ -201,6 +305,30 @@ class ShadertoySinglePassAnimation extends BaseAnimation {
         };
     }
 
+    loadImageWithFallback(src, fallbackSrc) {
+        const attempt = (candidate) =>
+            new Promise((resolve, reject) => {
+                if (!candidate) {
+                    reject(new Error('Missing image source'));
+                    return;
+                }
+                const element = new Image();
+                if (/^https?:\/\//.test(candidate)) {
+                    element.crossOrigin = 'anonymous';
+                }
+                element.onload = () => resolve(element);
+                element.onerror = () => reject(new Error(`Failed to load ${candidate}`));
+                element.src = candidate;
+            });
+
+        return attempt(src).catch((error) => {
+            if (!fallbackSrc || fallbackSrc === src) {
+                throw error;
+            }
+            return attempt(fallbackSrc);
+        });
+    }
+
     createAudioTexture(definition) {
         const width = definition.width || 512;
         const height = definition.height || 2;
@@ -212,6 +340,14 @@ class ShadertoySinglePassAnimation extends BaseAnimation {
         });
         textureState.audioSeed = definition.seed || 0;
         return textureState;
+    }
+
+    createKeyboardTexture() {
+        return this.createDataTexture(256, 3, new Uint8Array(256 * 3 * 4), {
+            filter: 'nearest',
+            wrap: 'clamp',
+            dynamic: false,
+        });
     }
 
     createDataTexture(width, height, data, options = {}) {
@@ -288,6 +424,7 @@ class ShadertoySinglePassAnimation extends BaseAnimation {
     }
 
     bindChannels() {
+        this.channelResolutionData.fill(1);
         for (let channel = 0; channel < 4; channel += 1) {
             const channelState = this.channelStates[channel];
             if (!channelState) {

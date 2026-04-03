@@ -75,6 +75,14 @@ class AnimationEngine {
         if (typeof PrideSpectrumAnimation !== 'undefined') {
             this.animationClasses.set('pride_spectrum', PrideSpectrumAnimation);
         }
+
+        const importedManifest = window.ImportedShadertoyAnimationsManifest || [];
+        importedManifest.forEach((entry) => {
+            const AnimationClass = window[entry.className];
+            if (AnimationClass) {
+                this.animationClasses.set(entry.id, AnimationClass);
+            }
+        });
     }
     
     setMaskImage(maskImage) {

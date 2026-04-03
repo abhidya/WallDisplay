@@ -5,14 +5,15 @@ class ShadertoyMultiPassAnimation extends BaseAnimation {
         this.mouse = { x: 0, y: 0, down: 0 };
         this.shaderLoaded = false;
         this.gl = null;
-        this.programs = {};
-        this.targets = {};
-        this.uniformLocations = {};
         this.channelResolution = new Float32Array(12);
         this.workSize = this.getWorkSize();
         this.glCanvas = document.createElement('canvas');
         this.glCanvas.width = this.workSize;
         this.glCanvas.height = this.workSize;
+        this.passDescriptors = [];
+        this.bufferTargets = new Map();
+        this.externalTextures = new Map();
+        this.manualExternalDefinitions = {};
         this.setupPointerTracking();
         this.loadShaderDefinition();
     }
@@ -94,74 +95,262 @@ class ShadertoyMultiPassAnimation extends BaseAnimation {
             this.gl.STATIC_DRAW
         );
 
-        this.keyboardTexture = this.createByteTexture(256, 3, null, {
+        this.keyboardTexture = this.createByteTexture(256, 3, new Uint8Array(256 * 3 * 4), {
+            filter: 'nearest',
+            wrap: 'clamp',
+        });
+        this.fallbackTexture = this.createByteTexture(1, 1, new Uint8Array([0, 0, 0, 255]), {
             filter: 'linear',
             wrap: 'clamp',
         });
     }
 
     async buildRuntime(shader) {
-        const commonCode = (shader.renderpass.find((pass) => pass.type === 'common')?.code || '');
-        const passMap = {};
-        shader.renderpass.forEach((pass) => {
-            passMap[pass.name || pass.type] = pass;
-        });
+        const commonCode = (shader.renderpass || [])
+            .filter((pass) => pass.type === 'common' && pass.code)
+            .map((pass) => pass.code)
+            .join('\n');
 
-        this.externalTextures = await this.loadExternalTextures();
-        this.targets = {
-            A: this.createPingPongTarget(this.workSize, this.workSize, { floatTexture: true, filter: 'nearest' }),
-            B: this.createPingPongTarget(this.workSize, this.workSize, { floatTexture: true, filter: 'nearest' }),
-            C: this.createRenderTarget(this.workSize, this.workSize, { floatTexture: true, filter: 'nearest' }),
-            D: this.createRenderTarget(this.workSize, this.workSize, { floatTexture: false, filter: 'linear' }),
-        };
+        this.manualExternalDefinitions = this.getExternalChannelDefinitions() || {};
+        this.externalTextures = await this.loadExternalTextures(shader);
+        this.passDescriptors = [];
+        this.bufferTargets = new Map();
 
-        const order = [
-            ['A', passMap['Buffer A']],
-            ['B', passMap['Buffer B']],
-            ['C', passMap['Buffer C']],
-            ['D', passMap['Buffer D']],
-            ['Image', passMap.Image],
-        ];
-
-        order.forEach(([key, pass]) => {
-            if (!pass?.code) {
-                throw new Error(`Missing pass ${key}`);
+        (shader.renderpass || []).forEach((pass, index) => {
+            if (!pass?.code || pass.type === 'common') {
+                return;
             }
+            if (pass.type !== 'buffer' && pass.type !== 'image') {
+                return;
+            }
+
             const built = this.createProgram(commonCode, pass.code);
-            this.programs[key] = built.program;
-            this.uniformLocations[key] = built.uniforms;
+            const descriptor = {
+                pass,
+                index,
+                program: built.program,
+                uniforms: built.uniforms,
+            };
+
+            if (pass.type === 'buffer') {
+                const output = (pass.outputs || [])[0];
+                if (!output?.id) {
+                    throw new Error(`Buffer pass missing output id at index ${index}`);
+                }
+                this.bufferTargets.set(
+                    output.id,
+                    this.createPingPongTarget(this.workSize, this.workSize, {
+                        floatTexture: true,
+                        filter: 'nearest',
+                    })
+                );
+                descriptor.targetId = output.id;
+            }
+
+            this.passDescriptors.push(descriptor);
         });
+
+        if (!this.passDescriptors.some((descriptor) => descriptor.pass.type === 'image')) {
+            throw new Error('No image pass found');
+        }
     }
 
-    async loadExternalTextures() {
-        const definitions = this.getExternalChannelDefinitions();
+    async loadExternalTextures(shader) {
+        const definitions = this.getExternalInputDefinitions(shader);
         const entries = await Promise.all(
-            Object.entries(definitions).map(async ([name, def]) => {
-                const image = await new Promise((resolve, reject) => {
-                    const element = new Image();
-                    element.onload = () => resolve(element);
-                    element.onerror = reject;
-                    element.src = def.src;
-                });
-
-                const texture = this.gl.createTexture();
-                this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
-                this.gl.pixelStorei(this.gl.UNPACK_FLIP_Y_WEBGL, def.vflip ? 1 : 0);
-                this.gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.RGBA, this.gl.RGBA, this.gl.UNSIGNED_BYTE, image);
-                this.configureSampler({
-                    filter: def.filter || 'linear',
-                    wrap: def.wrap || 'clamp',
-                });
-                if (def.filter === 'mipmap') {
-                    this.gl.generateMipmap(this.gl.TEXTURE_2D);
+            definitions.map(async (definition) => {
+                try {
+                    return [definition.key, await this.loadExternalTexture(definition)];
+                } catch (error) {
+                    console.warn('Failed to load Shadertoy external input', definition, error);
+                    return [definition.key, this.fallbackTexture];
                 }
-                this.gl.pixelStorei(this.gl.UNPACK_FLIP_Y_WEBGL, 0);
-
-                return [name, { texture, width: image.width, height: image.height }];
             })
         );
 
-        return Object.fromEntries(entries);
+        return new Map(entries);
+    }
+
+    getExternalInputDefinitions(shader) {
+        const seen = new Set();
+        const definitions = [];
+
+        (shader.renderpass || []).forEach((pass) => {
+            (pass.inputs || []).forEach((input) => {
+                if (input.type === 'buffer') {
+                    return;
+                }
+                const definition = this.resolveInputDefinition(input);
+                if (!definition || seen.has(definition.key)) {
+                    return;
+                }
+                seen.add(definition.key);
+                definitions.push(definition);
+            });
+        });
+
+        return definitions;
+    }
+
+    resolveInputDefinition(input) {
+        const key = this.getInputKey(input);
+        const override = this.lookupExternalDefinition(input);
+        const sampler = input.sampler || {};
+        const filter = override?.filter || this.normalizeSamplerFilter(sampler.filter);
+        const wrap = override?.wrap || this.normalizeSamplerWrap(sampler.wrap);
+        const vflip = override?.vflip ?? this.normalizeSamplerBoolean(sampler.vflip);
+
+        if (override?.kind === 'image' || (!override?.kind && input.type === 'texture')) {
+            return {
+                key,
+                kind: 'image',
+                src: override?.src || this.resolveMediaSource(input.filepath),
+                fallbackSrc: override?.fallbackSrc || this.resolveRemoteSource(input.filepath),
+                filter,
+                wrap,
+                vflip,
+            };
+        }
+
+        if (override?.kind === 'audio' || input.type === 'music' || input.type === 'musicstream' || input.type === 'mic') {
+            return {
+                key,
+                kind: 'audio',
+                filter,
+                wrap,
+                seed: override?.seed || input.channel + 1.37,
+                width: override?.width,
+                height: override?.height,
+            };
+        }
+
+        if (override?.kind === 'keyboard' || input.type === 'keyboard') {
+            return {
+                key,
+                kind: 'keyboard',
+            };
+        }
+
+        return null;
+    }
+
+    lookupExternalDefinition(input) {
+        const definitions = this.manualExternalDefinitions || {};
+        const filepath = input?.filepath || '';
+        const basename = filepath ? filepath.split('/').pop() : '';
+        const keys = [input?.id, filepath, basename, String(input?.channel)]
+            .filter(Boolean);
+
+        for (const key of keys) {
+            if (definitions[key]) {
+                return definitions[key];
+            }
+        }
+
+        const values = Object.values(definitions);
+        if (values.length === 1 && input?.type === 'texture') {
+            return values[0];
+        }
+
+        return null;
+    }
+
+    getInputKey(input) {
+        return input?.id || `${input?.type || 'unknown'}:${input?.filepath || input?.channel || 'na'}`;
+    }
+
+    resolveMediaSource(filepath) {
+        if (!filepath) {
+            return null;
+        }
+        if (/^https?:\/\//.test(filepath)) {
+            return filepath;
+        }
+        const filename = filepath.split('/').pop();
+        return filename ? `/backend-static/assets/shadertoy/media/${filename}` : null;
+    }
+
+    resolveRemoteSource(filepath) {
+        if (!filepath || /^https?:\/\//.test(filepath) || filepath.startsWith('/presets/')) {
+            return null;
+        }
+        return `https://www.shadertoy.com${filepath}`;
+    }
+
+    normalizeSamplerFilter(filter) {
+        if (filter === 'nearest' || filter === 'mipmap') {
+            return filter;
+        }
+        return 'linear';
+    }
+
+    normalizeSamplerWrap(wrap) {
+        return wrap === 'repeat' ? 'repeat' : 'clamp';
+    }
+
+    normalizeSamplerBoolean(value) {
+        return value === true || value === 'true' || value === 1 || value === '1';
+    }
+
+    async loadExternalTexture(definition) {
+        if (definition.kind === 'image') {
+            return this.loadImageTexture(definition);
+        }
+        if (definition.kind === 'audio') {
+            return this.createAudioTexture(definition);
+        }
+        if (definition.kind === 'keyboard') {
+            return this.keyboardTexture;
+        }
+        return this.fallbackTexture;
+    }
+
+    async loadImageTexture(definition) {
+        const image = await this.loadImageWithFallback(definition.src, definition.fallbackSrc);
+
+        const texture = this.gl.createTexture();
+        this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
+        this.gl.pixelStorei(this.gl.UNPACK_FLIP_Y_WEBGL, definition.vflip ? 1 : 0);
+        this.gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.RGBA, this.gl.RGBA, this.gl.UNSIGNED_BYTE, image);
+        this.configureSampler({
+            filter: definition.filter,
+            wrap: definition.wrap,
+        });
+        if (definition.filter === 'mipmap') {
+            this.gl.generateMipmap(this.gl.TEXTURE_2D);
+        }
+        this.gl.pixelStorei(this.gl.UNPACK_FLIP_Y_WEBGL, 0);
+
+        return {
+            texture,
+            width: image.width,
+            height: image.height,
+            dynamic: false,
+        };
+    }
+
+    loadImageWithFallback(src, fallbackSrc) {
+        const attempt = (candidate) =>
+            new Promise((resolve, reject) => {
+                if (!candidate) {
+                    reject(new Error('Missing image source'));
+                    return;
+                }
+                const element = new Image();
+                if (/^https?:\/\//.test(candidate)) {
+                    element.crossOrigin = 'anonymous';
+                }
+                element.onload = () => resolve(element);
+                element.onerror = () => reject(new Error(`Failed to load ${candidate}`));
+                element.src = candidate;
+            });
+
+        return attempt(src).catch((error) => {
+            if (!fallbackSrc || fallbackSrc === src) {
+                throw error;
+            }
+            return attempt(fallbackSrc);
+        });
     }
 
     createProgram(commonCode, shaderCode) {
@@ -296,7 +485,58 @@ class ShadertoyMultiPassAnimation extends BaseAnimation {
             texture,
             width,
             height,
+            data,
+            dynamic: Boolean(options.dynamic),
         };
+    }
+
+    createAudioTexture(definition) {
+        const width = definition.width || 512;
+        const height = definition.height || 2;
+        const data = new Uint8Array(width * height * 4);
+        const textureState = this.createByteTexture(width, height, data, {
+            filter: definition.filter || 'linear',
+            wrap: definition.wrap || 'clamp',
+            dynamic: true,
+        });
+        textureState.audioSeed = definition.seed || 0;
+        return textureState;
+    }
+
+    updateAudioTexture(channelState) {
+        if (!channelState?.dynamic || !channelState.data) {
+            return;
+        }
+
+        const { width, height, data } = channelState;
+        const time = this.time * 0.001;
+        for (let x = 0; x < width; x += 1) {
+            const phase = (x / width) * Math.PI * 2;
+            const waveform = 0.5 + 0.5 * Math.sin(phase * 6 + time * 2 + channelState.audioSeed);
+            const fft = 0.5 + 0.5 * Math.sin(phase * 2 + time * 0.75 + channelState.audioSeed * 0.5);
+            for (let y = 0; y < height; y += 1) {
+                const index = (y * width + x) * 4;
+                const value = y === 0 ? fft : waveform;
+                const byteValue = Math.max(0, Math.min(255, Math.round(value * 255)));
+                data[index] = byteValue;
+                data[index + 1] = byteValue;
+                data[index + 2] = byteValue;
+                data[index + 3] = 255;
+            }
+        }
+
+        this.gl.bindTexture(this.gl.TEXTURE_2D, channelState.texture);
+        this.gl.texSubImage2D(
+            this.gl.TEXTURE_2D,
+            0,
+            0,
+            0,
+            width,
+            height,
+            this.gl.RGBA,
+            this.gl.UNSIGNED_BYTE,
+            data
+        );
     }
 
     createFramebuffer(texture) {
@@ -321,10 +561,14 @@ class ShadertoyMultiPassAnimation extends BaseAnimation {
     bindPassInputs(uniforms, inputs) {
         this.channelResolution.fill(1);
         for (let channel = 0; channel < 4; channel += 1) {
-            const input = inputs[channel] || this.keyboardTexture;
+            const input = inputs[channel] || this.fallbackTexture;
             const texture = input.texture || input;
             const width = input.width || 1;
             const height = input.height || 1;
+
+            if (input.dynamic) {
+                this.updateAudioTexture(input);
+            }
 
             this.gl.activeTexture(this.gl.TEXTURE0 + channel);
             this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
@@ -343,9 +587,38 @@ class ShadertoyMultiPassAnimation extends BaseAnimation {
         }
     }
 
-    renderPass(key, target, inputs) {
-        const program = this.programs[key];
-        const uniforms = this.uniformLocations[key];
+    resolvePassInputs(pass) {
+        const inputs = {};
+        (pass.inputs || []).forEach((input) => {
+            const channel = input.channel;
+            if (channel == null || channel < 0 || channel > 3) {
+                return;
+            }
+
+            if (input.type === 'buffer') {
+                const target = this.bufferTargets.get(input.id);
+                if (target?.read) {
+                    inputs[channel] = target.read;
+                }
+                return;
+            }
+
+            if (input.type === 'keyboard') {
+                inputs[channel] = this.keyboardTexture;
+                return;
+            }
+
+            const external = this.externalTextures.get(this.getInputKey(input));
+            if (external) {
+                inputs[channel] = external;
+            }
+        });
+
+        return inputs;
+    }
+
+    renderPass(descriptor, target, inputs) {
+        const { program, uniforms } = descriptor;
         this.gl.useProgram(program);
         this.gl.uniform3f(uniforms.resolution, target.width, target.height, 1.0);
         this.gl.uniform1f(uniforms.time, this.time * 0.001);
@@ -357,11 +630,10 @@ class ShadertoyMultiPassAnimation extends BaseAnimation {
         this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
     }
 
-    drawFinalPass(inputs) {
-        const program = this.programs.Image;
-        const uniforms = this.uniformLocations.Image;
+    drawFinalPass(descriptor, inputs) {
+        const { program, uniforms } = descriptor;
         this.gl.useProgram(program);
-        this.gl.uniform3f(uniforms.resolution, this.workSize, this.workSize, 1.0);
+        this.gl.uniform3f(uniforms.resolution, this.glCanvas.width, this.glCanvas.height, 1.0);
         this.gl.uniform1f(uniforms.time, this.time * 0.001);
         this.gl.uniform4f(uniforms.mouse, this.mouse.x, this.mouse.y, this.mouse.down, 0.0);
         this.gl.uniform1i(uniforms.frame, this.frame);
@@ -372,7 +644,7 @@ class ShadertoyMultiPassAnimation extends BaseAnimation {
     }
 
     draw() {
-        if (!this.shaderLoaded || !this.gl) {
+        if (!this.shaderLoaded || !this.gl || !this.passDescriptors.length) {
             this.ctx.fillStyle = '#000';
             this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
             return;
@@ -382,43 +654,22 @@ class ShadertoyMultiPassAnimation extends BaseAnimation {
         this.gl.clearColor(0, 0, 0, 1);
         this.gl.clear(this.gl.COLOR_BUFFER_BIT);
 
-        const previousA = this.targets.A.read;
-        const previousB = this.targets.B.read;
-        const previousD = this.targets.D;
-
-        this.renderPass('A', this.targets.A.write, {
-            0: previousA,
-            1: previousB,
-            3: previousD,
+        this.passDescriptors.forEach((descriptor) => {
+            const inputs = this.resolvePassInputs(descriptor.pass);
+            if (descriptor.pass.type === 'buffer') {
+                const target = this.bufferTargets.get(descriptor.targetId);
+                if (target?.write) {
+                    this.renderPass(descriptor, target.write, inputs);
+                }
+                return;
+            }
+            this.drawFinalPass(descriptor, inputs);
         });
 
-        this.renderPass('B', this.targets.B.write, {
-            0: this.targets.A.write,
-            1: previousB,
-            3: this.keyboardTexture,
+        this.bufferTargets.forEach((target) => {
+            [target.read, target.write] = [target.write, target.read];
         });
-
-        this.renderPass('C', this.targets.C, {
-            0: this.targets.A.write,
-            1: this.targets.B.write,
-            3: this.keyboardTexture,
-        });
-
-        this.renderPass('D', this.targets.D, {
-            0: this.targets.C,
-            1: this.externalTextures.main,
-            3: this.keyboardTexture,
-        });
-
-        this.drawFinalPass({
-            0: this.targets.D,
-            3: this.keyboardTexture,
-        });
-
-        [this.targets.A.read, this.targets.A.write] = [this.targets.A.write, this.targets.A.read];
-        [this.targets.B.read, this.targets.B.write] = [this.targets.B.write, this.targets.B.read];
         this.frame += 1;
-
         this.ctx.drawImage(this.glCanvas, 0, 0, this.canvas.width, this.canvas.height);
     }
 }

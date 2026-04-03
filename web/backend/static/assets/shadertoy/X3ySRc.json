@@ -1,0 +1,118 @@
+{
+  "info": {
+    "date": "1720453554",
+    "description": "Exploring breathing alien tunnel.",
+    "flags": 32,
+    "hasliked": 0,
+    "id": "X3ySRc",
+    "likes": 100,
+    "name": "Alien Tunnel",
+    "parentid": "",
+    "parentname": "",
+    "published": 1,
+    "tags": [
+      "3d",
+      "gyroid"
+    ],
+    "usePreview": 0,
+    "username": "lz",
+    "viewed": 11282
+  },
+  "renderpass": [
+    {
+      "code": "/*\n * Creator: Leonid Zaides\n *\n * Alien Tunnel\n *\n * Copyright © 2024 Leonid Zaides\n * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:\n * The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.\n * THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.\n *   \n *  --------------------------------------------------------\n *\n */\n\n#define TFC(CRD) texelFetch(iChannel0, ivec2(CRD),0)\n#define TEX(UV)  texture(iChannel0, UV)\n#define MAX_KRN_SIZE 5.\n\nvec3 dofSimple(in float _dist, in vec4 _col, in ivec2 frag, in vec2 _uv)\n{\n  float krnSize = floor(smoothstep(0., 0.75, _dist) * MAX_KRN_SIZE);\n  vec3 scol;\n  float sw = 0.;\n  float w = 0.;\n  float shift_w = 0.;//5.*PULSE_T(mod(iTime, 50.), 0.5, 4., 23.)*smoothstep(0., 1., pow(_col.w, 2.));\n  for (int i = -int(krnSize); i <= int(krnSize); i++)\n  {\n      for (int j = -int(krnSize); j <= int(krnSize); j++)\n      {\n         vec2 shift = vec2(hash(123.9*_col.x + 11.3*float(i)), hash(17.*_col.y + 23.1*float(j))) - vec2(0.5);\n         vec4 ncol = TEX(_uv + (shift_w*shift.xy + vec2(ivec2(i, j)))/iResolution.y);\n         //vec4 ncol = TFC(frag + ivec2(i, j));\n         float dist_diff = 50.*(_col.w - ncol.w);\n         w = exp(-(dist_diff * dist_diff)) * step(float(i*i + j*j), krnSize * krnSize);\n         sw += w;\n         scol += w * ncol.rgb;\n      }\n  }\n  \n  scol /= sw;\n  \n  vec3 res = mix(_col.rgb, scol.rgb, krnSize/MAX_KRN_SIZE);\n  //res = vec3(krnSize/MAX_KRN_SIZE);\n  //res = _col;\n  return scol;\n}\n\nvoid mainImage( out vec4 fragColor, in vec2 fragCoord )\n{\n    vec2 uv = fragCoord / iResolution.xy;\n    vec4 col = texture(iChannel0, uv);\n\n    // post processing\n    col.rgb = dofSimple(col.w*col.w, col, ivec2(fragCoord), uv);\n    col.rgb = mix(2.*mix(col.rgb, vec3(0.05, 0.15, 0.3) * (col.w*col.w), col.w * col.w), vec3(0.01, 0.1, 0.24), sqrt(col.w));\n    col *= 2.;\n    col /= (1. + col);\n    col.rgb = pow(col.rgb, vec3(1.6));\n    \n    fragColor = vec4(col);\n}",
+      "description": "",
+      "inputs": [
+        {
+          "channel": 0,
+          "filepath": "/media/previz/buffer01.png",
+          "id": "XsXGR8",
+          "previewfilepath": "/media/previz/buffer01.png",
+          "published": 1,
+          "sampler": {
+            "filter": "linear",
+            "internal": "byte",
+            "srgb": "false",
+            "vflip": "true",
+            "wrap": "clamp"
+          },
+          "type": "buffer"
+        }
+      ],
+      "name": "Image",
+      "outputs": [
+        {
+          "channel": 0,
+          "id": "4dfGRr"
+        }
+      ],
+      "type": "image"
+    },
+    {
+      "code": "\n#define PI 3.14159265359\n#define PI2 6.28318530718\n#define PI_H 1.57079632679\n\n#define PHI 1.6180339887\n#define INV_PHI 0.6180339887\n\n#define INT(f) int(f + 0.00001)\n\n#define SEL_ZONE_Y 0.01\n\n#define ROT2D(p2d, ang) (cos(ang) * p2d.xy + sin(ang) * vec2(p2d.y, -p2d.x))\n\n#define FAR 60.\n#define M_ITER 256\n#define T_EPS 0.001\n#define N_EPS 0.001\n\n#define PI 3.14159265359\n#define PI2 6.28318530718\n\n//#define TARGET_RATIO 0.5625\n#define TARGET_RATIO 0.428\n\n#define PULSE_T(_t, _e, _pa, _pb) (smoothstep(_pa - _e, _pa, _t) - smoothstep(_pb, _pb + _e, _t))\n#define ASYM_PULSE_T(_t, _ea, _pa, _eb, _pb) (smoothstep(_pa - _ea, _pa, _t) - smoothstep(_pb, _pb + _eb, _t))\n#define ANIM_T_CF(_t, _p, _e0, _e1, _cf0, _cf1) (_cf0 * smoothstep(_p - _e0, _p, _t) - _cf1 * smoothstep(_p, _p + _e1, _t))\n#define ANIM_T_CF3(_t, _p0, _p1, _p2, _e0, _e1, _e2, _cf0, _cf1) (_cf0 * smoothstep(_p0 - _e0, _p0, _t) - _cf1 * smoothstep(_p1, _p1 + _e1, _t) - (_cf0-_cf1) * smoothstep(_p2, _p2 + _e2, _t))\n\n// noise\nfloat hash(in float s) {\n  return fract(5313.235 * mod(s, 0.78182) * mod(s, 0.1242));\n}\n\nfloat hash2(in vec2 st) {\n    return fract(sin(dot(st.xy,\n        vec2(113.9928,1178.243)))\n            * 4358.5475123);\n}\n\nfloat noise(in float s)\n{\n  float i = floor(s);\n  float f = fract(s);\n  \n  return mix(hash(i), hash(i + 1.0), f * f* (3.0 - 2.0 * f));\n}\n\n//https://www.shadertoy.com/view/ldSSzV\nvec3 hash31(float p) {\n\tvec3 h = vec3(127.231,491.7,718.423) * p;\t\n    return fract(sin(h)*435.543);\n}\n\nfloat grayscale(in vec3 col)\n{\n    float gray = dot(col.rgb, vec3(0.299, 0.587, 0.114));\n    return gray;\n}\n\n\nfloat hash(in vec3 p)\n{\nreturn fract(sin(dot(p,\nvec3(12.6547, 765.3648, 78.653)))*43749.535);\n}\n\nfloat noise3(in vec3 p)\n{\nvec3 pi = floor(p);\nvec3 pf = fract(p);\n\npf = pf*pf*(3.-2.*pf);\n\nfloat a = hash(pi + vec3(0., 0., 0.));\nfloat b = hash(pi + vec3(1., 0., 0.));\nfloat c = hash(pi + vec3(0., 1., 0.));\nfloat d = hash(pi + vec3(1., 1., 0.));\n\nfloat e = hash(pi + vec3(0., 0., 1.));\nfloat f = hash(pi + vec3(1., 0., 1.));\nfloat g = hash(pi + vec3(0., 1., 1.));\nfloat h = hash(pi + vec3(1., 1., 1.));\n\nreturn mix(mix(mix(a,b,pf.x),mix(c,d,pf.x),pf.y),\nmix(mix(e,f,pf.x),mix(g,h,pf.x),pf.y), pf.z);\n}\n\nfloat fbm(vec3 p) {\n\n  float f = 0.;\n  float ampl = 0.5;\n  float freq = 1.;\n  float off = 0.;\n\n  int i = 0;\n  for (i = 0; i < 4; i++) {\n    f += ampl*noise3(p*freq + off);\n    ampl*= 0.5;\n    freq *= 2.;\n    off += 12.274739;\n  }\n\n  return f;\n}\n\nvec2 sphIntersect( in vec3 ro, in vec3 rd, in vec3 ce, float ra )\n{\n    vec3 oc = ro - ce;\n    float b = dot( oc, rd );\n    float c = dot( oc, oc ) - ra*ra;\n    float h = b*b - c;\n    if( h<0.0 ) return vec2(-1.0); // no intersection\n    h = sqrt( h );\n    return vec2( -b-h, -b+h );\n}\n\nvec3 camera(in vec3 o, in vec3 d, in vec3 tar, out mat3 viewCam) {\n  vec3 dir = normalize(o - tar);\n  vec3 right = cross(vec3(0.,1.,0.),dir);\n  vec3 up = cross(dir,right);\n\n  mat3 view = mat3(right,up,dir);\n  viewCam = view;\n  return view*d;\n}\n\nvec3 camera(in vec3 o, in vec3 d, in vec3 tar, in vec3 up) {\n  vec3 dir = normalize(o - tar);\n  vec3 right = normalize(cross(dir, up));\n  up = normalize(cross(right,dir));\n\n  mat3 view = mat3(right,up,dir);\n  return (view*d);\n}\n\n#define NPO 6\nvec3 origs[NPO] = vec3[NPO](vec3(-7., 4.2, 6.4), vec3(4., 5.8, 6.4), \n    vec3(3., -6., 7.), vec3(4.4, -4., -8.23), vec3(-4., -6.3, -7.3), vec3(-4.7, 4.1, -6.6));\n\nvec3 getOrigin(in float time, in sampler2D s, in float _power)\n{\n    float t = time * 0.05;\n    float oTime = texelFetch(s, ivec2(mod(t, 256.), 0), 0).r;\n    float oNTime = texelFetch(s, ivec2(mod(t + 1., 256.), 0), 0).r;\n\n    int iOrig = int(mod(oTime * float(4), float(4)));\n    int iNOrig = int(mod(oNTime * float(4), float(4)));\n\n    float fOrig = fract(t);\n\n    vec3 o = mix(origs[iOrig], origs[iNOrig], smoothstep(0., 1., pow(fOrig, _power)));\n    o = normalize(o) * 8.;\n    o += vec3(sin(time*.5),cos(time*.5),0.);\n    \n    return o;\n}",
+      "description": "",
+      "inputs": [],
+      "name": "Common",
+      "outputs": [],
+      "type": "common"
+    },
+    {
+      "code": "const vec2 vhex = normalize(vec2(1., 0.5));\nconst float hexh = 0.8660254037; // = sqrt(3) / 2;\nconst float inv_hexh = 1.15470053837;\nconst vec2 hexGrid = vec2(3., sqrt(3.));\n\nvec4 hexgrid(in vec2 _uv)\n{\n  vec4 res;\n  vec2 a = mod(_uv + 0.5 * hexGrid, hexGrid) - 0.5 * hexGrid;\n  vec2 b = mod(_uv, hexGrid) - hexGrid * 0.5;\n  \n  vec2 fa = vec2(dot(abs(a), vhex), abs(a.y));\n  vec2 fb = vec2(dot(abs(b), vhex), abs(b.y));\n  \n  float ma = max(fa.x, fa.y);\n  float mb = max(fb.x, fb.y);\n  \n  vec2 bord;\n  vec2 id;\n  \n  if (ma < mb)\n  {\n    bord = fa;\n    id = floor((_uv + 0.5 * hexGrid) / hexGrid);\n  }\n  else\n  {\n    bord = fb;\n    id = floor(_uv/hexGrid) + vec2(123., 273.);\n  }\n  \n  res.x = min(ma, mb);\n  res.y = min(1. - bord.x, 1. - bord.y);\n  res.zw = id;\n  \n  return res;\n}\n\nvoid mainImage( out vec4 fragColor, in vec2 fragCoord )\n{\n    vec2 uv = (2.*fragCoord - iResolution.xy)/iResolution.y;\n    vec2 ouv = uv*0.5;\n    //uv.y += 2.*sin(uv.x);\n    vec2 grid = uv;\n    //grid = vec2(0.25*log(length(grid)), pow(atan(grid.y, grid.x), 1.));\n    //uv = vec2(atan(uv.y, abs(uv.x)), length(uv)).yx;\n    //uv = vec2(atan(uv.y, abs(uv.x)), length(uv)).yx;\n    float time = iTime + 180.;\n    uv.y += time * 0.1;\n    float ht = time*0.01;\n    float gridFactor = 1. + 2.*mix(hash(floor(ht)), hash(floor(ht) + 1.), fract(ht));\n    uv.x += sin(fbm(vec3(uv*1.2, time * 0.05))) + time*0.01;\n    vec2 fgridy = fract(vec2(uv.x * gridFactor, uv.y));\n    vec2 igridy = floor(vec2(uv.x * gridFactor, uv.y));\n    \n    float f0 = fbm(vec3(grid, time * 0.15));\n    float fl = smoothstep(0.5*f0, 0.5, fgridy.x) - smoothstep(0.5, 1.0 - 0.5*f0, fgridy.x);\n    float f2 = 2.*fbm(vec3(uv, time*0.01));\n    \n    vec4 hx = hexgrid(grid*10.);\n    \n    float xpulse = mod(iTime, 10.);\n    float lb = -0.001 * PULSE_T(xpulse, 1.5, 1.5, 8.5);\n    float ub = 0.001 * PULSE_T(xpulse, 1.5, 1.5, 8.5);\n    ouv *= 2.5;\n    ouv = vec2(0.3*log(length(ouv)), abs(atan(ouv.y, ouv.x))).yx;\n    ouv.y += 0.1 + 0.1*sin(ouv.x*5.);\n    float xmask = PULSE_T(ouv.x*2., 0.1, xpulse - 3., xpulse - 3. + 0.5);\n    float cf = PULSE_T(ouv.y, 0.01, lb*0.5, 0.5*ub) * xmask;\n    \n    fragColor = vec4(fl*f2, max(hx.x, 0.), cf,1.0);\n}",
+      "description": "",
+      "inputs": [],
+      "name": "Buffer A",
+      "outputs": [
+        {
+          "channel": 0,
+          "id": "4dXGR8"
+        }
+      ],
+      "type": "buffer"
+    },
+    {
+      "code": "\nfloat get_slen(in vec3 p, in float _t, in float _factor) {\n   return PI2 * (3. + 0.8*sin(iTime * 0.45 + p.x*0.5) + _factor * (18. + noise3(p*0.1) + 0.15*sin(5.*iTime)-2.5*(log(length(p)))) );\n}\nvec3 double_gyroid(in vec3 p, in float t, in bool high)\n{\n    vec3 r;\n    float s_len = get_slen(p, iTime, 0.5);\n    \n    float fn = dot(cos(p*PI2 / s_len), sin(p.yzx * PI2 / s_len));\n    \n    r.x = fn*fn - t*t;\n    \n    // differentiate gyroid\n    r.z = sign( (abs(fn - t) - abs(fn + t)) );\n    \n    // differentiate side of the gyroid\n    r.y = sign( r.x );\n    \n    r.x = 0.5*abs(r.x);\n    \n    return r;\n}\n\nfloat srad;\nfloat glow;\nvec3 g_col;\n\nfloat lite_shift(in vec3 _p, in float _t) {\n    return 0.13*sin(_p.y*10. + 0.2*_t) + 0.11*sin(_p.y*27. + 0.23*_t + 7.32) + \n           0.134*sin(_p.y*7. + 1.2 + 0.1*_t) +\n           0.141*sin(_p.y*12. + 0.7 + 0.3*_t);\n}\n\nvec4 geomI(in vec3 p, in bool high)\n{\n    //p.x += 2.5*sin(p.x*0.01) + 0.1*sin(p.y*2. + iTime*0.5);\n    //p.y += 4.3*cos(p.z*0.1) + 0.1*cos(p.z*2. + iTime*0.75) + 0.2*cos(p.x*2. + iTime*0.37);\n    //float dfx = PULSE_T(mod(iTime, 4.), 2., 2., 2.);\n    vec3 gf = double_gyroid(p, 0.7, high);\n    float rf = (high) ? 0.05*fbm(p) : 0.0;\n    gf.x += rf;\n    \n    // create holes\n    float s_len = get_slen(p, iTime, 0.5) ;\n    vec3 r = (p * PI2) / s_len;\n    float ad = max((length(p) - srad)*0.025, 0.);\n    float holeGrid = 0.1;\n    vec3 q = r - holeGrid*floor((r+0.5*holeGrid)/holeGrid);\n    float hf = mix(0., .4*holeGrid, smoothstep(0., 1., ad*30.));\n    float f = length(q)- hf;\n    \n    vec3 gcol = 0.2 + 0.8 * cos(r + vec3(0.1, 0.5, 0.9));\n    float lglow = step(f, -0.15*hf)*0.1/(0.1 + f * f);\n    \n    g_col += lglow * gcol;\n    glow += lglow;\n    \n    //gf.x = mix(gf.x, gf.x + rf, dfx);\n    \n    //gf.y = float(abs(f) < abs(gf.x));\n    gf.x = max(gf.x, -f);\n    return vec4(gf, rf);\n}\n\nvec4 traceI(in vec3 o, in vec3 d) {\n  float t = 0.0;\n  float mint = 10.0;\n\n  vec2 res = vec2(mint, 0.);\n    \n  for (int i=0 ; i < M_ITER ; i++)\n  {\n    vec3 p = o + t*d;\n    \n    res = geomI(p, false).xz;\n    mint = abs(res.x);\n    t += mint;\n\n    if (mint < T_EPS*t || t > FAR) break;\n  }\n  \n   \n  return vec4(t, mint, res.y, res.y);\n}\n\nvec3 normI(in vec3 p, in bool hres)\n{\n    vec3 n;\n    vec2 e = vec2(N_EPS*10., 0.0);\n    \n    n.x = geomI(p + e.xyy, hres).x - geomI(p - e.xyy, hres).x;\n    n.y = geomI(p + e.yxy, hres).x - geomI(p - e.yxy, hres).x;\n    n.z = geomI(p + e.yyx, hres).x - geomI(p - e.yyx, hres).x;\n    \n    return normalize(n);\n}\n\nvec3 normfI(in vec3 p, in bool hres)\n{\n    vec3 n;\n    vec2 e = vec2(N_EPS*10., 0.0);\n    \n    float f = geomI(p, hres).x;\n    n.x = geomI(p + e.xyy, hres).x - f;\n    n.y = geomI(p + e.yxy, hres).x - f;\n    n.z = geomI(p + e.yyx, hres).x - f;\n    \n    return normalize(n);\n}\n\n\nvec4 environment(in float t, in vec3 o, in vec3 d) {\n    float b = .03 + .01*sin(iTime * .1);\n    float alpha = exp(-(t + 5.)*b);\n    vec3  light  = vec3(0.1,0.35,0.9);\n    \n    return vec4(light, 1.-alpha);\n}\n\nvec4 triplanar(in vec3 p, in vec3 n, in float scale, in sampler2D s)\n{\n  //n += 0.7*n + vec3(0.2);\n  float sw = n.x + n.y + n.z;\n  float wx = n.x/sw;\n  float wy = n.y/sw;\n  float wz = n.z/sw;\n  \n  vec4 dx = texture(s, p.yz*scale*n.x);\n  vec4 dy = texture(s, p.zx*scale*n.y);\n  vec4 dz = texture(s, p.xy*scale*n.z);\n  \n  return dx * wx + dy *wy + dz * wz;\n}\n\n// Fresnel-Shlick\nfloat F(in float _f0, in vec3 _h, in vec3 _v)\n{\n    float hv = max(dot(_h, _v), 0.);\n    float hv1 = pow(1. - hv, 5.);\n    return _f0 + (1. - _f0) * hv1;\n}\n\nvec4 phase_anim_params(in float _ph_steps, in float _ph_time, \n                       in float _alpha) {\n    float phase_time = _ph_time/_ph_steps;\n    float light_phase = phase_time * floor(_ph_steps*_alpha)/_ph_steps;\n    float phase_in = phase_time * 0.4;\n    float phase_hold = phase_time * 0.1;\n    float phase_out = phase_time * 0.7;\n    \n    return vec4(light_phase, phase_in, phase_hold, phase_out);\n}\n\n#define AA 1\n\nvoid mainImage( out vec4 fragColor, in vec2 fragCoord )\n{\n    float currRatio = iResolution.y / iResolution.x;\n    float ratio = TARGET_RATIO / currRatio;\n    vec2 uv = (2.0*fragCoord-iResolution.xy)/(ratio*iResolution.y);\n    \n    float fov = 0.6 + 0.3*PULSE_T(mod(iTime, 25.), 2., 7., 14.);\n    \n    vec3 o = getOrigin(0.75*iTime - 1., iChannel1, 1.);\n    vec3 target = getOrigin(0.75*iTime - 2., iChannel1, 1.);\n    \n    vec3 od = normalize(vec3(fov*(2.*(uv-vec2(0.0, -0.5))),-1.));\n    vec3 light = normalize(vec3(1., -1., -1.));\n    \n    mat3 view;\n    vec3 d = camera(o, od, target, view);\n\n    vec3 col;\n    vec3 bckcol = vec3(0.);\n    vec4 ccol = vec4(0.);\n    \n    float depth = 0.0;\n    \n    if (abs(uv.y) > 1.0)\n    {\n        fragColor = vec4(0.);\n        return;\n    }\n    \n    srad = 15. + 2.*sin(iTime*0.005 + 2.3);\n    \n    for (int rw = 0; rw < AA; rw++)\n    for (int cl = 0; cl < AA; cl++)\n    {\n        vec2 off = -0.5 + vec2( float(rw), float(cl) ) / float(AA);\n        vec2 tuv = (2.0*(fragCoord + off)-iResolution.xy)/(iResolution.y);\n        \n        d = normalize(vec3(fov*(2.*(tuv-vec2(0.0, -0.0))),-1.0));\n        //rcd.xy += (1./vec2(float(AA*AA)) + vec2(float(row)/float(AA), float(col)/float(AA))) / (iResolution.y);\n        d = camera(o, d, 0.75*target, view);\n        //ccol += traceCubeCol(o, d, 3);\n\n        float rad = srad;\n        vec2 rsph = sphIntersect(o, d, vec3(0.), rad);\n        if (rsph.x * rsph.y < 0.)\n        {\n          vec3 pshp = o + rsph.y * d;\n          vec3 nsph = -normalize(pshp);\n          vec4 g3res = traceI(pshp, d);\n          // hit position to gyroid.\n          vec3 totp = pshp + g3res.x * d;\n          \n          // relative distance from sphere\n          float gp_ratio = min((length(totp) - rad) / (0.75*FAR - rad), 1.);\n          \n          // color sphere\n          float rsscl = rsph.y/(rad * 2.);\n          vec3 sphCol = vec3(1., rsscl, 0.0);\n          vec4 mtl = geomI(pshp + g3res.x * d, true);\n\n          float inside = step(0.1, mtl.y);\n\n          vec3 gcol = mix(vec3(1.), vec3(1., 1., 0.821), step(0.1, mtl.z));\n\n          // differentiate inside/outside\n          gcol *= (1. - 0.5*inside);\n\n          depth += g3res.x + rsph.y;\n          vec3 n3gyr = normI(totp, true);\n\n          // fake normals for triplanar texturing\n          vec3 tn3gyr = normI(totp, false);\n          vec3 tcol2 = triplanar(totp, (tn3gyr * tn3gyr), 1. / g3res.x, iChannel3).rgb;\n          vec3 tcol = triplanar(totp + length(2.*tcol2), (tn3gyr * tn3gyr), 0.5 / g3res.x, iChannel3).rgb;\n\n          // texture brigthness attenuation.\n          gcol *= length(tcol.rrr);\n          gcol += tcol2.x * 3. * vec3(1.0, 0.55, 0.185);\n          gcol += tcol2.z * 4. * vec3(0.19, 0.58, 1.116);\n          gcol *= mix(vec3(1.), vec3(0.95, 0.95, 0.5), g3res.z);\n          //gcol += g3res.w * 0.01;\n\n          // bright one of the two gyroids.\n          gcol *= (1. + 5.*step(0.1, mtl.z));\n\n          // light direction towards the cube.\n          vec3 ldir = normalize(totp);\n\n          vec3 rfl = reflect(d, n3gyr);\n          //vec3 dn3gyr = fwidth(n3gyr);\n          vec3 h = normalize(ldir - d);\n          vec3 spec = vec3(1.)*max(dot(rfl, -ldir), 0.) * 4.*F(0.9, h, -d);\n\n          // spherical distance attenuation\n          vec3 ocol = mix(sphCol, gcol, 0.5);\n          ocol = mix(ocol, 1. - ocol*ocol, vec3(ccol.a));\n\n          // gyroid distance attenuation\n          ocol += 200.*vec3(.96, 0.41, 2.1) * smoothstep(0., g3res.x*g3res.x, 0.25);\n\n          // lighting\n          ocol *= (0.25 + max(0.75*dot(n3gyr, -ldir), 0.01)) + spec;\n          ocol = mix(2.*ocol*tcol2.y*max(dot(nsph, -d), 0.0), ocol, exp(0.03*(rad - g3res.x)));\n          \n          \n          float t_cycle = mod(iTime, 60.);\n          float t_col = mod(iTime, 40.);\n\n          const float phase_steps = 12.;\n          \n          vec4 aparams = phase_anim_params(phase_steps, 12., gp_ratio);\n          \n          float t_light = ANIM_T_CF3(t_cycle, 10. + aparams.x, 10. + aparams.z + aparams.x, 51., aparams.y, aparams.w, 2., 1.0, 0.4);\n          \n          vec3 mp = mod(floor(totp*5.), vec3(4., 4., 4.));\n          float block_id = mp.x + mp.y * 4. + mp.z * 16.;\n          block_id = hash(block_id);\n          \n          aparams = phase_anim_params(12., 12., block_id);\n          \n          // color animation\n          vec3 glight = mix(g_col, vec3(5.*glow), ASYM_PULSE_T(t_col, 2., 8., aparams.y + aparams.z + aparams.w, 24. - aparams.x));\n          \n          vec3 rtotp = totp;\n          rtotp.xy = ROT2D(rtotp.xy, rtotp.z);\n          mp = mod(floor(rtotp*0.5), vec3(4., 4., 4.));\n          block_id = mp.x + mp.y * 4. + mp.z * 16.;\n          block_id = hash(block_id);\n          \n          aparams = phase_anim_params(8., 15., block_id);\n          \n          // glow/glow + color animation\n          glight = mix(glight, vec3(0.), ASYM_PULSE_T(t_cycle, aparams.y, 20.+aparams.x, 2., 49.));\n          \n          // dark/light mode cycle\n          ocol = mix((0.005*glight * g3res.x + 0.01)* ocol,\n                     ocol + 0.005*glight * g3res.x, t_light);\n          \n          // kind of fog\n          vec4 fg = environment(g3res.x * (smoothstep(0., 15., g3res.x) - smoothstep(15., 40., g3res.x)), o, d);\n          ocol = mix(ocol, fg.rgb, fg.a);\n\n          //ocol = mix(ocol, rocol.rgb * dot(n3gyr, -ldir), 0.7 * clamp(rocol.a, 0., 1.));\n          bckcol += ocol;\n        }\n    }\n    \n    depth /= float(AA * AA);\n    ccol /= float(AA * AA);\n    bckcol /= float(AA * AA);\n    col = mix(bckcol, ccol.rgb, pow(clamp(1.02*ccol.a, 0., 1.), 2.));\n    col = col.bgr;\n    col = max(vec3(0.), col);\n    //col = mix(col, col.bgr, _ANIMATION(11));\n    \n    //col = mix(col, tcol.rgb, (step(0.1, ccol.a) - step(0.75, ccol.a)) * 0.5 * smoothstep(1.2, 1.8, length(col - tcol.rgb)) );\n    // Output to screen\n    fragColor = vec4(col, depth/FAR);\n}",
+      "description": "",
+      "inputs": [
+        {
+          "channel": 1,
+          "filepath": "/media/a/0c7bf5fe9462d5bffbd11126e82908e39be3ce56220d900f633d58fb432e56f5.png",
+          "id": "4dXGzn",
+          "previewfilepath": "/media/ap/0c7bf5fe9462d5bffbd11126e82908e39be3ce56220d900f633d58fb432e56f5.png",
+          "published": 1,
+          "sampler": {
+            "filter": "mipmap",
+            "internal": "byte",
+            "srgb": "false",
+            "vflip": "true",
+            "wrap": "repeat"
+          },
+          "type": "texture"
+        },
+        {
+          "channel": 3,
+          "filepath": "/media/previz/buffer00.png",
+          "id": "4dXGR8",
+          "previewfilepath": "/media/previz/buffer00.png",
+          "published": 1,
+          "sampler": {
+            "filter": "linear",
+            "internal": "byte",
+            "srgb": "false",
+            "vflip": "true",
+            "wrap": "clamp"
+          },
+          "type": "buffer"
+        }
+      ],
+      "name": "Buffer B",
+      "outputs": [
+        {
+          "channel": 0,
+          "id": "XsXGR8"
+        }
+      ],
+      "type": "buffer"
+    }
+  ],
+  "ver": "0.1"
+}

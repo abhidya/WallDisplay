@@ -32,12 +32,13 @@
     <div id="preview-host"></div>
     <script>
         const params = new URLSearchParams(window.location.search);
-        const assetVersion = params.get('v') || '20260327-anim-1';
+        const assetVersion = params.get('v') || '20260403-anim-4';
         const scriptPaths = [
             '/backend-static/js/vendor/gifler.min.js',
             '/backend-static/js/projection/animation_engine.js',
             '/backend-static/js/projection/animations/shadertoy_single_pass.js',
             '/backend-static/js/projection/animations/shadertoy_multi_pass.js',
+            '/backend-static/js/projection/animations/shadertoy_imported_animations.js',
             '/backend-static/js/projection/animations/neural_noise.js',
             '/backend-static/js/projection/animations/moving_clouds.js',
             '/backend-static/js/projection/animations/koi_fish.js',

@@ -1,0 +1,37 @@
+{
+  "info": {
+    "date": "1741275655",
+    "description": "A whirling blackhole.",
+    "flags": 0,
+    "hasliked": 0,
+    "id": "3csSWB",
+    "likes": 355,
+    "name": "Singularity [381]",
+    "parentid": "",
+    "parentname": "",
+    "published": 1,
+    "tags": [
+      "space",
+      "golf"
+    ],
+    "usePreview": 0,
+    "username": "Xor",
+    "viewed": 19858
+  },
+  "renderpass": [
+    {
+      "code": "/*\n    \"Singularity\" by @XorDev\n\n    A whirling blackhole.\n    Feel free to code golf!\n    \n    FabriceNeyret2: -19\n    dean_the_coder: -12\n    iq: -4\n*/\nvoid mainImage(out vec4 O, vec2 F)\n{\n    //Iterator and attenuation (distance-squared)\n    float i = .2, a;\n    //Resolution for scaling and centering\n    vec2 r = iResolution.xy,\n         //Centered ratio-corrected coordinates\n         p = ( F+F - r ) / r.y / .7,\n         //Diagonal vector for skewing\n         d = vec2(-1,1),\n         //Blackhole center\n         b = p - i*d,\n         //Rotate and apply perspective\n         c = p * mat2(1, 1, d/(.1 + i/dot(b,b))),\n         //Rotate into spiraling coordinates\n         v = c * mat2(cos(.5*log(a=dot(c,c)) + iTime*i + vec4(0,33,11,0)))/i,\n         //Waves cumulative total for coloring\n         w;\n    \n    //Loop through waves\n    for(; i++<9.; w += 1.+sin(v) )\n        //Distort coordinates\n        v += .7* sin(v.yx*i+iTime) / i + .5;\n    //Acretion disk radius\n    i = length( sin(v/.3)*.4 + c*(3.+d) );\n    //Red/blue gradient\n    O = 1. - exp( -exp( c.x * vec4(.6,-.4,-1,0) )\n                   //Wave coloring\n                   /  w.xyyx\n                   //Acretion disk brightness\n                   / ( 2. + i*i/4. - i )\n                   //Center darkness\n                   / ( .5 + 1. / a )\n                   //Rim highlight\n                   / ( .03 + abs( length(p)-.7 ) )\n             );\n    }\n\n\n\n//Original [432]\n/*\nvoid mainImage(out vec4 O,in vec2 F)\n{\n    vec2 p=(F*2.-iResolution.xy)/(iResolution.y*.7),\n    d=vec2(-1,1),\n    c=p*mat2(1,1,d/(.1+5./dot(5.*p-d,5.*p-d))),\n    v=c;\n    v*=mat2(cos(log(length(v))+iTime*.2+vec4(0,33,11,0)))*5.;\n    vec4 o=vec4(0);\n    for(float i;i++<9.;o+=sin(v.xyyx)+1.)\n    v+=.7*sin(v.yx*i+iTime)/i+.5;\n    O=1.-exp(-exp(c.x*vec4(.6,-.4,-1,0))/o\n    /(.1+.1*pow(length(sin(v/.3)*.2+c*vec2(1,2))-1.,2.))\n    /(1.+7.*exp(.3*c.y-dot(c,c)))\n    /(.03+abs(length(p)-.7))*.2);\n}*/",
+      "description": "",
+      "inputs": [],
+      "name": "Image",
+      "outputs": [
+        {
+          "channel": 0,
+          "id": "4dfGRr"
+        }
+      ],
+      "type": "image"
+    }
+  ],
+  "ver": "0.1"
+}
