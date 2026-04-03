@@ -326,6 +326,12 @@ export class NanoDlnaApiClient {
     return asArray<MediaDirectorySummary>(payload);
   }
 
+  async scanMediaDirectory(directoryId: number | string): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/media-library/directories/${directoryId}/scan`, {
+      method: 'POST',
+    });
+  }
+
   async listMediaLists(): Promise<MediaListSummary[]> {
     const payload = await this.requestJson<unknown>('/media-library/lists');
     return asArray<MediaListSummary>(payload);
@@ -336,6 +342,12 @@ export class NanoDlnaApiClient {
     return asArray<MediaChannelSummary>(payload);
   }
 
+  async advanceMediaChannel(channelId: number | string): Promise<MediaChannelSummary> {
+    return this.requestJson<MediaChannelSummary>(`/media-library/channels/${channelId}/advance`, {
+      method: 'POST',
+    });
+  }
+
   async getStreamingAnalytics(): Promise<StreamingAnalytics> {
     return this.requestJson<StreamingAnalytics>('/streaming/analytics');
   }
@@ -343,6 +355,24 @@ export class NanoDlnaApiClient {
   async listStreamingSessions(): Promise<StreamingSessionSummary[]> {
     const payload = await this.requestJson<unknown>('/streaming/sessions');
     return asArray<StreamingSessionSummary>(payload);
+  }
+
+  async completeStreamingSession(sessionId: string): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/streaming/sessions/${sessionId}/complete`, {
+      method: 'POST',
+    });
+  }
+
+  async resetStreamingSession(sessionId: string): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/streaming/sessions/${sessionId}/reset`, {
+      method: 'POST',
+    });
+  }
+
+  async stopStreamingSession(sessionId: string): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/streaming/sessions/${sessionId}`, {
+      method: 'DELETE',
+    });
   }
 
   async listRenderers(): Promise<RendererInstanceSummary[]> {
