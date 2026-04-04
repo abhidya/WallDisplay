@@ -2,7 +2,7 @@ const originalGetContext = HTMLCanvasElement.prototype.getContext;
 HTMLCanvasElement.prototype.getContext = jest.fn(() => null);
 
 // eslint-disable-next-line global-require
-const { normalizeScene } = require('../pages/Mappings');
+const { determineMaskForegroundMode, normalizeScene } = require('../pages/Mappings');
 
 afterAll(() => {
   HTMLCanvasElement.prototype.getContext = originalGetContext;
@@ -78,5 +78,26 @@ describe('normalizeScene', () => {
       color_a: '#b56a2d',
       color_b: '#6a7f58',
     });
+  });
+});
+
+describe('determineMaskForegroundMode', () => {
+  test('falls back to alpha for fully opaque single-polarity masks', () => {
+    expect(determineMaskForegroundMode('luminance', { opaqueCount: 100, brightCount: 0 })).toBe('alpha');
+    expect(determineMaskForegroundMode('luminance', { opaqueCount: 100, brightCount: 100 })).toBe('alpha');
+  });
+
+  test('keeps bright foreground masks as bright by default', () => {
+    expect(determineMaskForegroundMode('luminance', { opaqueCount: 100, brightCount: 35 })).toBe('bright');
+    expect(determineMaskForegroundMode('luminance', { opaqueCount: 100, brightCount: 12 })).toBe('bright');
+  });
+
+  test('detects inverted luminance masks when bright pixels dominate', () => {
+    expect(determineMaskForegroundMode('luminance', { opaqueCount: 100, brightCount: 92 })).toBe('dark');
+  });
+
+  test('honors explicit alpha and inverted mask modes', () => {
+    expect(determineMaskForegroundMode('alpha', { opaqueCount: 100, brightCount: 1 })).toBe('alpha');
+    expect(determineMaskForegroundMode('luminance-inverted', { opaqueCount: 100, brightCount: 1 })).toBe('dark');
   });
 });

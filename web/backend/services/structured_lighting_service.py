@@ -1470,9 +1470,9 @@ class StructuredLightingService:
         import cv2
         import numpy as np
 
-        clean = cv2.medianBlur(img_white_bgr, blur_ksize)
-        smooth = cv2.bilateralFilter(clean, bilateral_params[0], bilateral_params[1], bilateral_params[2])
-        gray = cv2.cvtColor(smooth, cv2.COLOR_BGR2GRAY)
+        # clean = cv2.medianBlur(img_white_bgr, blur_ksize)
+        # smooth = cv2.bilateralFilter(clean, bilateral_params[0], bilateral_params[1], bilateral_params[2])
+        gray = cv2.cvtColor(img_white_bgr, cv2.COLOR_BGR2GRAY)
         edge_mode = (edge_mode or "morph_gradient").lower()
 
         if edge_mode == "canny":

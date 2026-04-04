@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import html
+import ipaddress
 import os
 import logging
 import queue
@@ -23,6 +24,7 @@ import aiohttp
 
 from discovery.base import CastingSession
 from discovery.discovery_manager import DiscoveryManager
+from discovery.network import get_local_ipv4_addresses
 
 logger = logging.getLogger(__name__)
 RELAY_IDLE_TIMEOUT_SECONDS = 15
@@ -65,15 +67,19 @@ class FanoutRelayState:
     def publish(self, chunk: bytes):
         if not chunk:
             return
-        stale_clients: list[str] = []
         with self._lock:
             for client_id, client_queue in self._clients.items():
                 try:
                     client_queue.put_nowait(chunk)
                 except queue.Full:
-                    stale_clients.append(client_id)
-        for client_id in stale_clients:
-            self.unregister_client(client_id)
+                    try:
+                        client_queue.get_nowait()
+                    except queue.Empty:
+                        pass
+                    try:
+                        client_queue.put_nowait(chunk)
+                    except queue.Full:
+                        logger.debug("Overlay cast relay client %s is still backpressured; dropping chunk", client_id)
 
     def close(self):
         with self._lock:
@@ -94,6 +100,7 @@ class FanoutRelayState:
 
 class OverlayCastRelayHandler(BaseHTTPRequestHandler):
     server_version = "OverlayCastRelay/1.0"
+    protocol_version = "HTTP/1.1"
 
     def log_message(self, format, *args):
         logger.debug("Overlay cast relay: " + format, *args)
@@ -111,6 +118,7 @@ class OverlayCastRelayHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", OVERLAY_STREAM_CONTENT_TYPE)
         self.send_header("Connection", "keep-alive")
+        self.send_header("Cache-Control", "no-cache")
         self.end_headers()
 
         session = getattr(self.server, "overlay_session", None)
@@ -187,6 +195,7 @@ class OverlayCastSession:
     frame_decode_lock: threading.Lock = field(default_factory=threading.Lock)
     frame_decode_event: threading.Event = field(default_factory=threading.Event)
     frame_interval_seconds: float = 1 / 20
+    relay_reconnect_attempts: int = 0
 
     def to_dict(self) -> dict:
         return {
@@ -212,6 +221,7 @@ class OverlayCastSession:
             "error": self.error,
             "discovery_session_id": self.discovery_session_id,
             "encoder": self.encoder,
+            "relay_reconnect_attempts": self.relay_reconnect_attempts,
         }
 
 
@@ -431,7 +441,7 @@ class OverlayCastService:
                 await self._stop_session(existing_session_id)
 
             relay_port = stream_port or self._reserve_free_port()
-            relay_url = f"http://{self._get_local_ip()}:{relay_port}{OVERLAY_STREAM_PATH}"
+            relay_url = f"http://{self._get_local_ip(device_id)}:{relay_port}{OVERLAY_STREAM_PATH}"
             overlay_url = self._build_overlay_url(
                 overlay_base_url,
                 config_id,
@@ -666,7 +676,17 @@ class OverlayCastService:
                     session.last_client_disconnected_at is not None and
                     (datetime.utcnow() - session.last_client_disconnected_at).total_seconds() > RELAY_IDLE_TIMEOUT_SECONDS
                 ):
-                    raise RuntimeError("Relay client disconnected and did not reconnect")
+                    if session.relay_reconnect_attempts < 1:
+                        session.relay_reconnect_attempts += 1
+                        self._log_step(
+                            session,
+                            "relay_reconnect",
+                            "Relay client disconnected; retrying DLNA handoff without metadata",
+                        )
+                        await self._direct_dlna_handshake(session, include_metadata=False)
+                        session.last_client_disconnected_at = datetime.utcnow()
+                    else:
+                        raise RuntimeError("Relay client disconnected and did not reconnect")
                 await asyncio.sleep(1)
 
         except asyncio.CancelledError:
@@ -798,15 +818,39 @@ class OverlayCastService:
             params["capture"] = capture_mode
         return f"{base}/backend-static/overlay_window.html?{urlencode(params)}"
 
-    def _get_local_ip(self) -> str:
+    def _get_local_ip(self, device_id: Optional[str] = None) -> str:
+        for env_name in ("STREAMING_SERVE_IP", "NANODLNA_DISCOVERY_INTERFACE_IP", "SERVE_IP"):
+            env_ip = os.environ.get(env_name)
+            if env_ip and not env_ip.startswith("127.") and env_ip != "localhost":
+                return env_ip
+
+        local_addresses = sorted(get_local_ipv4_addresses())
+        device = self.discovery_manager.get_device_by_id(device_id) if device_id else None
+        device_ip = getattr(device, "hostname", None)
+        if device_ip:
+            try:
+                device_network = ipaddress.ip_network(f"{device_ip}/24", strict=False)
+                for address in local_addresses:
+                    if ipaddress.ip_address(address) in device_network:
+                        return address
+            except ValueError:
+                pass
+
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
-            sock.connect(("10.255.255.255", 1))
-            return sock.getsockname()[0]
+            target_ip = device_ip or "8.8.8.8"
+            sock.connect((target_ip, 80))
+            candidate = sock.getsockname()[0]
+            if candidate and not candidate.startswith("127."):
+                return candidate
         except Exception:
-            return "127.0.0.1"
+            pass
         finally:
             sock.close()
+
+        if local_addresses:
+            return local_addresses[0]
+        return "127.0.0.1"
 
     def _reserve_free_port(self) -> int:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -879,6 +923,8 @@ class OverlayCastService:
                     ffmpeg_proc.stdin.write(session.latest_frame)
                     ffmpeg_proc.stdin.flush()
             except Exception as exc:
+                if session.stop_event.is_set() or ffmpeg_proc.poll() is not None:
+                    break
                 logger.warning("Overlay cast frame writer stopped for session %s: %s", session.session_id, exc)
                 session.error = str(exc)
                 session.stop_event.set()
@@ -1037,7 +1083,7 @@ class OverlayCastService:
             output_path,
         ]
 
-    async def _direct_dlna_handshake(self, session: OverlayCastSession) -> CastingSession:
+    async def _direct_dlna_handshake(self, session: OverlayCastSession, include_metadata: bool = True) -> CastingSession:
         device = self.discovery_manager.get_device_by_id(session.device_id)
         if not device or not device.action_url:
             raise RuntimeError("DLNA device action URL not available")
@@ -1060,7 +1106,7 @@ class OverlayCastService:
             '<s:Body><u:SetAVTransportURI xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">'
             "<InstanceID>0</InstanceID>"
             f"<CurrentURI>{stream_url}</CurrentURI>"
-            f"<CurrentURIMetaData>{escaped_meta}</CurrentURIMetaData>"
+            f"<CurrentURIMetaData>{escaped_meta if include_metadata else ''}</CurrentURIMetaData>"
             "</u:SetAVTransportURI></s:Body></s:Envelope>"
         )
         play_body = (

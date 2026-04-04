@@ -50,6 +50,9 @@ const PANEL_BORDER = 'rgba(68, 58, 43, 0.14)';
 const PANEL_TEXT = '#261f16';
 const PANEL_SUBTEXT = 'rgba(38, 31, 22, 0.66)';
 const CANVAS_FRAME = '#d6c8ae';
+const MASK_ALPHA_THRESHOLD = 5;
+const MASK_LUMINANCE_THRESHOLD = 127;
+const MASK_BRIGHT_RATIO_THRESHOLD = 0.2;
 
 const emptyGroup = () => ({
   id: `group_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`,
@@ -202,6 +205,33 @@ export function normalizeScene(scene = {}) {
   };
 }
 
+export function determineMaskForegroundMode(maskMode = 'luminance', stats = {}) {
+  const normalizedMaskMode = String(maskMode || 'luminance').toLowerCase();
+  if (normalizedMaskMode === 'alpha') {
+    return 'alpha';
+  }
+  if (normalizedMaskMode === 'luminance-inverted' || normalizedMaskMode === 'inverse-luminance') {
+    return 'dark';
+  }
+
+  const opaqueCount = Number(stats.opaqueCount) || 0;
+  const brightCount = Number(stats.brightCount) || 0;
+  const darkCount = Math.max(0, opaqueCount - brightCount);
+
+  if (!opaqueCount || !brightCount || !darkCount) {
+    return 'alpha';
+  }
+
+  const brightRatio = brightCount / opaqueCount;
+  if (brightRatio <= MASK_BRIGHT_RATIO_THRESHOLD) {
+    return 'bright';
+  }
+  if (brightRatio >= (1 - MASK_BRIGHT_RATIO_THRESHOLD)) {
+    return 'dark';
+  }
+  return 'bright';
+}
+
 function Mappings() {
   const [searchParams, setSearchParams] = useSearchParams();
   const stageRef = useRef(null);
@@ -294,6 +324,7 @@ function Mappings() {
     return {
       canvas_width: sceneDraft.canvas_width,
       canvas_height: sceneDraft.canvas_height,
+      mask_mode: sceneDraft.mask_mode,
       render_settings: {
         background: sceneDraft.render_settings?.background || '#000000',
       },
@@ -1500,14 +1531,14 @@ function renderStage(canvas, sceneDraft, maskImages, selectedGroupId, polygonDra
     const images = group.mask_ids.map((maskId) => maskImages[maskId]).filter(Boolean);
     if (!images.length) return;
 
-    const bounds = computeMaskBounds(images, width, height);
+    const bounds = computeMaskBounds(images, width, height, sceneDraft.mask_mode);
     const offscreen = document.createElement('canvas');
     offscreen.width = width;
     offscreen.height = height;
     const offscreenCtx = offscreen.getContext('2d');
 
     drawFallbackFill(offscreenCtx, group, bounds);
-    applyLuminanceMasks(offscreenCtx, images, width, height);
+    applyMasks(offscreenCtx, images, width, height, sceneDraft.mask_mode);
     ctx.drawImage(offscreen, 0, 0);
 
     ctx.strokeStyle = group.color_a || '#b56a2d';
@@ -1525,26 +1556,74 @@ function renderStage(canvas, sceneDraft, maskImages, selectedGroupId, polygonDra
   }
 }
 
-function computeMaskBounds(maskImages, width, height) {
+const maskAnalysisCache = new WeakMap();
+
+function getMaskAnalysis(image, width, height) {
+  const cached = maskAnalysisCache.get(image);
+  if (cached && cached.width === width && cached.height === height) {
+    return cached;
+  }
+
+  const offscreen = document.createElement('canvas');
+  offscreen.width = width;
+  offscreen.height = height;
+  const ctx = offscreen.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(image, 0, 0, width, height);
+  const imageData = ctx.getImageData(0, 0, width, height);
+  let opaqueCount = 0;
+  let brightCount = 0;
+
+  for (let i = 0; i < imageData.data.length; i += 4) {
+    const alpha = imageData.data[i + 3];
+    if (alpha <= MASK_ALPHA_THRESHOLD) {
+      continue;
+    }
+    opaqueCount += 1;
+    const luminance = (imageData.data[i] + imageData.data[i + 1] + imageData.data[i + 2]) / 3;
+    if (luminance > MASK_LUMINANCE_THRESHOLD) {
+      brightCount += 1;
+    }
+  }
+
+  const analysis = {
+    width,
+    height,
+    data: imageData.data,
+    opaqueCount,
+    brightCount,
+  };
+  maskAnalysisCache.set(image, analysis);
+  return analysis;
+}
+
+function isForegroundPixel(red, green, blue, alpha, foregroundMode) {
+  if (alpha <= MASK_ALPHA_THRESHOLD) {
+    return false;
+  }
+  if (foregroundMode === 'alpha') {
+    return true;
+  }
+  const luminance = (red + green + blue) / 3;
+  return foregroundMode === 'dark'
+    ? luminance <= MASK_LUMINANCE_THRESHOLD
+    : luminance > MASK_LUMINANCE_THRESHOLD;
+}
+
+function computeMaskBounds(maskImages, width, height, maskMode = 'luminance') {
   let minX = width;
   let minY = height;
   let maxX = 0;
   let maxY = 0;
 
   maskImages.forEach((image) => {
-    const offscreen = document.createElement('canvas');
-    offscreen.width = width;
-    offscreen.height = height;
-    const ctx = offscreen.getContext('2d', { willReadFrequently: true });
-    ctx.drawImage(image, 0, 0, width, height);
-    const { data } = ctx.getImageData(0, 0, width, height);
+    const analysis = getMaskAnalysis(image, width, height);
+    const foregroundMode = determineMaskForegroundMode(maskMode, analysis);
+    const { data } = analysis;
 
     for (let y = 0; y < height; y += 1) {
       for (let x = 0; x < width; x += 1) {
         const idx = (y * width + x) * 4;
-        const alpha = data[idx + 3];
-        const lum = (data[idx] + data[idx + 1] + data[idx + 2]) / 3;
-        if (alpha > 5 && lum > 127) {
+        if (isForegroundPixel(data[idx], data[idx + 1], data[idx + 2], data[idx + 3], foregroundMode)) {
           minX = Math.min(minX, x);
           minY = Math.min(minY, y);
           maxX = Math.max(maxX, x);
@@ -1563,11 +1642,37 @@ function computeMaskBounds(maskImages, width, height) {
 }
 
 function drawFallbackFill(ctx, group, bounds) {
+  const [colorA, colorB] = resolvePreviewFillColors(group);
   const gradient = ctx.createLinearGradient(bounds.x, bounds.y, bounds.x + bounds.width, bounds.y + bounds.height);
-  gradient.addColorStop(0, group.color_a || '#00bbf9');
-  gradient.addColorStop(1, group.color_b || '#003049');
+  gradient.addColorStop(0, colorA);
+  gradient.addColorStop(1, colorB);
   ctx.fillStyle = gradient;
   ctx.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+}
+
+function isNearBlack(color) {
+  return typeof color === 'string' && /^#0{6}$/i.test(color.trim());
+}
+
+function resolvePreviewFillColors(group) {
+  const colorA = group.color_a || '#00bbf9';
+  const colorB = group.color_b || '#003049';
+  const normalizedName = String(group?.name || '').trim().toLowerCase();
+  const isBackgroundGroup = ['background', 'full', 'full_scene'].includes(normalizedName);
+  if (!(isNearBlack(colorA) && isNearBlack(colorB))) {
+    return [colorA, colorB];
+  }
+  if (isBackgroundGroup) {
+    return ['#111111', '#2b2b2b'];
+  }
+
+  const seed = String(group?.id || group?.name || 'group');
+  let hash = 0;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash = ((hash << 5) - hash) + seed.charCodeAt(index);
+    hash |= 0;
+  }
+  return GROUP_COLOR_PALETTE[Math.abs(hash) % GROUP_COLOR_PALETTE.length];
 }
 
 const hitTestCanvas = document.createElement('canvas');
@@ -1575,17 +1680,19 @@ hitTestCanvas.width = 1;
 hitTestCanvas.height = 1;
 const hitTestCtx = hitTestCanvas.getContext('2d', { willReadFrequently: true });
 
-function maskContainsPoint(image, x, y, width, height) {
+function maskContainsPoint(image, x, y, width, height, maskMode = 'luminance') {
   if (!image || !hitTestCtx) {
     return false;
   }
 
+  const analysis = getMaskAnalysis(image, width, height);
+  const foregroundMode = determineMaskForegroundMode(maskMode, analysis);
   const sourceX = Math.max(0, Math.min((image.naturalWidth || image.width || width) - 1, Math.round((x / width) * (image.naturalWidth || image.width || width))));
   const sourceY = Math.max(0, Math.min((image.naturalHeight || image.height || height) - 1, Math.round((y / height) * (image.naturalHeight || image.height || height))));
   hitTestCtx.clearRect(0, 0, 1, 1);
   hitTestCtx.drawImage(image, sourceX, sourceY, 1, 1, 0, 0, 1, 1);
   const data = hitTestCtx.getImageData(0, 0, 1, 1).data;
-  return data[3] > 0 && (data[0] + data[1] + data[2]) > 0;
+  return isForegroundPixel(data[0], data[1], data[2], data[3], foregroundMode);
 }
 
 function hitTestGroupAtPoint(sceneDraft, maskImages, x, y) {
@@ -1600,7 +1707,7 @@ function hitTestGroupAtPoint(sceneDraft, maskImages, x, y) {
     if (!images.length) {
       continue;
     }
-    const hit = images.some((image) => maskContainsPoint(image, x, y, width, height));
+    const hit = images.some((image) => maskContainsPoint(image, x, y, width, height, sceneDraft.mask_mode));
     if (hit) {
       return group.id;
     }
@@ -1609,7 +1716,7 @@ function hitTestGroupAtPoint(sceneDraft, maskImages, x, y) {
   return '';
 }
 
-function applyLuminanceMasks(ctx, maskImages, width, height) {
+function applyMasks(ctx, maskImages, width, height, maskMode = 'luminance') {
   const maskCanvas = document.createElement('canvas');
   maskCanvas.width = width;
   maskCanvas.height = height;
@@ -1618,22 +1725,16 @@ function applyLuminanceMasks(ctx, maskImages, width, height) {
   const combinedPixels = combinedImageData.data;
 
   maskImages.forEach((image) => {
-    maskCtx.clearRect(0, 0, width, height);
-    maskCtx.drawImage(image, 0, 0, width, height);
-    const { data } = maskCtx.getImageData(0, 0, width, height);
+    const analysis = getMaskAnalysis(image, width, height);
+    const foregroundMode = determineMaskForegroundMode(maskMode, analysis);
+    const { data } = analysis;
 
     for (let i = 0; i < data.length; i += 4) {
-      const alpha = data[i + 3];
-      if (alpha <= 5) {
-        continue;
-      }
-
-      const lum = (data[i] + data[i + 1] + data[i + 2]) / 3;
-      if (lum > combinedPixels[i + 3]) {
+      if (isForegroundPixel(data[i], data[i + 1], data[i + 2], data[i + 3], foregroundMode)) {
         combinedPixels[i] = 255;
         combinedPixels[i + 1] = 255;
         combinedPixels[i + 2] = 255;
-        combinedPixels[i + 3] = lum > 127 ? 255 : 0;
+        combinedPixels[i + 3] = 255;
       }
     }
   });
