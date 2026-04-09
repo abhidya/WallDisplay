@@ -323,6 +323,169 @@ export class NanoDlnaApiClient {
     });
   }
 
+  async listPhotoLists(): Promise<JsonRecord[]> {
+    const payload = await this.requestJson<unknown>('/photo-lists/');
+    return asArray<JsonRecord>(payload);
+  }
+
+  async createMediaList(payload: JsonRecord): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>('/media-library/lists', {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
+  async createMediaChannel(payload: JsonRecord): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>('/media-library/channels', {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
+  async deleteMediaList(listId: number | string): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/media-library/lists/${listId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async deleteMediaChannel(channelId: number | string): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/media-library/channels/${channelId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async createVideo(payload: JsonRecord): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>('/videos/', {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
+  async deleteVideo(videoId: number | string): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/videos/${videoId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async uploadVideo(formData: FormData): Promise<JsonRecord> {
+    return requestUpload<JsonRecord>(this.apiHttp, '/videos/upload', formData);
+  }
+
+  async createPhoto(payload: JsonRecord): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>('/photos/', {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
+  async deletePhoto(photoId: number | string): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/photos/${photoId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async uploadPhoto(formData: FormData): Promise<JsonRecord> {
+    return requestUpload<JsonRecord>(this.apiHttp, '/photos/upload', formData);
+  }
+
+  async createMediaDirectory(payload: JsonRecord): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>('/media-library/directories', {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
+  async deleteMediaDirectory(directoryId: number | string): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/media-library/directories/${directoryId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async createPhotoList(payload: JsonRecord): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>('/photo-lists/', {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
+  async deletePhotoList(listId: number | string): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/photo-lists/${listId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getGlobalApiConfigs(): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>('/overlay/global-api-configs');
+  }
+
+  async updateGlobalApiConfigs(payload: JsonRecord): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>('/overlay/global-api-configs', {
+      method: 'PUT',
+      body: payload,
+    });
+  }
+
+  async getProjectorRedirectConfig(): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>('/overlay/projector-redirect');
+  }
+
+  async updateProjectorRedirectConfig(payload: JsonRecord): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>('/overlay/projector-redirect', {
+      method: 'PUT',
+      body: payload,
+    });
+  }
+
+  async getRecentProjectorRedirectRequests(limit = 50): Promise<JsonRecord[]> {
+    const payload = await this.requestJson<unknown>('/overlay/projector-redirect/recent', {
+      query: { limit },
+    });
+    return asArray<JsonRecord>(payload);
+  }
+
+  async getServiceDiagnostics(params: QueryRecord = {}): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>('/diagnostics/service', {
+      query: params,
+    });
+  }
+
+  async getIncidentDetail(incidentId: string, params: QueryRecord = {}): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/diagnostics/incidents/${incidentId}`, {
+      query: params,
+    });
+  }
+
+  async getLogs(params: QueryRecord = {}): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>('/logs', {
+      query: params,
+    });
+  }
+
+  async getLogSources(): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>('/logs/sources');
+  }
+
+  async getLogLevels(): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>('/logs/levels');
+  }
+
+  async getLogStats(): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>('/logs/stats');
+  }
+
+  async tailLogSource(source: string, lines = 100): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/logs/tail/${encodeURIComponent(source)}`, {
+      query: { lines },
+    });
+  }
+
+  async exportLogs(format: string, params: QueryRecord = {}): Promise<Blob> {
+    return this.requestJson<Blob>('/logs/export', {
+      query: { format, ...params },
+      parseAs: 'blob',
+    });
+  }
+
   async getStreamingAnalytics(): Promise<StreamingAnalytics> {
     return this.requestJson<StreamingAnalytics>('/streaming/analytics');
   }
@@ -387,6 +550,46 @@ export class NanoDlnaApiClient {
   async stopOverlayCastSession(sessionId: string): Promise<JsonRecord> {
     return this.requestJson<JsonRecord>(`/overlay/cast/sessions/${sessionId}`, {
       method: 'DELETE',
+    });
+  }
+
+  async createOverlayConfig(payload: JsonRecord): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>('/overlay/configs', {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
+  async deleteOverlayConfig(configId: number | string): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/overlay/configs/${configId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getOverlayBrightness(): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>('/overlay/brightness');
+  }
+
+  async setOverlayBrightness(brightness: number): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>('/overlay/brightness', {
+      method: 'POST',
+      query: { brightness },
+    });
+  }
+
+  async exportOverlayMp4(payload: JsonRecord): Promise<Blob> {
+    return this.requestJson<Blob>('/overlay/export', {
+      method: 'POST',
+      body: payload,
+      parseAs: 'blob',
+      timeout: 0,
+    });
+  }
+
+  async startOverlayCast(payload: JsonRecord): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>('/overlay/cast', {
+      method: 'POST',
+      body: payload,
     });
   }
 
@@ -500,6 +703,151 @@ export class NanoDlnaApiClient {
 
   async getProjectionSession(sessionId: string): Promise<ProjectionSessionSummary> {
     return this.requestJson<ProjectionSessionSummary>(`/projection/sessions/${sessionId}`);
+  }
+
+  async listProjectionAnimations(): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>('/projection/animations');
+  }
+
+  async listProjectionAnimationLists(): Promise<JsonRecord[]> {
+    return this.requestJson<JsonRecord[]>('/projection/animation-lists');
+  }
+
+  async getProjectionAnimationList(id: number | string): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/projection/animation-lists/${id}`);
+  }
+
+  async createProjectionAnimationList(data: JsonRecord): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>('/projection/animation-lists', {
+      method: 'POST',
+      body: data,
+    });
+  }
+
+  async updateProjectionAnimationList(id: number | string, data: JsonRecord): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/projection/animation-lists/${id}`, {
+      method: 'PUT',
+      body: data,
+    });
+  }
+
+  async deleteProjectionAnimationList(id: number | string): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/projection/animation-lists/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getStructuredLightingCapabilities(): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>('/structured-lighting/capabilities');
+  }
+
+  async getStructuredLightingStatus(): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>('/structured-lighting/status');
+  }
+
+  async listStructuredLightingSessions(): Promise<JsonRecord[]> {
+    return this.requestJson<JsonRecord[]>('/structured-lighting/sessions');
+  }
+
+  async createStructuredLightingSession(payload: JsonRecord): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>('/structured-lighting/sessions', {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
+  async deleteStructuredLightingSession(sessionId: string): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/structured-lighting/sessions/${sessionId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getStructuredLightingRuntime(sessionId: string): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/structured-lighting/sessions/${sessionId}/runtime`);
+  }
+
+  async listStructuredLightingCaptures(sessionId: string): Promise<JsonRecord[]> {
+    return this.requestJson<JsonRecord[]>(`/structured-lighting/sessions/${sessionId}/captures`);
+  }
+
+  async startStructuredLightingSession(sessionId: string): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/structured-lighting/sessions/${sessionId}/start`, {
+      method: 'POST',
+    });
+  }
+
+  async uploadDepthMap(formData: FormData): Promise<JsonRecord> {
+    return requestUpload<JsonRecord>(this.apiHttp, '/depth/upload', formData);
+  }
+
+  getDepthPreviewUrl(depthId: number | string): string {
+    return this.buildApiUrl(`/depth/preview/${depthId}`);
+  }
+
+  async segmentDepthMap(depthId: number | string, segmentationParams: JsonRecord): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/depth/segment/${depthId}`, {
+      method: 'POST',
+      body: segmentationParams,
+    });
+  }
+
+  getDepthSegmentationPreviewUrl(depthId: number | string, alpha = 0.5): string {
+    return this.buildApiUrl(`/depth/segmentation_preview/${depthId}`, { alpha });
+  }
+
+  async exportDepthMasks(
+    depthId: number | string,
+    segmentIds: Array<number | string>,
+    cleanMask = true,
+    minArea = 100,
+    kernelSize = 3,
+  ): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/depth/export_masks/${depthId}`, {
+      method: 'POST',
+      body: {
+        segment_ids: segmentIds,
+        clean_mask: cleanMask,
+        min_area: minArea,
+        kernel_size: kernelSize,
+      },
+    });
+  }
+
+  async deleteDepthMap(depthId: number | string): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/depth/${depthId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  getDepthMaskUrl(
+    depthId: number | string,
+    segmentId: number | string,
+    clean = true,
+    minArea = 100,
+    kernelSize = 3,
+  ): string {
+    return this.buildApiUrl(`/depth/mask/${depthId}/${segmentId}`, {
+      clean,
+      min_area: minArea,
+      kernel_size: kernelSize,
+    });
+  }
+
+  async createDepthProjection(config: JsonRecord): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>('/depth/projection/create', {
+      method: 'POST',
+      body: config,
+    });
+  }
+
+  getDepthProjectionUrl(configId: number | string): string {
+    return this.buildApiUrl(`/depth/projection/${configId}`);
+  }
+
+  async deleteDepthProjection(configId: number | string): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/depth/projection/${configId}`, {
+      method: 'DELETE',
+    });
   }
 }
 

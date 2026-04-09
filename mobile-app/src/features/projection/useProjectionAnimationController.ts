@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { createServiceModules } from '../../services/api.ts';
 import type { AppMode } from '../../control-plane/localState.ts';
+import { createHttpClient, normalizeApiBaseUrl } from '../../services/httpClient.ts';
 import type { JsonRecord } from '../../types/api.ts';
 
 function asRecord(value: unknown): JsonRecord | null {
@@ -14,6 +14,36 @@ function asArray(value: unknown): JsonRecord[] {
   return Array.isArray(value)
     ? value.filter((item) => item && typeof item === 'object' && !Array.isArray(item)) as JsonRecord[]
     : [];
+}
+
+export interface ProjectionRemoteClient {
+  createAnimationList: (payload: JsonRecord) => Promise<JsonRecord>;
+  deleteAnimationList: (animationListId: number | string) => Promise<JsonRecord>;
+  listAnimationLists: () => Promise<JsonRecord[]>;
+  listAnimations: () => Promise<JsonRecord>;
+  updateAnimationList: (animationListId: number | string, payload: JsonRecord) => Promise<JsonRecord>;
+}
+
+export function createProjectionRemoteClient(
+  apiBaseUrl: string,
+  fetchImpl: typeof fetch = globalThis.fetch,
+): ProjectionRemoteClient {
+  const api = createHttpClient({
+    baseURL: normalizeApiBaseUrl(apiBaseUrl),
+    normalizeApiBase: false,
+    fetchImpl,
+  });
+
+  return {
+    createAnimationList: (payload: JsonRecord) =>
+      api.post<JsonRecord>('/projection/animation-lists', { body: payload }),
+    deleteAnimationList: (animationListId: number | string) =>
+      api.delete<JsonRecord>(`/projection/animation-lists/${animationListId}`),
+    listAnimationLists: () => api.get<JsonRecord[]>('/projection/animation-lists'),
+    listAnimations: () => api.get<JsonRecord>('/projection/animations'),
+    updateAnimationList: (animationListId: number | string, payload: JsonRecord) =>
+      api.put<JsonRecord>(`/projection/animation-lists/${animationListId}`, { body: payload }),
+  };
 }
 
 export interface ProjectionAnimationController {
@@ -57,7 +87,10 @@ const emptyDraft = {
 export function useProjectionAnimationController(
   options: UseProjectionAnimationControllerOptions,
 ): ProjectionAnimationController {
-  const services = useMemo(() => createServiceModules(options.apiBaseUrl), [options.apiBaseUrl]);
+  const client = useMemo(
+    () => createProjectionRemoteClient(options.apiBaseUrl),
+    [options.apiBaseUrl],
+  );
   const [animations, setAnimations] = useState<JsonRecord[]>([]);
   const [animationLists, setAnimationLists] = useState<JsonRecord[]>([]);
   const [listDraft, setListDraft] = useState(emptyDraft);
@@ -77,13 +110,11 @@ export function useProjectionAnimationController(
     setError(null);
     try {
       const [animationsPayload, listsPayload] = await Promise.all([
-        services.projectionApi.listAnimations(),
-        services.projectionApi.listAnimationLists(),
+        client.listAnimations(),
+        client.listAnimationLists(),
       ]);
       setAnimations(asArray(asRecord(animationsPayload)?.animations ?? animationsPayload));
-      setAnimationLists(
-        asArray(asRecord(listsPayload)?.animation_lists ?? listsPayload),
-      );
+      setAnimationLists(asArray(asRecord(listsPayload)?.animation_lists ?? listsPayload));
     } catch (refreshError) {
       setError(
         refreshError instanceof Error
@@ -93,7 +124,7 @@ export function useProjectionAnimationController(
     } finally {
       setLoading(false);
     }
-  }, [options.appMode, services]);
+  }, [client, options.appMode]);
 
   useEffect(() => {
     void refresh();
@@ -128,8 +159,8 @@ export function useProjectionAnimationController(
         shuffle: listDraft.shuffle,
       };
       const response = listDraft.id
-        ? await services.projectionApi.updateAnimationList(listDraft.id, payload)
-        : await services.projectionApi.createAnimationList(payload);
+        ? await client.updateAnimationList(listDraft.id, payload)
+        : await client.createAnimationList(payload);
       const saved = response as JsonRecord;
       setActionMessage(`Saved animation list: ${String(saved.name ?? payload.name)}`);
       resetListDraft();
@@ -139,7 +170,7 @@ export function useProjectionAnimationController(
     } finally {
       setActionLoading(false);
     }
-  }, [listDraft, options.appMode, refresh, resetListDraft, services]);
+  }, [client, listDraft, options.appMode, refresh, resetListDraft]);
 
   const deleteAnimationList = useCallback(
     async (animationListId: number | string) => {
@@ -147,7 +178,7 @@ export function useProjectionAnimationController(
       setError(null);
       setActionMessage(null);
       try {
-        await services.projectionApi.deleteAnimationList(animationListId);
+        await client.deleteAnimationList(animationListId);
         setActionMessage(`Deleted animation list ${String(animationListId)}.`);
         if (String(listDraft.id) === String(animationListId)) {
           resetListDraft();
@@ -161,7 +192,7 @@ export function useProjectionAnimationController(
         setActionLoading(false);
       }
     },
-    [listDraft.id, refresh, resetListDraft, services],
+    [client, listDraft.id, refresh, resetListDraft],
   );
 
   const editAnimationList = useCallback((animationList: JsonRecord) => {

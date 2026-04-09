@@ -42,9 +42,15 @@ test('mobile modules cover local-first overview, devices, media, and operations 
   assert.deepEqual(projection?.endpoints, ['/api/projection/animations', '/api/projection/animation-lists']);
   assert.deepEqual(overlay?.endpoints, ['/api/overlay/configs', '/api/overlay/cast/sessions', '/api/overlay/export']);
   assert.deepEqual(logs?.endpoints, ['/api/logs', '/api/logs/sources', '/api/logs/tail']);
+  assert.match(lighting?.description ?? '', /remote-only/i);
+  assert.match(lighting?.description ?? '', /FastAPI/i);
+  assert.match(depth?.description ?? '', /remote-only/i);
 });
 
 test('product area inventory still acknowledges diagnostics and deferred advanced workflows', () => {
+  const lighting = currentProductAreas.find((area) => area.title === 'Structured lighting');
+  const depth = currentProductAreas.find((area) => area.title === 'Depth processing');
+
   assert.ok(
     currentProductAreas.some((area) => area.endpoints.includes('local://health')),
     'expected diagnostics coverage via local health',
@@ -77,4 +83,8 @@ test('product area inventory still acknowledges diagnostics and deferred advance
     currentProductAreas.some((area) => area.endpoints.includes('/api/logs')),
     'expected log-viewer coverage',
   );
+  assert.match(lighting?.description ?? '', /remote-only/i);
+  assert.match(lighting?.description ?? '', /deferred/i);
+  assert.match(depth?.description ?? '', /remote-only/i);
+  assert.match(depth?.description ?? '', /deferred/i);
 });

@@ -1,4 +1,5 @@
 import { NanoDlnaApiClient, normalizeApiBaseUrl } from '../services/api.ts';
+import type { QueryRecord } from '../services/httpClient.ts';
 import type {
   ActionHistoryEntry,
   DeviceActionResponse,
@@ -86,6 +87,34 @@ export interface ControlPlaneClient {
   listMediaLists(): Promise<MediaListSummary[]>;
   listMediaChannels(): Promise<MediaChannelSummary[]>;
   advanceMediaChannel(channelId: number | string): Promise<MediaChannelSummary>;
+  listPhotoLists(): Promise<JsonRecord[]>;
+  createMediaList(payload: JsonRecord): Promise<JsonRecord>;
+  createMediaChannel(payload: JsonRecord): Promise<JsonRecord>;
+  deleteMediaList(listId: number | string): Promise<JsonRecord>;
+  deleteMediaChannel(channelId: number | string): Promise<JsonRecord>;
+  createVideo(payload: JsonRecord): Promise<JsonRecord>;
+  deleteVideo(videoId: number | string): Promise<JsonRecord>;
+  uploadVideo(formData: FormData): Promise<JsonRecord>;
+  createPhoto(payload: JsonRecord): Promise<JsonRecord>;
+  deletePhoto(photoId: number | string): Promise<JsonRecord>;
+  uploadPhoto(formData: FormData): Promise<JsonRecord>;
+  createMediaDirectory(payload: JsonRecord): Promise<JsonRecord>;
+  deleteMediaDirectory(directoryId: number | string): Promise<JsonRecord>;
+  createPhotoList(payload: JsonRecord): Promise<JsonRecord>;
+  deletePhotoList(listId: number | string): Promise<JsonRecord>;
+  getGlobalApiConfigs(): Promise<JsonRecord>;
+  updateGlobalApiConfigs(payload: JsonRecord): Promise<JsonRecord>;
+  getProjectorRedirectConfig(): Promise<JsonRecord>;
+  updateProjectorRedirectConfig(payload: JsonRecord): Promise<JsonRecord>;
+  getRecentProjectorRedirectRequests(limit?: number): Promise<JsonRecord[]>;
+  getServiceDiagnostics(params?: QueryRecord): Promise<JsonRecord>;
+  getIncidentDetail(incidentId: string, params?: QueryRecord): Promise<JsonRecord>;
+  getLogs(params?: QueryRecord): Promise<JsonRecord>;
+  getLogSources(): Promise<JsonRecord>;
+  getLogLevels(): Promise<JsonRecord>;
+  getLogStats(): Promise<JsonRecord>;
+  tailLogSource(source: string, lines?: number): Promise<JsonRecord>;
+  exportLogs(format: string, params?: QueryRecord): Promise<Blob>;
   getStreamingAnalytics(): Promise<StreamingAnalytics>;
   listStreamingSessions(): Promise<StreamingSessionSummary[]>;
   getStreamingHealth(): Promise<StreamingHealthResponse>;
@@ -101,6 +130,12 @@ export interface ControlPlaneClient {
   listAirPlayDevices(): Promise<JsonRecord>;
   getAllAirPlayDevices(): Promise<JsonRecord>;
   listOverlayConfigs(): Promise<OverlayConfigSummary[]>;
+  createOverlayConfig(payload: JsonRecord): Promise<JsonRecord>;
+  deleteOverlayConfig(configId: number | string): Promise<JsonRecord>;
+  getOverlayBrightness(): Promise<JsonRecord>;
+  setOverlayBrightness(brightness: number): Promise<JsonRecord>;
+  exportOverlayMp4(payload: JsonRecord): Promise<Blob>;
+  startOverlayCast(payload: JsonRecord): Promise<JsonRecord>;
   listRendererScenes(): Promise<RendererSceneSummary[]>;
   startRenderer(projector: string, scene: string): Promise<RendererActionResponse>;
   startProjector(projectorId: string): Promise<RendererActionResponse>;
@@ -117,6 +152,42 @@ export interface ControlPlaneClient {
   listProjectionConfigs(): Promise<ProjectionConfigSummary[]>;
   launchProjectionConfig(configId: number | string): Promise<ProjectionSessionSummary>;
   getProjectionSession(sessionId: string): Promise<ProjectionSessionSummary>;
+  listProjectionAnimations(): Promise<JsonRecord>;
+  listProjectionAnimationLists(): Promise<JsonRecord[]>;
+  getProjectionAnimationList(id: number | string): Promise<JsonRecord>;
+  createProjectionAnimationList(data: JsonRecord): Promise<JsonRecord>;
+  updateProjectionAnimationList(id: number | string, data: JsonRecord): Promise<JsonRecord>;
+  deleteProjectionAnimationList(id: number | string): Promise<JsonRecord>;
+  getStructuredLightingCapabilities(): Promise<JsonRecord>;
+  getStructuredLightingStatus(): Promise<JsonRecord>;
+  listStructuredLightingSessions(): Promise<JsonRecord[]>;
+  createStructuredLightingSession(payload: JsonRecord): Promise<JsonRecord>;
+  deleteStructuredLightingSession(sessionId: string): Promise<JsonRecord>;
+  getStructuredLightingRuntime(sessionId: string): Promise<JsonRecord>;
+  listStructuredLightingCaptures(sessionId: string): Promise<JsonRecord[]>;
+  startStructuredLightingSession(sessionId: string): Promise<JsonRecord>;
+  uploadDepthMap(formData: FormData): Promise<JsonRecord>;
+  getDepthPreviewUrl(depthId: number | string): string;
+  segmentDepthMap(depthId: number | string, segmentationParams: JsonRecord): Promise<JsonRecord>;
+  getDepthSegmentationPreviewUrl(depthId: number | string, alpha?: number): string;
+  exportDepthMasks(
+    depthId: number | string,
+    segmentIds: Array<number | string>,
+    cleanMask?: boolean,
+    minArea?: number,
+    kernelSize?: number,
+  ): Promise<JsonRecord>;
+  deleteDepthMap(depthId: number | string): Promise<JsonRecord>;
+  getDepthMaskUrl(
+    depthId: number | string,
+    segmentId: number | string,
+    clean?: boolean,
+    minArea?: number,
+    kernelSize?: number,
+  ): string;
+  createDepthProjection(config: JsonRecord): Promise<JsonRecord>;
+  getDepthProjectionUrl(configId: number | string): string;
+  deleteDepthProjection(configId: number | string): Promise<JsonRecord>;
   listActionHistory(): Promise<ActionHistoryEntry[]>;
   listCapabilities(): Promise<LocalCapabilitySummary[]>;
   listDeferredFeatures(): Promise<DeferredFeatureSummary[]>;
@@ -159,6 +230,34 @@ class RemoteControlPlaneAdapter implements ControlPlaneClient {
   listMediaLists() { return this.client.listMediaLists(); }
   listMediaChannels() { return this.client.listMediaChannels(); }
   advanceMediaChannel(channelId: number | string) { return this.client.advanceMediaChannel(channelId); }
+  listPhotoLists() { return this.client.listPhotoLists(); }
+  createMediaList(payload: JsonRecord) { return this.client.createMediaList(payload); }
+  createMediaChannel(payload: JsonRecord) { return this.client.createMediaChannel(payload); }
+  deleteMediaList(listId: number | string) { return this.client.deleteMediaList(listId); }
+  deleteMediaChannel(channelId: number | string) { return this.client.deleteMediaChannel(channelId); }
+  createVideo(payload: JsonRecord) { return this.client.createVideo(payload); }
+  deleteVideo(videoId: number | string) { return this.client.deleteVideo(videoId); }
+  uploadVideo(formData: FormData) { return this.client.uploadVideo(formData); }
+  createPhoto(payload: JsonRecord) { return this.client.createPhoto(payload); }
+  deletePhoto(photoId: number | string) { return this.client.deletePhoto(photoId); }
+  uploadPhoto(formData: FormData) { return this.client.uploadPhoto(formData); }
+  createMediaDirectory(payload: JsonRecord) { return this.client.createMediaDirectory(payload); }
+  deleteMediaDirectory(directoryId: number | string) { return this.client.deleteMediaDirectory(directoryId); }
+  createPhotoList(payload: JsonRecord) { return this.client.createPhotoList(payload); }
+  deletePhotoList(listId: number | string) { return this.client.deletePhotoList(listId); }
+  getGlobalApiConfigs() { return this.client.getGlobalApiConfigs(); }
+  updateGlobalApiConfigs(payload: JsonRecord) { return this.client.updateGlobalApiConfigs(payload); }
+  getProjectorRedirectConfig() { return this.client.getProjectorRedirectConfig(); }
+  updateProjectorRedirectConfig(payload: JsonRecord) { return this.client.updateProjectorRedirectConfig(payload); }
+  getRecentProjectorRedirectRequests(limit?: number) { return this.client.getRecentProjectorRedirectRequests(limit); }
+  getServiceDiagnostics(params?: QueryRecord) { return this.client.getServiceDiagnostics(params); }
+  getIncidentDetail(incidentId: string, params?: QueryRecord) { return this.client.getIncidentDetail(incidentId, params); }
+  getLogs(params?: QueryRecord) { return this.client.getLogs(params); }
+  getLogSources() { return this.client.getLogSources(); }
+  getLogLevels() { return this.client.getLogLevels(); }
+  getLogStats() { return this.client.getLogStats(); }
+  tailLogSource(source: string, lines?: number) { return this.client.tailLogSource(source, lines); }
+  exportLogs(format: string, params?: QueryRecord) { return this.client.exportLogs(format, params); }
   getStreamingAnalytics() { return this.client.getStreamingAnalytics(); }
   listStreamingSessions() { return this.client.listStreamingSessions(); }
   getStreamingHealth() { return this.client.getStreamingHealth(); }
@@ -174,6 +273,12 @@ class RemoteControlPlaneAdapter implements ControlPlaneClient {
   listAirPlayDevices() { return this.client.listAirPlayDevices(); }
   getAllAirPlayDevices() { return this.client.getAllAirPlayDevices(); }
   listOverlayConfigs() { return this.client.listOverlayConfigs(); }
+  createOverlayConfig(payload: JsonRecord) { return this.client.createOverlayConfig(payload); }
+  deleteOverlayConfig(configId: number | string) { return this.client.deleteOverlayConfig(configId); }
+  getOverlayBrightness() { return this.client.getOverlayBrightness(); }
+  setOverlayBrightness(brightness: number) { return this.client.setOverlayBrightness(brightness); }
+  exportOverlayMp4(payload: JsonRecord) { return this.client.exportOverlayMp4(payload); }
+  startOverlayCast(payload: JsonRecord) { return this.client.startOverlayCast(payload); }
   listRendererScenes() { return this.client.listRendererScenes(); }
   startRenderer(projector: string, scene: string) { return this.client.startRenderer(projector, scene); }
   startProjector(projectorId: string) { return this.client.startProjector(projectorId); }
@@ -188,6 +293,62 @@ class RemoteControlPlaneAdapter implements ControlPlaneClient {
   listProjectionConfigs() { return this.client.listProjectionConfigs(); }
   launchProjectionConfig(configId: number | string) { return this.client.launchProjectionConfig(configId); }
   getProjectionSession(sessionId: string) { return this.client.getProjectionSession(sessionId); }
+  listProjectionAnimations() { return this.client.listProjectionAnimations(); }
+  listProjectionAnimationLists() { return this.client.listProjectionAnimationLists(); }
+  getProjectionAnimationList(id: number | string) { return this.client.getProjectionAnimationList(id); }
+  createProjectionAnimationList(data: JsonRecord) { return this.client.createProjectionAnimationList(data); }
+  updateProjectionAnimationList(id: number | string, data: JsonRecord) {
+    return this.client.updateProjectionAnimationList(id, data);
+  }
+  deleteProjectionAnimationList(id: number | string) { return this.client.deleteProjectionAnimationList(id); }
+  getStructuredLightingCapabilities() { return this.client.getStructuredLightingCapabilities(); }
+  getStructuredLightingStatus() { return this.client.getStructuredLightingStatus(); }
+  listStructuredLightingSessions() { return this.client.listStructuredLightingSessions(); }
+  createStructuredLightingSession(payload: JsonRecord) {
+    return this.client.createStructuredLightingSession(payload);
+  }
+  deleteStructuredLightingSession(sessionId: string) {
+    return this.client.deleteStructuredLightingSession(sessionId);
+  }
+  getStructuredLightingRuntime(sessionId: string) {
+    return this.client.getStructuredLightingRuntime(sessionId);
+  }
+  listStructuredLightingCaptures(sessionId: string) {
+    return this.client.listStructuredLightingCaptures(sessionId);
+  }
+  startStructuredLightingSession(sessionId: string) {
+    return this.client.startStructuredLightingSession(sessionId);
+  }
+  uploadDepthMap(formData: FormData) { return this.client.uploadDepthMap(formData); }
+  getDepthPreviewUrl(depthId: number | string) { return this.client.getDepthPreviewUrl(depthId); }
+  segmentDepthMap(depthId: number | string, segmentationParams: JsonRecord) {
+    return this.client.segmentDepthMap(depthId, segmentationParams);
+  }
+  getDepthSegmentationPreviewUrl(depthId: number | string, alpha?: number) {
+    return this.client.getDepthSegmentationPreviewUrl(depthId, alpha);
+  }
+  exportDepthMasks(
+    depthId: number | string,
+    segmentIds: Array<number | string>,
+    cleanMask?: boolean,
+    minArea?: number,
+    kernelSize?: number,
+  ) {
+    return this.client.exportDepthMasks(depthId, segmentIds, cleanMask, minArea, kernelSize);
+  }
+  deleteDepthMap(depthId: number | string) { return this.client.deleteDepthMap(depthId); }
+  getDepthMaskUrl(
+    depthId: number | string,
+    segmentId: number | string,
+    clean?: boolean,
+    minArea?: number,
+    kernelSize?: number,
+  ) {
+    return this.client.getDepthMaskUrl(depthId, segmentId, clean, minArea, kernelSize);
+  }
+  createDepthProjection(config: JsonRecord) { return this.client.createDepthProjection(config); }
+  getDepthProjectionUrl(configId: number | string) { return this.client.getDepthProjectionUrl(configId); }
+  deleteDepthProjection(configId: number | string) { return this.client.deleteDepthProjection(configId); }
   async listActionHistory(): Promise<ActionHistoryEntry[]> {
     return [
       {
@@ -225,6 +386,35 @@ class LocalControlPlaneClient implements ControlPlaneClient {
   readonly mode: AppMode = 'local';
   readonly apiBaseUrl = 'local://control-plane';
   readonly rootBaseUrl = 'local://control-plane';
+
+  private buildLocalFeatureUrl(path: string, query?: QueryRecord): string {
+    const search = new URLSearchParams();
+
+    for (const [key, rawValue] of Object.entries(query ?? {})) {
+      if (rawValue === undefined || rawValue === null) {
+        continue;
+      }
+
+      const values = Array.isArray(rawValue) ? rawValue : [rawValue];
+      for (const value of values) {
+        search.append(key, String(value));
+      }
+    }
+
+    const queryString = search.toString();
+    return `${this.rootBaseUrl}${path}${queryString ? `?${queryString}` : ''}`;
+  }
+
+  private async recordDeferredFeature(title: string, detail: string): Promise<void> {
+    await updateLocalControlPlaneState((state) =>
+      appendActionHistory(state, {
+        title,
+        detail,
+        status: 'deferred',
+        mode: 'local',
+      }),
+    );
+  }
 
   private async getLocalWritableDevice(deviceId: number | string) {
     const state = await loadLocalControlPlaneState();
@@ -714,6 +904,382 @@ class LocalControlPlaneClient implements ControlPlaneClient {
     };
   }
 
+  async listPhotoLists(): Promise<JsonRecord[]> {
+    const state = await loadLocalControlPlaneState();
+    return state.photoLists;
+  }
+
+  async createMediaList(payload: JsonRecord): Promise<JsonRecord> {
+    let created: JsonRecord = {};
+    await updateLocalControlPlaneState((state) => {
+      created = {
+        id: payload.id ?? `list-${state.lists.length + 1}`,
+        name: payload.name ?? `Local list ${state.lists.length + 1}`,
+        category: payload.category ?? 'local',
+        playback_mode: payload.playback_mode ?? 'manual',
+        ...payload,
+      };
+      state.lists = [...state.lists, created as MediaListSummary];
+      return appendActionHistory(state, {
+        title: 'Saved local media list',
+        detail: `Saved media list ${String(created.name ?? created.id)} in local mode.`,
+        status: 'ok',
+        mode: 'local',
+      });
+    });
+    return created;
+  }
+
+  async createMediaChannel(payload: JsonRecord): Promise<JsonRecord> {
+    let created: JsonRecord = {};
+    await updateLocalControlPlaneState((state) => {
+      created = {
+        id: payload.id ?? `channel-${state.channels.length + 1}`,
+        name: payload.name ?? `Local channel ${state.channels.length + 1}`,
+        media_list_id: payload.media_list_id ?? state.lists[0]?.id ?? '',
+        current_video_id: payload.current_video_id ?? state.videos[0]?.id ?? null,
+        current_index: payload.current_index ?? 0,
+        ...payload,
+      };
+      state.channels = [...state.channels, created as MediaChannelSummary];
+      return appendActionHistory(state, {
+        title: 'Saved local media channel',
+        detail: `Saved media channel ${String(created.name ?? created.id)} in local mode.`,
+        status: 'ok',
+        mode: 'local',
+      });
+    });
+    return created;
+  }
+
+  async deleteMediaList(listId: number | string): Promise<JsonRecord> {
+    await updateLocalControlPlaneState((state) => {
+      state.lists = state.lists.filter((list) => String(list.id) !== String(listId));
+      state.channels = state.channels.filter(
+        (channel) => String(channel.media_list_id) !== String(listId),
+      );
+      return appendActionHistory(state, {
+        title: 'Deleted local media list',
+        detail: `Deleted media list ${String(listId)} in local mode.`,
+        status: 'info',
+        mode: 'local',
+      });
+    });
+    return { success: true, message: `Deleted media list ${String(listId)} locally.` };
+  }
+
+  async deleteMediaChannel(channelId: number | string): Promise<JsonRecord> {
+    await updateLocalControlPlaneState((state) => {
+      state.channels = state.channels.filter((channel) => String(channel.id) !== String(channelId));
+      return appendActionHistory(state, {
+        title: 'Deleted local media channel',
+        detail: `Deleted media channel ${String(channelId)} in local mode.`,
+        status: 'info',
+        mode: 'local',
+      });
+    });
+    return { success: true, message: `Deleted media channel ${String(channelId)} locally.` };
+  }
+
+  async createVideo(payload: JsonRecord): Promise<JsonRecord> {
+    let created: JsonRecord = {};
+    await updateLocalControlPlaneState((state) => {
+      created = {
+        id: payload.id ?? `video-${state.videos.length + 1}`,
+        title: payload.title ?? payload.name ?? `Local video ${state.videos.length + 1}`,
+        file_path: payload.file_path ?? payload.path ?? `local://media/video-${state.videos.length + 1}.mp4`,
+        ...payload,
+      };
+      state.videos = [...state.videos, created as VideoSummary];
+      return appendActionHistory(state, {
+        title: 'Saved local video',
+        detail: `Saved video ${String(created.title ?? created.id)} in local mode.`,
+        status: 'ok',
+        mode: 'local',
+      });
+    });
+    return created;
+  }
+
+  async deleteVideo(videoId: number | string): Promise<JsonRecord> {
+    await updateLocalControlPlaneState((state) => {
+      state.videos = state.videos.filter((video) => String(video.id) !== String(videoId));
+      state.channels = state.channels.map((channel) =>
+        String(channel.current_video_id) === String(videoId)
+          ? { ...channel, current_video_id: null }
+          : channel,
+      );
+      state.devices = state.devices.map((device) =>
+        String(device.current_video) === String(videoId)
+          ? {
+              ...device,
+              current_video: undefined,
+              current_media_title: 'Video removed',
+              playback_state: 'stopped',
+              is_playing: false,
+            }
+          : device,
+      );
+      state.sessions = state.sessions.filter(
+        (session) => String(session.consumer_id) !== `local-consumer-${String(videoId)}`,
+      );
+      return appendActionHistory(state, {
+        title: 'Deleted local video',
+        detail: `Deleted video ${String(videoId)} in local mode.`,
+        status: 'info',
+        mode: 'local',
+      });
+    });
+    return { success: true, message: `Deleted video ${String(videoId)} locally.` };
+  }
+
+  async uploadVideo(_formData: FormData): Promise<JsonRecord> {
+    await updateLocalControlPlaneState((state) =>
+      appendActionHistory(state, {
+        title: 'Deferred local video upload',
+        detail: 'File uploads remain remote-only until a native/mobile-safe ingest flow is approved.',
+        status: 'deferred',
+        mode: 'local',
+      }),
+    );
+    return makeDeferredResult(
+      'Video upload is remote-only until a native/mobile-safe ingest flow is approved.',
+    );
+  }
+
+  async createPhoto(payload: JsonRecord): Promise<JsonRecord> {
+    let created: JsonRecord = {};
+    await updateLocalControlPlaneState((state) => {
+      created = {
+        id: payload.id ?? `photo-${state.photos.length + 1}`,
+        name: payload.name ?? payload.file_name ?? `Local photo ${state.photos.length + 1}`,
+        path: payload.path ?? `local://media/photo-${state.photos.length + 1}.png`,
+        category: payload.category ?? 'reference',
+        ...payload,
+      };
+      state.photos = [...state.photos, created as PhotoSummary];
+      return appendActionHistory(state, {
+        title: 'Saved local photo',
+        detail: `Saved photo ${String(created.name ?? created.id)} in local mode.`,
+        status: 'ok',
+        mode: 'local',
+      });
+    });
+    return created;
+  }
+
+  async deletePhoto(photoId: number | string): Promise<JsonRecord> {
+    await updateLocalControlPlaneState((state) => {
+      state.photos = state.photos.filter((photo) => String(photo.id) !== String(photoId));
+      state.photoLists = state.photoLists.map((list) => {
+        const photoIds = Array.isArray(list.photo_ids)
+          ? list.photo_ids.filter((entry) => String(entry) !== String(photoId))
+          : list.photo_ids;
+        return { ...list, photo_ids: photoIds };
+      });
+      return appendActionHistory(state, {
+        title: 'Deleted local photo',
+        detail: `Deleted photo ${String(photoId)} in local mode.`,
+        status: 'info',
+        mode: 'local',
+      });
+    });
+    return { success: true, message: `Deleted photo ${String(photoId)} locally.` };
+  }
+
+  async uploadPhoto(_formData: FormData): Promise<JsonRecord> {
+    await updateLocalControlPlaneState((state) =>
+      appendActionHistory(state, {
+        title: 'Deferred local photo upload',
+        detail: 'Photo uploads remain remote-only until a native/mobile-safe ingest flow is approved.',
+        status: 'deferred',
+        mode: 'local',
+      }),
+    );
+    return makeDeferredResult(
+      'Photo upload is remote-only until a native/mobile-safe ingest flow is approved.',
+    );
+  }
+
+  async createMediaDirectory(payload: JsonRecord): Promise<JsonRecord> {
+    let created: JsonRecord = {};
+    await updateLocalControlPlaneState((state) => {
+      created = {
+        id: payload.id ?? `dir-${state.directories.length + 1}`,
+        name: payload.name ?? `Local dir ${state.directories.length + 1}`,
+        path: payload.path ?? `local://media/local-dir-${state.directories.length + 1}`,
+        category: payload.category ?? 'local',
+        enabled: payload.enabled ?? true,
+        scan_mode: payload.scan_mode ?? 'on-demand',
+        ...payload,
+      };
+      state.directories = [...state.directories, created as MediaDirectorySummary];
+      return appendActionHistory(state, {
+        title: 'Saved local directory',
+        detail: `Saved media directory ${String(created.name ?? created.id)} in local mode.`,
+        status: 'ok',
+        mode: 'local',
+      });
+    });
+    return created;
+  }
+
+  async deleteMediaDirectory(directoryId: number | string): Promise<JsonRecord> {
+    await updateLocalControlPlaneState((state) => {
+      state.directories = state.directories.filter(
+        (directory) => String(directory.id) !== String(directoryId),
+      );
+      return appendActionHistory(state, {
+        title: 'Deleted local directory',
+        detail: `Deleted media directory ${String(directoryId)} in local mode.`,
+        status: 'info',
+        mode: 'local',
+      });
+    });
+    return { success: true, message: `Deleted media directory ${String(directoryId)} locally.` };
+  }
+
+  async createPhotoList(payload: JsonRecord): Promise<JsonRecord> {
+    let created: JsonRecord = {};
+    await updateLocalControlPlaneState((state) => {
+      created = {
+        id: payload.id ?? `photo-list-${state.photoLists.length + 1}`,
+        name: payload.name ?? `Local photo list ${state.photoLists.length + 1}`,
+        photo_ids: Array.isArray(payload.photo_ids) ? payload.photo_ids : [],
+        ...payload,
+      };
+      state.photoLists = [...state.photoLists, created];
+      return appendActionHistory(state, {
+        title: 'Saved local photo list',
+        detail: `Saved photo list ${String(created.name ?? created.id)} in local mode.`,
+        status: 'ok',
+        mode: 'local',
+      });
+    });
+    return created;
+  }
+
+  async deletePhotoList(listId: number | string): Promise<JsonRecord> {
+    await updateLocalControlPlaneState((state) => {
+      state.photoLists = state.photoLists.filter((list) => String(list.id) !== String(listId));
+      return appendActionHistory(state, {
+        title: 'Deleted local photo list',
+        detail: `Deleted photo list ${String(listId)} in local mode.`,
+        status: 'info',
+        mode: 'local',
+      });
+    });
+    return { success: true, message: `Deleted photo list ${String(listId)} locally.` };
+  }
+
+  async getGlobalApiConfigs(): Promise<JsonRecord> {
+    return {};
+  }
+
+  async updateGlobalApiConfigs(_payload: JsonRecord): Promise<JsonRecord> {
+    await updateLocalControlPlaneState((state) =>
+      appendActionHistory(state, {
+        title: 'Deferred backend settings save',
+        detail: 'Backend-owned global API configs remain explicit remote-only settings.',
+        status: 'deferred',
+        mode: 'local',
+      }),
+    );
+    return makeDeferredResult('Global API configs remain remote-only in this slice.');
+  }
+
+  async getProjectorRedirectConfig(): Promise<JsonRecord> {
+    return {
+      enabled: false,
+      client_ip: '',
+      target_path: '',
+      rules: [],
+    };
+  }
+
+  async updateProjectorRedirectConfig(_payload: JsonRecord): Promise<JsonRecord> {
+    await updateLocalControlPlaneState((state) =>
+      appendActionHistory(state, {
+        title: 'Deferred projector redirect save',
+        detail: 'Projector redirect rules remain backend-owned in remote mode.',
+        status: 'deferred',
+        mode: 'local',
+      }),
+    );
+    return makeDeferredResult('Projector redirect settings remain remote-only in this slice.');
+  }
+
+  async getRecentProjectorRedirectRequests(): Promise<JsonRecord[]> {
+    return [];
+  }
+
+  async getServiceDiagnostics(_params?: QueryRecord): Promise<JsonRecord> {
+    return {
+      current_run: {
+        status: 'local-only',
+        uptime_seconds: 0,
+      },
+      recent_incidents: [],
+      supervisor_events: [],
+    };
+  }
+
+  async getIncidentDetail(incidentId: string, _params?: QueryRecord): Promise<JsonRecord> {
+    return {
+      incident: {
+        incident_id: incidentId,
+        status: 'local-only',
+        detail: 'Incident detail is only available in remote mode.',
+      },
+      related_logs: [],
+    };
+  }
+
+  async getLogs(_params?: QueryRecord): Promise<JsonRecord> {
+    return {
+      logs: [],
+      total: 0,
+    };
+  }
+
+  async getLogSources(): Promise<JsonRecord> {
+    return {
+      sources: [],
+    };
+  }
+
+  async getLogLevels(): Promise<JsonRecord> {
+    return {
+      levels: [],
+    };
+  }
+
+  async getLogStats(): Promise<JsonRecord> {
+    return {
+      total_logs: 0,
+      recent_logs_1h: 0,
+      active_websockets: 0,
+    };
+  }
+
+  async tailLogSource(source: string, lines = 100): Promise<JsonRecord> {
+    return {
+      source,
+      lines,
+      entries: [],
+    };
+  }
+
+  async exportLogs(_format: string, _params?: QueryRecord): Promise<Blob> {
+    await this.recordDeferredFeature(
+      'Logs export deferred',
+      'Aggregated backend log export remains explicit remote-only in local mode.',
+    );
+    return new Blob([JSON.stringify(makeDeferredResult('Logs export remains remote-only in local mode.'))], {
+      type: 'application/json',
+    });
+  }
+
   async getStreamingAnalytics(): Promise<StreamingAnalytics> {
     const state = await loadLocalControlPlaneState();
     return {
@@ -840,7 +1406,81 @@ class LocalControlPlaneClient implements ControlPlaneClient {
   }
 
   async listOverlayConfigs(): Promise<OverlayConfigSummary[]> {
-    return [];
+    const state = await loadLocalControlPlaneState();
+    return state.overlayConfigs;
+  }
+
+  async createOverlayConfig(payload: JsonRecord): Promise<JsonRecord> {
+    let created: JsonRecord = {};
+    await updateLocalControlPlaneState((state) => {
+      created = {
+        id: payload.id ?? `overlay-${state.overlayConfigs.length + 1}`,
+        name: payload.name ?? `Local overlay ${state.overlayConfigs.length + 1}`,
+        ...payload,
+      };
+      state.overlayConfigs = [...state.overlayConfigs, created as OverlayConfigSummary];
+      return appendActionHistory(state, {
+        title: 'Saved local overlay config',
+        detail: `Saved overlay config ${String(created.name ?? created.id)} in local mode.`,
+        status: 'ok',
+        mode: 'local',
+      });
+    });
+    return created;
+  }
+
+  async deleteOverlayConfig(configId: number | string): Promise<JsonRecord> {
+    await updateLocalControlPlaneState((state) => {
+      state.overlayConfigs = state.overlayConfigs.filter(
+        (config) => String(config.id) !== String(configId),
+      );
+      return appendActionHistory(state, {
+        title: 'Deleted local overlay config',
+        detail: `Deleted overlay config ${String(configId)} in local mode.`,
+        status: 'info',
+        mode: 'local',
+      });
+    });
+    return { success: true, message: `Deleted overlay config ${String(configId)} locally.` };
+  }
+
+  async getOverlayBrightness(): Promise<JsonRecord> {
+    const state = await loadLocalControlPlaneState();
+    return {
+      brightness: state.overlayStatus.brightness ?? 0,
+    };
+  }
+
+  async setOverlayBrightness(brightness: number): Promise<JsonRecord> {
+    await updateLocalControlPlaneState((state) => {
+      state.overlayStatus = {
+        ...state.overlayStatus,
+        brightness,
+      };
+      return appendActionHistory(state, {
+        title: 'Updated local overlay brightness',
+        detail: `Overlay brightness set to ${String(brightness)} in local mode.`,
+        status: 'ok',
+        mode: 'local',
+      });
+    });
+    return { brightness };
+  }
+
+  async exportOverlayMp4(_payload: JsonRecord): Promise<Blob> {
+    await this.recordDeferredFeature(
+      'Overlay export deferred',
+      'Overlay MP4 export remains explicit remote-only in local mode.',
+    );
+    return new Blob([], { type: 'video/mp4' });
+  }
+
+  async startOverlayCast(payload: JsonRecord): Promise<JsonRecord> {
+    await this.recordDeferredFeature(
+      'Overlay cast deferred',
+      `Overlay cast for config ${String(payload.config_id ?? 'unknown')} remains remote-only in local mode.`,
+    );
+    return makeDeferredResult('Overlay casting remains remote-only in local mode.');
   }
 
   async listRendererScenes(): Promise<RendererSceneSummary[]> {
@@ -929,6 +1569,173 @@ class LocalControlPlaneClient implements ControlPlaneClient {
       status: 'deferred',
       zones: [],
     };
+  }
+
+  async listProjectionAnimations(): Promise<JsonRecord> {
+    return {
+      animations: [],
+    };
+  }
+
+  async listProjectionAnimationLists(): Promise<JsonRecord[]> {
+    return [];
+  }
+
+  async getProjectionAnimationList(id: number | string): Promise<JsonRecord> {
+    return {
+      id,
+      status: 'deferred',
+    };
+  }
+
+  async createProjectionAnimationList(_data: JsonRecord): Promise<JsonRecord> {
+    await this.recordDeferredFeature(
+      'Projection animation list deferred',
+      'Projection animation list management remains explicit remote-only in local mode.',
+    );
+    return makeDeferredResult('Projection animation list management remains remote-only in local mode.');
+  }
+
+  async updateProjectionAnimationList(_id: number | string, _data: JsonRecord): Promise<JsonRecord> {
+    await this.recordDeferredFeature(
+      'Projection animation update deferred',
+      'Projection animation list management remains explicit remote-only in local mode.',
+    );
+    return makeDeferredResult('Projection animation list management remains remote-only in local mode.');
+  }
+
+  async deleteProjectionAnimationList(id: number | string): Promise<JsonRecord> {
+    await this.recordDeferredFeature(
+      'Projection animation delete deferred',
+      `Projection animation list ${String(id)} remains remote-only in local mode.`,
+    );
+    return makeDeferredResult('Projection animation list management remains remote-only in local mode.');
+  }
+
+  async getStructuredLightingCapabilities(): Promise<JsonRecord> {
+    return makeDeferredResult('Structured lighting remains remote-only in local mode.');
+  }
+
+  async getStructuredLightingStatus(): Promise<JsonRecord> {
+    return makeDeferredResult('Structured lighting remains remote-only in local mode.');
+  }
+
+  async listStructuredLightingSessions(): Promise<JsonRecord[]> {
+    return [];
+  }
+
+  async createStructuredLightingSession(_payload: JsonRecord): Promise<JsonRecord> {
+    await this.recordDeferredFeature(
+      'Structured lighting deferred',
+      'Structured lighting session creation remains explicit remote-only in local mode.',
+    );
+    return makeDeferredResult('Structured lighting remains remote-only in local mode.');
+  }
+
+  async deleteStructuredLightingSession(sessionId: string): Promise<JsonRecord> {
+    await this.recordDeferredFeature(
+      'Structured lighting deferred',
+      `Structured lighting session ${sessionId} remains remote-only in local mode.`,
+    );
+    return makeDeferredResult('Structured lighting remains remote-only in local mode.');
+  }
+
+  async getStructuredLightingRuntime(sessionId: string): Promise<JsonRecord> {
+    return makeDeferredResult('Structured lighting runtime remains remote-only in local mode.', {
+      session_id: sessionId,
+    });
+  }
+
+  async listStructuredLightingCaptures(_sessionId: string): Promise<JsonRecord[]> {
+    return [];
+  }
+
+  async startStructuredLightingSession(sessionId: string): Promise<JsonRecord> {
+    await this.recordDeferredFeature(
+      'Structured lighting deferred',
+      `Structured lighting session ${sessionId} remains remote-only in local mode.`,
+    );
+    return makeDeferredResult('Structured lighting remains remote-only in local mode.');
+  }
+
+  async uploadDepthMap(_formData: FormData): Promise<JsonRecord> {
+    await this.recordDeferredFeature(
+      'Depth upload deferred',
+      'Depth processing remains explicit remote-only in local mode.',
+    );
+    return makeDeferredResult('Depth processing remains remote-only in local mode.');
+  }
+
+  getDepthPreviewUrl(depthId: number | string): string {
+    return this.buildLocalFeatureUrl(`/depth/preview/${depthId}`);
+  }
+
+  async segmentDepthMap(depthId: number | string, _segmentationParams: JsonRecord): Promise<JsonRecord> {
+    await this.recordDeferredFeature(
+      'Depth segmentation deferred',
+      `Depth map ${String(depthId)} segmentation remains remote-only in local mode.`,
+    );
+    return makeDeferredResult('Depth processing remains remote-only in local mode.');
+  }
+
+  getDepthSegmentationPreviewUrl(depthId: number | string, alpha = 0.5): string {
+    return this.buildLocalFeatureUrl(`/depth/segmentation_preview/${depthId}`, { alpha });
+  }
+
+  async exportDepthMasks(
+    depthId: number | string,
+    _segmentIds: Array<number | string>,
+    _cleanMask = true,
+    _minArea = 100,
+    _kernelSize = 3,
+  ): Promise<JsonRecord> {
+    await this.recordDeferredFeature(
+      'Depth mask export deferred',
+      `Depth mask export for ${String(depthId)} remains remote-only in local mode.`,
+    );
+    return makeDeferredResult('Depth processing remains remote-only in local mode.');
+  }
+
+  async deleteDepthMap(depthId: number | string): Promise<JsonRecord> {
+    await this.recordDeferredFeature(
+      'Depth delete deferred',
+      `Depth map ${String(depthId)} remains remote-only in local mode.`,
+    );
+    return makeDeferredResult('Depth processing remains remote-only in local mode.');
+  }
+
+  getDepthMaskUrl(
+    depthId: number | string,
+    segmentId: number | string,
+    clean = true,
+    minArea = 100,
+    kernelSize = 3,
+  ): string {
+    return this.buildLocalFeatureUrl(`/depth/mask/${depthId}/${segmentId}`, {
+      clean,
+      min_area: minArea,
+      kernel_size: kernelSize,
+    });
+  }
+
+  async createDepthProjection(_config: JsonRecord): Promise<JsonRecord> {
+    await this.recordDeferredFeature(
+      'Depth projection deferred',
+      'Depth projection creation remains explicit remote-only in local mode.',
+    );
+    return makeDeferredResult('Depth processing remains remote-only in local mode.');
+  }
+
+  getDepthProjectionUrl(configId: number | string): string {
+    return this.buildLocalFeatureUrl(`/depth/projection/${configId}`);
+  }
+
+  async deleteDepthProjection(configId: number | string): Promise<JsonRecord> {
+    await this.recordDeferredFeature(
+      'Depth projection deferred',
+      `Depth projection ${String(configId)} remains remote-only in local mode.`,
+    );
+    return makeDeferredResult('Depth processing remains remote-only in local mode.');
   }
 
   async listActionHistory(): Promise<ActionHistoryEntry[]> {

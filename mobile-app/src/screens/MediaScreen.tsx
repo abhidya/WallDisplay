@@ -105,7 +105,7 @@ export function MediaScreen({
     uploadPhoto,
     uploadVideo,
     videos,
-  } = useMediaController(client, { apiBaseUrl: client.apiBaseUrl, selectedDeviceId });
+  } = useMediaController(client, { selectedDeviceId });
 
   const metricCards = useMemo(
     () => [

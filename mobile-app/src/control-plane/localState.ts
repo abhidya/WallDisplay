@@ -54,6 +54,7 @@ export interface LocalControlPlaneState {
   devices: PersistedLocalDevice[];
   videos: VideoSummary[];
   photos: PhotoSummary[];
+  photoLists: JsonRecord[];
   directories: MediaDirectorySummary[];
   lists: MediaListSummary[];
   channels: MediaChannelSummary[];
@@ -177,6 +178,15 @@ const initialDirectories: MediaDirectorySummary[] = [
   },
 ];
 
+const initialPhotoLists: JsonRecord[] = [
+  {
+    id: 'photo-list-1',
+    name: 'Reference stills',
+    description: 'Seeded on-device photo list for local-first media browsing.',
+    photo_ids: ['photo-1'],
+  },
+];
+
 const initialLists: MediaListSummary[] = [
   {
     id: 'list-1',
@@ -297,6 +307,7 @@ function createInitialState(): LocalControlPlaneState {
     devices: initialDevices,
     videos: initialVideos,
     photos: initialPhotos,
+    photoLists: initialPhotoLists,
     directories: initialDirectories,
     lists: initialLists,
     channels: initialChannels,
@@ -355,6 +366,7 @@ function ensureStateShape(state: LocalControlPlaneState): LocalControlPlaneState
     devices: state.devices?.length ? state.devices : createInitialState().devices,
     videos: state.videos?.length ? state.videos : createInitialState().videos,
     photos: state.photos?.length ? state.photos : createInitialState().photos,
+    photoLists: state.photoLists?.length ? state.photoLists : createInitialState().photoLists,
     directories: state.directories?.length ? state.directories : createInitialState().directories,
     lists: state.lists?.length ? state.lists : createInitialState().lists,
     channels: state.channels?.length ? state.channels : createInitialState().channels,

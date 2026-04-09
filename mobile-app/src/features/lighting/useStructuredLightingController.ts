@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { createServiceModules } from '../../services/api.ts';
+import { createControlPlaneClient } from '../../control-plane/client.ts';
 import type { AppMode } from '../../control-plane/localState.ts';
+import {
+  createHttpClient,
+  normalizeApiBaseUrl,
+  type QueryRecord,
+} from '../../services/httpClient.ts';
 import type { JsonRecord } from '../../types/api.ts';
 
 function asRecord(value: unknown): JsonRecord | null {
@@ -51,6 +56,41 @@ interface UseStructuredLightingControllerOptions {
   appMode: AppMode;
 }
 
+export interface StructuredLightingRemoteClient {
+  createSession: (payload: JsonRecord) => Promise<JsonRecord>;
+  deleteSession: (sessionId: string) => Promise<JsonRecord>;
+  getCapabilities: () => Promise<JsonRecord>;
+  getRuntime: (sessionId: string) => Promise<JsonRecord>;
+  getStatus: () => Promise<JsonRecord>;
+  listCaptures: (sessionId: string) => Promise<JsonRecord[]>;
+  listProjectors: (params?: QueryRecord) => Promise<JsonRecord[]>;
+  listSessions: () => Promise<JsonRecord[]>;
+  startSession: (sessionId: string) => Promise<JsonRecord>;
+}
+
+export function createStructuredLightingRemoteClient(
+  apiBaseUrl: string,
+): StructuredLightingRemoteClient {
+  const seamClient = createControlPlaneClient('remote', apiBaseUrl);
+  const api = createHttpClient({
+    baseURL: normalizeApiBaseUrl(apiBaseUrl),
+    normalizeApiBase: false,
+  });
+
+  return {
+    createSession: (payload: JsonRecord) => seamClient.createStructuredLightingSession(payload),
+    deleteSession: (sessionId: string) => seamClient.deleteStructuredLightingSession(sessionId),
+    getCapabilities: () => seamClient.getStructuredLightingCapabilities(),
+    getRuntime: (sessionId: string) => seamClient.getStructuredLightingRuntime(sessionId),
+    getStatus: () => seamClient.getStructuredLightingStatus(),
+    listCaptures: (sessionId: string) => seamClient.listStructuredLightingCaptures(sessionId),
+    listProjectors: (params: QueryRecord = { casting_method: 'dlna' }) =>
+      api.get<JsonRecord[]>('/v2/discovery/devices', { query: params }),
+    listSessions: () => seamClient.listStructuredLightingSessions(),
+    startSession: (sessionId: string) => seamClient.startStructuredLightingSession(sessionId),
+  };
+}
+
 const defaultForm = {
   name: 'Wall Calibration',
   projector_device_id: '',
@@ -65,7 +105,10 @@ const defaultForm = {
 export function useStructuredLightingController(
   options: UseStructuredLightingControllerOptions,
 ): StructuredLightingController {
-  const services = useMemo(() => createServiceModules(options.apiBaseUrl), [options.apiBaseUrl]);
+  const client = useMemo(
+    () => createStructuredLightingRemoteClient(options.apiBaseUrl),
+    [options.apiBaseUrl],
+  );
   const [capabilities, setCapabilities] = useState<JsonRecord | null>(null);
   const [status, setStatus] = useState<JsonRecord | null>(null);
   const [sessions, setSessions] = useState<JsonRecord[]>([]);
@@ -95,10 +138,10 @@ export function useStructuredLightingController(
     try {
       const [capabilitiesPayload, statusPayload, sessionsPayload, projectorPayload] =
         await Promise.all([
-          services.structuredLightingApi.getCapabilities(),
-          services.structuredLightingApi.getStatus(),
-          services.structuredLightingApi.listSessions(),
-          services.discoveryV2Api.getDevices({ casting_method: 'dlna' }),
+          client.getCapabilities(),
+          client.getStatus(),
+          client.listSessions(),
+          client.listProjectors(),
         ]);
 
       const nextSessions = asArray(sessionsPayload);
@@ -127,7 +170,7 @@ export function useStructuredLightingController(
     } finally {
       setLoading(false);
     }
-  }, [options.appMode, services]);
+  }, [client, options.appMode]);
 
   const refreshSessionDetails = useCallback(async () => {
     if (options.appMode !== 'remote' || !selectedSessionId) {
@@ -138,8 +181,8 @@ export function useStructuredLightingController(
 
     try {
       const [runtimePayload, capturesPayload] = await Promise.all([
-        services.structuredLightingApi.getRuntime(selectedSessionId),
-        services.structuredLightingApi.listCaptures(selectedSessionId),
+        client.getRuntime(selectedSessionId),
+        client.listCaptures(selectedSessionId),
       ]);
       setRuntime(asRecord(runtimePayload));
       setCaptures(asArray(capturesPayload));
@@ -147,7 +190,7 @@ export function useStructuredLightingController(
       setRuntime(null);
       setCaptures([]);
     }
-  }, [options.appMode, selectedSessionId, services]);
+  }, [client, options.appMode, selectedSessionId]);
 
   useEffect(() => {
     void refresh();
@@ -184,7 +227,7 @@ export function useStructuredLightingController(
   const createSession = useCallback(async () => {
     await runAction(
       () =>
-        services.structuredLightingApi.createSession({
+        client.createSession({
           name: form.name,
           projector_device_id: form.projector_device_id,
           camera_index: Number(form.camera_index || 1),
@@ -196,27 +239,27 @@ export function useStructuredLightingController(
         }),
       'Structured lighting session created.',
     );
-  }, [form, runAction, services]);
+  }, [client, form, runAction]);
 
   const startSession = useCallback(
     async (sessionId: string) => {
       await runAction(
-        () => services.structuredLightingApi.startSession(sessionId),
+        () => client.startSession(sessionId),
         `Structured lighting session ${sessionId} started.`,
       );
     },
-    [runAction, services],
+    [client, runAction],
   );
 
   const deleteSession = useCallback(
     async (sessionId: string) => {
       await runAction(
-        () => services.structuredLightingApi.deleteSession(sessionId),
+        () => client.deleteSession(sessionId),
         `Structured lighting session ${sessionId} deleted.`,
       );
       setSelectedSessionId((current) => (current === sessionId ? '' : current));
     },
-    [runAction, services],
+    [client, runAction],
   );
 
   const updateForm = useCallback((key: string, value: string) => {

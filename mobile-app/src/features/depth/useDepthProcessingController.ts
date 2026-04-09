@@ -1,8 +1,9 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Platform } from 'react-native';
 
-import { createServiceModules } from '../../services/api.ts';
+import { createControlPlaneClient } from '../../control-plane/client.ts';
 import type { AppMode } from '../../control-plane/localState.ts';
+import { createHttpClient, normalizeApiBaseUrl } from '../../services/httpClient.ts';
 import type { JsonRecord } from '../../types/api.ts';
 import { buildSegmentationPayload } from './utils.ts';
 
@@ -62,10 +63,49 @@ interface UseDepthProcessingControllerOptions {
   appMode: AppMode;
 }
 
+export interface DepthRemoteClient {
+  createProjection: (payload: JsonRecord) => Promise<JsonRecord>;
+  deleteDepthMap: (depthId: string) => Promise<JsonRecord>;
+  exportMasks: (depthId: string, segmentIds: number[]) => Promise<Blob>;
+  previewDepthMap: (depthId: string) => string;
+  previewSegmentation: (depthId: string, alpha?: number) => string;
+  segmentDepthMap: (depthId: string, payload: JsonRecord) => Promise<JsonRecord>;
+  uploadDepthMap: (formData: FormData) => Promise<JsonRecord>;
+}
+
+export function createDepthRemoteClient(apiBaseUrl: string): DepthRemoteClient {
+  const seamClient = createControlPlaneClient('remote', apiBaseUrl);
+  const api = createHttpClient({
+    baseURL: normalizeApiBaseUrl(apiBaseUrl),
+    normalizeApiBase: false,
+  });
+
+  return {
+    createProjection: (payload: JsonRecord) => seamClient.createDepthProjection(payload),
+    deleteDepthMap: (depthId: string) => seamClient.deleteDepthMap(depthId),
+    exportMasks: (depthId: string, segmentIds: number[]) =>
+      api.post<Blob>(`/depth/export_masks/${depthId}`, {
+        body: {
+          segment_ids: segmentIds,
+          clean_mask: true,
+          min_area: 100,
+          kernel_size: 3,
+        },
+        parseAs: 'blob',
+      }),
+    previewDepthMap: (depthId: string) => seamClient.getDepthPreviewUrl(depthId),
+    previewSegmentation: (depthId: string, alpha = 0.5) =>
+      seamClient.getDepthSegmentationPreviewUrl(depthId, alpha),
+    segmentDepthMap: (depthId: string, payload: JsonRecord) =>
+      seamClient.segmentDepthMap(depthId, payload),
+    uploadDepthMap: (formData: FormData) => seamClient.uploadDepthMap(formData),
+  };
+}
+
 export function useDepthProcessingController(
   options: UseDepthProcessingControllerOptions,
 ): DepthProcessingController {
-  const services = useMemo(() => createServiceModules(options.apiBaseUrl), [options.apiBaseUrl]);
+  const client = useMemo(() => createDepthRemoteClient(options.apiBaseUrl), [options.apiBaseUrl]);
   const [currentDepthId, setCurrentDepthId] = useState<string | null>(null);
   const [segmentationMethod, setSegmentationMethod] = useState('kmeans');
   const [numClusters, setNumClusters] = useState('5');
@@ -81,10 +121,10 @@ export function useDepthProcessingController(
   const [error, setError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
-  const depthPreviewUrl = currentDepthId ? services.depthApi.previewDepthMap(currentDepthId) : null;
+  const depthPreviewUrl = currentDepthId ? client.previewDepthMap(currentDepthId) : null;
   const segmentationPreviewUrl =
     currentDepthId && segmentationResult
-      ? services.depthApi.previewSegmentation(currentDepthId, Number(overlayAlpha || 0.5))
+      ? client.previewSegmentation(currentDepthId, Number(overlayAlpha || 0.5))
       : null;
 
   const uploadDepthMap = useCallback(async () => {
@@ -111,7 +151,7 @@ export function useDepthProcessingController(
     setError(null);
     setActionMessage(null);
     try {
-      const response = await services.depthApi.uploadDepthMap(formData);
+      const response = await client.uploadDepthMap(formData);
       const record = asRecord(response);
       const depthId = record?.depth_id ? String(record.depth_id) : null;
       setCurrentDepthId(depthId);
@@ -129,7 +169,7 @@ export function useDepthProcessingController(
     } finally {
       setLoading(false);
     }
-  }, [options.appMode, services]);
+  }, [client, options.appMode]);
 
   const segmentDepthMap = useCallback(async () => {
     if (!currentDepthId) {
@@ -141,7 +181,7 @@ export function useDepthProcessingController(
     setError(null);
     setActionMessage(null);
     try {
-      const response = await services.depthApi.segmentDepthMap(
+      const response = await client.segmentDepthMap(
         currentDepthId,
         buildSegmentationPayload(segmentationMethod, numClusters, thresholds, numBands),
       );
@@ -161,7 +201,7 @@ export function useDepthProcessingController(
     } finally {
       setLoading(false);
     }
-  }, [currentDepthId, numBands, numClusters, segmentationMethod, services, thresholds]);
+  }, [client, currentDepthId, numBands, numClusters, segmentationMethod, thresholds]);
 
   const toggleSegment = useCallback((segmentId: number) => {
     setSelectedSegments((current) =>
@@ -181,15 +221,7 @@ export function useDepthProcessingController(
       try {
         setLoading(true);
         setError(null);
-        const blob = await services.api.post<Blob>(`/depth/export_masks/${currentDepthId}`, {
-          body: {
-            segment_ids: selectedSegments,
-            clean_mask: true,
-            min_area: 100,
-            kernel_size: 3,
-          },
-          parseAs: 'blob',
-        });
+        const blob = await client.exportMasks(currentDepthId, selectedSegments);
 
         if (typeof window !== 'undefined') {
           const objectUrl = URL.createObjectURL(blob);
@@ -202,7 +234,7 @@ export function useDepthProcessingController(
         setLoading(false);
       }
     })();
-  }, [currentDepthId, selectedSegments, services]);
+  }, [client, currentDepthId, selectedSegments]);
 
   const deleteDepthMap = useCallback(async () => {
     if (!currentDepthId) {
@@ -214,7 +246,7 @@ export function useDepthProcessingController(
     setError(null);
     setActionMessage(null);
     try {
-      await services.depthApi.deleteDepthMap(currentDepthId);
+      await client.deleteDepthMap(currentDepthId);
       setCurrentDepthId(null);
       setSegmentationResult(null);
       setSelectedSegments([]);
@@ -226,7 +258,7 @@ export function useDepthProcessingController(
     } finally {
       setLoading(false);
     }
-  }, [currentDepthId, services]);
+  }, [client, currentDepthId]);
 
   const createProjection = useCallback(async () => {
     if (!currentDepthId || selectedSegments.length === 0) {
@@ -238,7 +270,7 @@ export function useDepthProcessingController(
     setError(null);
     setActionMessage(null);
     try {
-      const response = await services.depthApi.createProjection({
+      const response = await client.createProjection({
         device_id: Number(projectionDeviceId || 1),
         depth_id: currentDepthId,
         surfaces: [
@@ -260,7 +292,7 @@ export function useDepthProcessingController(
     } finally {
       setLoading(false);
     }
-  }, [currentDepthId, projectionDeviceId, selectedSegments, services]);
+  }, [client, currentDepthId, projectionDeviceId, selectedSegments]);
 
   return {
     actionMessage,

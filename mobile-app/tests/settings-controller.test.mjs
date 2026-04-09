@@ -6,7 +6,7 @@ import {
   createRedirectRule,
   normalizeProjectorRedirectConfig,
   selectPreferredIncidentId,
-} from '../src/features/settings/useSettingsController.ts';
+} from '../src/features/settings/helpers.ts';
 
 test('normalizeProjectorRedirectConfig produces a safe editable rule set', () => {
   const normalized = normalizeProjectorRedirectConfig({

@@ -2,87 +2,16 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import type { ControlPlaneClient } from '../../control-plane/client.ts';
 import type { AppMode } from '../../control-plane/localState.ts';
-import { createServiceModules, normalizeApiBaseUrl } from '../../services/api.ts';
+import { normalizeApiBaseUrl } from '../../services/api.ts';
 import type { DiscoverySystemStatus, HealthResponse, JsonRecord } from '../../types/api';
-
-export interface ProjectorRedirectRule extends JsonRecord {
-  id: string;
-  name: string;
-  enabled: boolean;
-  client_ip: string;
-  target_path: string;
-}
-
-export interface ProjectorRedirectConfig extends JsonRecord {
-  enabled: boolean;
-  client_ip: string;
-  target_path: string;
-  rules: ProjectorRedirectRule[];
-}
-
-export const DEFAULT_PROJECTOR_REDIRECT_TARGET =
-  '/backend-static/overlay_window.html?config_id=5&controls=hidden';
-
-export function createRedirectRule(index = 1): ProjectorRedirectRule {
-  return {
-    id: `rule-${index}`,
-    name: `Projector ${index}`,
-    enabled: index === 1,
-    client_ip: '',
-    target_path: DEFAULT_PROJECTOR_REDIRECT_TARGET,
-  };
-}
-
-export function normalizeProjectorRedirectConfig(value: unknown): ProjectorRedirectConfig {
-  const record =
-    value && typeof value === 'object' && !Array.isArray(value)
-      ? (value as JsonRecord)
-      : {};
-  const rawRules = Array.isArray(record.rules) ? record.rules : [];
-  const rules = rawRules.length
-    ? rawRules.map((rule, index) => {
-        const nextRule =
-          rule && typeof rule === 'object' && !Array.isArray(rule) ? (rule as JsonRecord) : {};
-        return {
-          id: String(nextRule.id ?? `rule-${index + 1}`),
-          name: String(nextRule.name ?? `Projector ${index + 1}`),
-          enabled: Boolean(nextRule.enabled),
-          client_ip: String(nextRule.client_ip ?? ''),
-          target_path: String(nextRule.target_path ?? DEFAULT_PROJECTOR_REDIRECT_TARGET),
-        };
-      })
-    : [createRedirectRule()];
-
-  const activeRule = rules.find((rule) => rule.enabled) ?? rules[0];
-  return {
-    enabled: Boolean(record.enabled ?? activeRule?.enabled),
-    client_ip: String(record.client_ip ?? activeRule?.client_ip ?? ''),
-    target_path: String(record.target_path ?? activeRule?.target_path ?? DEFAULT_PROJECTOR_REDIRECT_TARGET),
-    rules,
-  };
-}
-
-export function selectPreferredIncidentId(
-  snapshot: JsonRecord | null,
-  currentIncidentId: string,
-  preserveSelection: boolean,
-): string {
-  const incidentIds = Array.isArray(snapshot?.recent_incidents)
-    ? snapshot.recent_incidents
-        .map((item) =>
-          item && typeof item === 'object' && !Array.isArray(item)
-            ? String((item as JsonRecord).incident_id ?? '')
-            : '',
-        )
-        .filter(Boolean)
-    : [];
-
-  if (preserveSelection && currentIncidentId && incidentIds.includes(currentIncidentId)) {
-    return currentIncidentId;
-  }
-
-  return incidentIds[0] ?? '';
-}
+import {
+  createRedirectRule,
+  DEFAULT_PROJECTOR_REDIRECT_TARGET,
+  normalizeProjectorRedirectConfig,
+  selectPreferredIncidentId,
+  type ProjectorRedirectConfig,
+  type ProjectorRedirectRule,
+} from './helpers.ts';
 
 function asRecord(value: unknown): JsonRecord | null {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -165,11 +94,6 @@ export function useSettingsController(
     setDraftValue(options.apiBaseUrl);
   }, [options.apiBaseUrl]);
 
-  const remoteServices = useMemo(
-    () => createServiceModules(options.apiBaseUrl),
-    [options.apiBaseUrl],
-  );
-
   const refreshConnection = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -219,10 +143,10 @@ export function useSettingsController(
           recentRequestsPayload,
           diagnosticsPayload,
         ] = await Promise.all([
-          remoteServices.overlayApi.getGlobalApiConfigs(),
-          remoteServices.overlayApi.getProjectorRedirectConfig(),
-          remoteServices.overlayApi.getRecentProjectorRedirectRequests(),
-          remoteServices.diagnosticsApi.getServiceDiagnostics({
+          client.getGlobalApiConfigs(),
+          client.getProjectorRedirectConfig(),
+          client.getRecentProjectorRedirectRequests(),
+          client.getServiceDiagnostics({
             incident_limit: 8,
             run_limit: 8,
             supervisor_limit: 8,
@@ -253,7 +177,7 @@ export function useSettingsController(
         setDiagnosticsLoading(false);
       }
     },
-    [options.appMode, remoteServices],
+    [client, options.appMode],
   );
 
   const saveRemoteAdmin = useCallback(async () => {
@@ -267,8 +191,8 @@ export function useSettingsController(
     setActionMessage(null);
     try {
       await Promise.all([
-        remoteServices.overlayApi.updateGlobalApiConfigs(globalApiConfigs),
-        remoteServices.overlayApi.updateProjectorRedirectConfig(projectorRedirect),
+        client.updateGlobalApiConfigs(globalApiConfigs),
+        client.updateProjectorRedirectConfig(projectorRedirect),
       ]);
       setActionMessage('Remote settings saved.');
       await refreshRemoteAdmin(true);
@@ -277,7 +201,7 @@ export function useSettingsController(
     } finally {
       setAdminLoading(false);
     }
-  }, [globalApiConfigs, options.appMode, projectorRedirect, refreshRemoteAdmin, remoteServices]);
+  }, [client, globalApiConfigs, options.appMode, projectorRedirect, refreshRemoteAdmin]);
 
   const updateGlobalApiConfig = useCallback((key: string, value: string) => {
     setGlobalApiConfigs((current) => ({
@@ -353,10 +277,9 @@ export function useSettingsController(
     void (async () => {
       setIncidentDetailLoading(true);
       try {
-        const detailPayload = await remoteServices.diagnosticsApi.getIncidentDetail(
-          selectedIncidentId,
-          { context_minutes: 3 },
-        );
+        const detailPayload = await client.getIncidentDetail(selectedIncidentId, {
+          context_minutes: 3,
+        });
         if (!cancelled) {
           setSelectedIncidentDetail(asRecord(detailPayload));
         }
@@ -374,7 +297,7 @@ export function useSettingsController(
     return () => {
       cancelled = true;
     };
-  }, [options.appMode, remoteServices, selectedIncidentId]);
+  }, [client, options.appMode, selectedIncidentId]);
 
   return useMemo(
     () => ({

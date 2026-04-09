@@ -32,13 +32,13 @@ export const currentProductAreas: FeatureCardData[] = [
   {
     title: 'Structured lighting',
     description:
-      'Backend worker/session orchestration for projector-camera calibration is now surfaced as a remote operator slice in mobile.',
+      'Backend worker/session orchestration for projector-camera calibration is surfaced as an explicit remote-only operator slice in mobile while local mode stays safely deferred.',
     endpoints: ['/api/structured-lighting', '/api/v2/discovery/devices', '/api/mappings'],
   },
   {
     title: 'Depth processing',
     description:
-      'Remote depth upload, segmentation, mask export, and projection creation are now available through the mobile operator app.',
+      'Remote-only depth upload, segmentation, mask export, and projection creation are available through the mobile operator app while local mode keeps the workflow deferred.',
     endpoints: ['/api/depth/upload', '/api/depth/segment', '/api/depth/projection/create'],
   },
   {
@@ -96,13 +96,13 @@ export const mobileModules: FeatureCardData[] = [
   {
     title: 'Structured lighting',
     description:
-      'Remote structured-lighting capability, session inventory, and runtime inspection backed by the existing FastAPI services.',
+      'Explicit remote-only structured-lighting capability, session inventory, and runtime inspection backed by the existing FastAPI services.',
     endpoints: ['/api/structured-lighting/status', '/api/structured-lighting/sessions', '/api/v2/discovery/devices'],
   },
   {
     title: 'Depth processing',
     description:
-      'Remote depth-processing parity for upload, segmentation previews, mask export, and projection creation.',
+      'Explicit remote-only depth-processing parity for upload, segmentation previews, mask export, and projection creation.',
     endpoints: ['/api/depth/upload', '/api/depth/segment', '/api/depth/projection/create'],
   },
   {

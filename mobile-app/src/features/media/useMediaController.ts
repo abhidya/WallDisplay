@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { type ControlPlaneClient } from '../../control-plane/client';
-import { createServiceModules } from '../../services/api.ts';
 import type {
   JsonRecord,
   MediaChannelSummary,
@@ -58,7 +57,6 @@ export interface MediaController {
 }
 
 interface UseMediaControllerOptions {
-  apiBaseUrl: string;
   selectedDeviceId: number | string | null;
 }
 
@@ -66,7 +64,6 @@ export function useMediaController(
   client: ControlPlaneClient,
   options: UseMediaControllerOptions,
 ): MediaController {
-  const services = useMemo(() => createServiceModules(options.apiBaseUrl), [options.apiBaseUrl]);
   const [actionLoadingKey, setActionLoadingKey] = useState<string | null>(null);
   const [videos, setVideos] = useState<VideoSummary[]>([]);
   const [photos, setPhotos] = useState<PhotoSummary[]>([]);
@@ -109,7 +106,7 @@ export function useMediaController(
         client.listMediaDirectories(),
         client.listMediaLists(),
         client.listMediaChannels(),
-        services.photoListApi.listPhotoLists(),
+        client.listPhotoLists(),
       ]);
 
       setVideos(videosPayload);
@@ -123,7 +120,7 @@ export function useMediaController(
     } finally {
       setLoading(false);
     }
-  }, [client, services]);
+  }, [client]);
 
   const playVideo = useCallback(
     async (videoId: number | string) => {
@@ -219,33 +216,33 @@ export function useMediaController(
     async (payload: JsonRecord) => {
       await runRemoteMutation(
         'create-media-list',
-        () => services.mediaLibraryApi.createMediaList(payload),
+        () => client.createMediaList(payload),
         'Media list saved.',
       );
     },
-    [runRemoteMutation, services],
+    [client, runRemoteMutation],
   );
 
   const createVideo = useCallback(
     async (payload: JsonRecord) => {
       await runRemoteMutation(
         'create-video',
-        () => services.videoApi.createVideo(payload),
+        () => client.createVideo(payload),
         'Video saved.',
       );
     },
-    [runRemoteMutation, services],
+    [client, runRemoteMutation],
   );
 
   const deleteVideo = useCallback(
     async (videoId: number | string) => {
       await runRemoteMutation(
         `delete-video-${String(videoId)}`,
-        () => services.videoApi.deleteVideo(videoId),
+        () => client.deleteVideo(videoId),
         `Deleted video ${String(videoId)}.`,
       );
     },
-    [runRemoteMutation, services],
+    [client, runRemoteMutation],
   );
 
   const uploadVideo = useCallback(async () => {
@@ -261,31 +258,31 @@ export function useMediaController(
 
     await runRemoteMutation(
       'upload-video',
-      () => services.videoApi.uploadVideo(formData),
+      () => client.uploadVideo(formData),
       `Uploaded video ${file.name}.`,
     );
-  }, [runRemoteMutation, services]);
+  }, [client, runRemoteMutation]);
 
   const createPhoto = useCallback(
     async (payload: JsonRecord) => {
       await runRemoteMutation(
         'create-photo',
-        () => services.photoApi.createPhoto(payload),
+        () => client.createPhoto(payload),
         'Photo saved.',
       );
     },
-    [runRemoteMutation, services],
+    [client, runRemoteMutation],
   );
 
   const deletePhoto = useCallback(
     async (photoId: number | string) => {
       await runRemoteMutation(
         `delete-photo-${String(photoId)}`,
-        () => services.photoApi.deletePhoto(photoId),
+        () => client.deletePhoto(photoId),
         `Deleted photo ${String(photoId)}.`,
       );
     },
-    [runRemoteMutation, services],
+    [client, runRemoteMutation],
   );
 
   const uploadPhoto = useCallback(async () => {
@@ -300,86 +297,86 @@ export function useMediaController(
 
     await runRemoteMutation(
       'upload-photo',
-      () => services.photoApi.uploadPhoto(formData),
+      () => client.uploadPhoto(formData),
       `Uploaded photo ${file.name}.`,
     );
-  }, [runRemoteMutation, services]);
+  }, [client, runRemoteMutation]);
 
   const createDirectory = useCallback(
     async (payload: JsonRecord) => {
       await runRemoteMutation(
         'create-directory',
-        () => services.mediaLibraryApi.createDirectory(payload),
+        () => client.createMediaDirectory(payload),
         'Media directory saved.',
       );
     },
-    [runRemoteMutation, services],
+    [client, runRemoteMutation],
   );
 
   const deleteDirectory = useCallback(
     async (directoryId: number | string) => {
       await runRemoteMutation(
         `delete-directory-${String(directoryId)}`,
-        () => services.mediaLibraryApi.deleteDirectory(directoryId),
+        () => client.deleteMediaDirectory(directoryId),
         `Deleted directory ${String(directoryId)}.`,
       );
     },
-    [runRemoteMutation, services],
+    [client, runRemoteMutation],
   );
 
   const createMediaChannel = useCallback(
     async (payload: JsonRecord) => {
       await runRemoteMutation(
         'create-media-channel',
-        () => services.mediaLibraryApi.createMediaChannel(payload),
+        () => client.createMediaChannel(payload),
         'Media channel saved.',
       );
     },
-    [runRemoteMutation, services],
+    [client, runRemoteMutation],
   );
 
   const deleteMediaList = useCallback(
     async (listId: number | string) => {
       await runRemoteMutation(
         `delete-media-list-${String(listId)}`,
-        () => services.mediaLibraryApi.deleteMediaList(listId),
+        () => client.deleteMediaList(listId),
         `Deleted media list ${String(listId)}.`,
       );
     },
-    [runRemoteMutation, services],
+    [client, runRemoteMutation],
   );
 
   const deleteMediaChannel = useCallback(
     async (channelId: number | string) => {
       await runRemoteMutation(
         `delete-media-channel-${String(channelId)}`,
-        () => services.mediaLibraryApi.deleteMediaChannel(channelId),
+        () => client.deleteMediaChannel(channelId),
         `Deleted media channel ${String(channelId)}.`,
       );
     },
-    [runRemoteMutation, services],
+    [client, runRemoteMutation],
   );
 
   const createPhotoList = useCallback(
     async (payload: JsonRecord) => {
       await runRemoteMutation(
         'create-photo-list',
-        () => services.photoListApi.createPhotoList(payload),
+        () => client.createPhotoList(payload),
         'Photo list saved.',
       );
     },
-    [runRemoteMutation, services],
+    [client, runRemoteMutation],
   );
 
   const deletePhotoList = useCallback(
     async (listId: number | string) => {
       await runRemoteMutation(
         `delete-photo-list-${String(listId)}`,
-        () => services.photoListApi.deletePhotoList(listId),
+        () => client.deletePhotoList(listId),
         `Deleted photo list ${String(listId)}.`,
       );
     },
-    [runRemoteMutation, services],
+    [client, runRemoteMutation],
   );
 
   useEffect(() => {

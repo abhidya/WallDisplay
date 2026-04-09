@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { createServiceModules } from '../../services/api.ts';
 import type { AppMode } from '../../control-plane/localState.ts';
+import {
+  createHttpClient,
+  normalizeApiBaseUrl,
+  type QueryRecord,
+} from '../../services/httpClient.ts';
 import type { JsonRecord } from '../../types/api.ts';
 
 function asArray(value: unknown): JsonRecord[] {
@@ -16,7 +20,11 @@ function asRecord(value: unknown): JsonRecord | null {
     : null;
 }
 
-function createDefaultConfig(name: string, videoId?: number | string | null, mappingSceneId?: number | string | null): JsonRecord {
+function createDefaultConfig(
+  name: string,
+  videoId?: number | string | null,
+  mappingSceneId?: number | string | null,
+): JsonRecord {
   return {
     name,
     background_type: videoId ? 'video' : 'mapping',
@@ -34,6 +42,58 @@ function createDefaultConfig(name: string, videoId?: number | string | null, map
 
 function getIdValue(value: unknown): string | number | null {
   return typeof value === 'string' || typeof value === 'number' ? value : null;
+}
+
+export interface OverlayRemoteClient {
+  readonly rootBaseUrl: string;
+  createConfig: (payload: JsonRecord) => Promise<JsonRecord>;
+  deleteConfig: (configId: number | string) => Promise<JsonRecord>;
+  exportMp4: (payload: JsonRecord) => Promise<Blob>;
+  getBrightness: () => Promise<JsonRecord>;
+  listCastDevices: (params?: QueryRecord) => Promise<JsonRecord[]>;
+  listCastSessions: () => Promise<JsonRecord[]>;
+  listConfigs: () => Promise<JsonRecord[]>;
+  listMappings: () => Promise<JsonRecord[]>;
+  listVideos: () => Promise<JsonRecord[]>;
+  startCast: (payload: JsonRecord) => Promise<JsonRecord>;
+  stopCastSession: (sessionId: string) => Promise<JsonRecord>;
+  triggerOverlaySync: (options?: { triggeredBy?: string; videoName?: string }) => Promise<JsonRecord>;
+}
+
+export function createOverlayRemoteClient(
+  apiBaseUrl: string,
+  fetchImpl: typeof fetch = globalThis.fetch,
+): OverlayRemoteClient {
+  const normalizedApiBaseUrl = normalizeApiBaseUrl(apiBaseUrl);
+  const api = createHttpClient({
+    baseURL: normalizedApiBaseUrl,
+    normalizeApiBase: false,
+    fetchImpl,
+  });
+
+  return {
+    rootBaseUrl: normalizedApiBaseUrl.replace(/\/api$/, ''),
+    createConfig: (payload: JsonRecord) => api.post<JsonRecord>('/overlay/configs', { body: payload }),
+    deleteConfig: (configId: number | string) => api.delete<JsonRecord>(`/overlay/configs/${configId}`),
+    exportMp4: (payload: JsonRecord) =>
+      api.post<Blob>('/overlay/export', { body: payload, parseAs: 'blob', timeout: 0 }),
+    getBrightness: () => api.get<JsonRecord>('/overlay/brightness'),
+    listCastDevices: (params: QueryRecord = { casting_method: 'dlna' }) =>
+      api.get<JsonRecord[]>('/v2/discovery/devices', { query: params }),
+    listCastSessions: () => api.get<JsonRecord[]>('/overlay/cast/sessions'),
+    listConfigs: () => api.get<JsonRecord[]>('/overlay/configs'),
+    listMappings: () => api.get<JsonRecord[]>('/mappings/scenes'),
+    listVideos: () => api.get<JsonRecord[]>('/videos'),
+    startCast: (payload: JsonRecord) => api.post<JsonRecord>('/overlay/cast', { body: payload }),
+    stopCastSession: (sessionId: string) => api.delete<JsonRecord>(`/overlay/cast/sessions/${sessionId}`),
+    triggerOverlaySync: (options?: { triggeredBy?: string; videoName?: string }) =>
+      api.post<JsonRecord>('/overlay/sync', {
+        query: {
+          triggered_by: options?.triggeredBy ?? 'mobile_app',
+          video_name: options?.videoName,
+        },
+      }),
+  };
 }
 
 export interface OverlayProjectionController {
@@ -76,7 +136,7 @@ interface UseOverlayProjectionControllerOptions {
 export function useOverlayProjectionController(
   options: UseOverlayProjectionControllerOptions,
 ): OverlayProjectionController {
-  const services = useMemo(() => createServiceModules(options.apiBaseUrl), [options.apiBaseUrl]);
+  const client = useMemo(() => createOverlayRemoteClient(options.apiBaseUrl), [options.apiBaseUrl]);
   const [videos, setVideos] = useState<JsonRecord[]>([]);
   const [mappings, setMappings] = useState<JsonRecord[]>([]);
   const [configs, setConfigs] = useState<JsonRecord[]>([]);
@@ -115,19 +175,19 @@ export function useOverlayProjectionController(
         castSessionsPayload,
         brightnessPayload,
       ] = await Promise.all([
-        services.videoApi.getVideos(),
-        services.mappingsApi.listScenes(),
-        services.overlayApi.listConfigs(),
-        services.discoveryV2Api.getDevices({ casting_method: 'dlna' }),
-        services.overlayApi.listCastSessions(),
-        services.overlayApi.getBrightness(),
+        client.listVideos(),
+        client.listMappings(),
+        client.listConfigs(),
+        client.listCastDevices(),
+        client.listCastSessions(),
+        client.getBrightness(),
       ]);
 
-      const nextVideos = asArray((asRecord(videosPayload)?.videos ?? videosPayload));
-      const nextMappings = asArray(mappingsPayload);
-      const nextConfigs = asArray(configsPayload);
-      const nextCastDevices = asArray(castDevicesPayload);
-      const nextCastSessions = asArray(castSessionsPayload);
+      const nextVideos = asArray(asRecord(videosPayload)?.videos ?? videosPayload);
+      const nextMappings = asArray(asRecord(mappingsPayload)?.scenes ?? mappingsPayload);
+      const nextConfigs = asArray(asRecord(configsPayload)?.configs ?? configsPayload);
+      const nextCastDevices = asArray(asRecord(castDevicesPayload)?.devices ?? castDevicesPayload);
+      const nextCastSessions = asArray(asRecord(castSessionsPayload)?.sessions ?? castSessionsPayload);
 
       setVideos(nextVideos);
       setMappings(nextMappings);
@@ -146,7 +206,7 @@ export function useOverlayProjectionController(
     } finally {
       setLoading(false);
     }
-  }, [options.appMode, services]);
+  }, [client, options.appMode]);
 
   useEffect(() => {
     void refresh();
@@ -183,7 +243,7 @@ export function useOverlayProjectionController(
     const selectedMapping = mappings.find((scene) => String(scene.id) === selectedMappingId) ?? null;
     await runAction(
       () =>
-        services.overlayApi.createConfig(
+        client.createConfig(
           createDefaultConfig(
             `Mobile overlay ${configs.length + 1}`,
             getIdValue(selectedVideo?.id),
@@ -192,16 +252,13 @@ export function useOverlayProjectionController(
         ),
       'Overlay config created.',
     );
-  }, [configs.length, mappings, runAction, selectedMappingId, selectedVideoId, services, videos]);
+  }, [client, configs.length, mappings, runAction, selectedMappingId, selectedVideoId, videos]);
 
   const deleteConfig = useCallback(
     async (configId: number | string) => {
-      await runAction(
-        () => services.overlayApi.deleteConfig(configId),
-        `Deleted overlay config ${String(configId)}.`,
-      );
+      await runAction(() => client.deleteConfig(configId), `Deleted overlay config ${String(configId)}.`);
     },
-    [runAction, services],
+    [client, runAction],
   );
 
   const startCast = useCallback(async () => {
@@ -211,27 +268,27 @@ export function useOverlayProjectionController(
     }
     await runAction(
       () =>
-        services.overlayApi.startCast({
+        client.startCast({
           device_id: selectedCastDeviceId,
           config_id: Number(selectedConfigId),
-          overlay_base_url: services.client.rootBaseUrl,
+          overlay_base_url: client.rootBaseUrl,
           controls_hidden: true,
           frame_rate: 15,
         }),
       'Overlay cast started.',
       true,
     );
-  }, [runAction, selectedCastDeviceId, selectedConfigId, services]);
+  }, [client, runAction, selectedCastDeviceId, selectedConfigId]);
 
   const stopCast = useCallback(
     async (sessionId: string) => {
       await runAction(
-        () => services.overlayApi.stopCastSession(sessionId),
+        () => client.stopCastSession(sessionId),
         `Overlay cast ${sessionId} stopped.`,
         true,
       );
     },
-    [runAction, services],
+    [client, runAction],
   );
 
   const exportProjection = useCallback(async () => {
@@ -243,9 +300,9 @@ export function useOverlayProjectionController(
     setError(null);
     setActionMessage(null);
     try {
-      const blob = await services.overlayApi.exportMp4({
+      const blob = await client.exportMp4({
         config_id: Number(selectedConfigId),
-        overlay_base_url: services.client.rootBaseUrl,
+        overlay_base_url: client.rootBaseUrl,
         controls_hidden: true,
         hide_widgets: true,
         viewport_width: 1280,
@@ -268,19 +325,19 @@ export function useOverlayProjectionController(
     } finally {
       setActionLoading(false);
     }
-  }, [exportDurationSeconds, selectedConfigId, services]);
+  }, [client, exportDurationSeconds, selectedConfigId]);
 
   const syncOverlays = useCallback(async () => {
     await runAction(
       () =>
-        services.client.triggerOverlaySync({
+        client.triggerOverlaySync({
           triggeredBy: 'mobile_overlay_console',
           videoName:
             videos.find((video) => String(video.id) === selectedVideoId)?.name as string | undefined,
         }),
       'Overlay sync triggered.',
     );
-  }, [runAction, selectedVideoId, services, videos]);
+  }, [client, runAction, selectedVideoId, videos]);
 
   const setBrightnessValue = useCallback((value: string) => {
     const next = Number(value || 100);

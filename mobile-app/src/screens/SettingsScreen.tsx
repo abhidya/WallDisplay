@@ -5,8 +5,8 @@ import { Panel } from '../components/Panel';
 import { emulatorConnectionNotes } from '../data/features';
 import {
   useSettingsController,
-  type ProjectorRedirectRule,
 } from '../features/settings/useSettingsController';
+import type { ProjectorRedirectRule } from '../features/settings/helpers.ts';
 import type { ControlPlaneClient } from '../control-plane/client';
 import type { AppMode } from '../control-plane/localState';
 import { colors } from '../theme';
