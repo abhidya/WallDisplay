@@ -122,29 +122,38 @@ class AnimationEngine {
         }
         if (typeof AnimeBackground3Animation !== 'undefined') {
             this.animationClasses.set('anime_background_3', AnimeBackground3Animation);
-    }
         }
         if (typeof GridAndLinesAnimation !== 'undefined') {
             this.animationClasses.set('grid_and_lines', GridAndLinesAnimation);
         }
         if (typeof AnimeBackgroundAnimation !== 'undefined') {
             this.animationClasses.set('anime_background', AnimeBackgroundAnimation);
-        }            console.warn(`Animation type '${type}' not found`);
+        }
+    }
+
+    setMaskImage(maskImage) {
+        this.maskImage = maskImage;
+    }
+
+    createAnimation(type, zone, container) {
+        const AnimationClass = this.animationClasses.get(type);
+        if (!AnimationClass) {
+            console.warn(`Animation type '${type}' not found`);
             return null;
         }
-        
+
         const animation = new AnimationClass(zone, container, this.maskImage);
         animation.externalClock = true;
         animation.init();
-        
+
         // Store reference
         this.animations.set(zone.id, animation);
-        
+
         // Provide initial data if available
         if (this.data.weather || this.data.transit) {
             animation.updateData(this.data);
         }
-        
+
         return animation;
     }
 
