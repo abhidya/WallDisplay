@@ -43,7 +43,7 @@ import {
   FilterList as FilterIcon,
   ExpandMore as ExpandMoreIcon
 } from '@mui/icons-material';
-import { deviceApi, discoveryV2Api } from '../services/api';
+import { deviceApi } from '../services/api';
 import { useNavigate } from 'react-router-dom';
 import ConfigurationManager from '../components/ConfigurationManager';
 
@@ -105,6 +105,31 @@ function getAvailabilityColor(availability) {
     default:
       return 'default';
   }
+}
+
+function getProjectionChipProps(device) {
+  if (!device?.active_overlay_cast) {
+    return { label: 'stopped', color: 'default' };
+  }
+
+  if (device.overlay_cast_source === 'direct_client') {
+    return { label: 'direct html', color: 'info' };
+  }
+
+  return {
+    label: device.overlay_cast_status || 'running',
+    color: 'success',
+  };
+}
+
+function getProjectionSourceLabel(device) {
+  if (device?.overlay_cast_source === 'direct_client') {
+    return 'browser client';
+  }
+  if (device?.overlay_cast_source === 'backend_cast') {
+    return 'backend relay';
+  }
+  return null;
 }
 
 function Devices() {
@@ -956,11 +981,15 @@ function Devices() {
                 </Typography>
                 <Typography variant="body2" color="textSecondary" gutterBottom>
                   Projection:{' '}
-                  <Chip
-                    label={device.active_overlay_cast ? (device.overlay_cast_status || 'running') : 'stopped'}
-                    color={device.active_overlay_cast ? 'success' : 'default'}
-                    size="small"
-                  />
+                  <Chip {...getProjectionChipProps(device)} size="small" />
+                  {getProjectionSourceLabel(device) && (
+                    <Chip
+                      label={getProjectionSourceLabel(device)}
+                      variant="outlined"
+                      size="small"
+                      sx={{ ml: 1 }}
+                    />
+                  )}
                   {device.active_overlay_cast && device.overlay_cast_ffmpeg_speed !== null && device.overlay_cast_ffmpeg_speed !== undefined && (
                     <Chip
                       label={`speed ${device.overlay_cast_ffmpeg_speed.toFixed(2)}x`}
@@ -975,6 +1004,11 @@ function Devices() {
                   {formatDurationSeconds(device.uptime_seconds) && ` • uptime ${formatDurationSeconds(device.uptime_seconds)}`}
                   {!formatDurationSeconds(device.uptime_seconds) && formatDurationSeconds(device.downtime_seconds) && ` • downtime ${formatDurationSeconds(device.downtime_seconds)}`}
                 </Typography>
+                {device.overlay_cast_source === 'direct_client' && (
+                  <Typography variant="body2" color="textSecondary" gutterBottom>
+                    Direct overlay page {formatCycleAge(device.overlay_cast_last_seen_at)}
+                  </Typography>
+                )}
                 <Typography variant="body2" color="textSecondary" gutterBottom>
                   Reconnects {device.reconnect_count ?? 0} • degraded {device.degraded_count ?? 0} • offline {device.offline_count ?? 0}
                 </Typography>

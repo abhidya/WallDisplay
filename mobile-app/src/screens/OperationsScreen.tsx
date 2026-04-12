@@ -100,6 +100,7 @@ export function OperationsScreen({ appMode, client }: OperationsScreenProps) {
     actionMessage,
     actionHistory,
     analytics,
+    airplayDevices,
     streamingHealth,
     capabilities,
     deferredFeatures,
@@ -111,6 +112,7 @@ export function OperationsScreen({ appMode, client }: OperationsScreenProps) {
     overlayConfigs,
     overlayCastSessions,
     overlayStatus,
+    rendererStatus,
     projectors,
     projectionConfigs,
     recentProjectionSession,
@@ -118,6 +120,7 @@ export function OperationsScreen({ appMode, client }: OperationsScreenProps) {
     renderers,
     runOverlaySync,
     runOverlayCastStop,
+    refreshRendererStatus,
     runRendererPause,
     runRendererResume,
     runRendererStartDefault,
@@ -438,6 +441,16 @@ export function OperationsScreen({ appMode, client }: OperationsScreenProps) {
             disabled={actionsBusy}
             variant="secondary"
           />
+          <ActionButton
+            label={
+              actionLoadingKey === 'refresh-renderer-status'
+                ? 'Refreshing status...'
+                : 'Refresh status'
+            }
+            onPress={() => void refreshRendererStatus()}
+            disabled={actionsBusy}
+            variant="secondary"
+          />
         </View>
 
         <Text style={styles.sectionTitle}>Active renderers</Text>
@@ -449,6 +462,39 @@ export function OperationsScreen({ appMode, client }: OperationsScreenProps) {
             <Text style={styles.itemTitle}>{formatValue(renderer.projector, 'Renderer')}</Text>
             <Text style={styles.detailText}>Scene: {formatValue(renderer.scene)}</Text>
             <Text style={styles.detailText}>Status: {formatValue(renderer.status)}</Text>
+          </View>
+        ))}
+
+        {rendererStatus ? (
+          <View style={styles.itemCard}>
+            <Text style={styles.itemTitle}>Renderer status detail</Text>
+            <Text style={styles.detailText}>
+              Projector: {formatValue(rendererStatus.projector_id ?? rendererStatus.projector)}
+            </Text>
+            <Text style={styles.detailText}>
+              Scene: {formatValue(rendererStatus.scene_id ?? rendererStatus.scene)}
+            </Text>
+            <Text style={styles.detailText}>
+              Status: {formatValue(rendererStatus.status)}
+            </Text>
+            <Text style={styles.detailText}>
+              Extra keys: {Object.keys(rendererStatus).join(' • ')}
+            </Text>
+          </View>
+        ) : null}
+
+        <Text style={styles.sectionTitle}>AirPlay devices</Text>
+        {airplayDevices.length === 0 && !loading ? (
+          <Text style={styles.emptyText}>No AirPlay devices returned.</Text>
+        ) : null}
+        {airplayDevices.slice(0, 8).map((device, index) => (
+          <View key={`${String(device.id ?? device.name ?? index)}`} style={styles.itemCard}>
+            <Text style={styles.itemTitle}>
+              {formatValue(device.name ?? device.friendly_name, 'AirPlay device')}
+            </Text>
+            <Text style={styles.detailText}>Source: {formatValue(device.source)}</Text>
+            <Text style={styles.detailText}>ID: {formatValue(device.id)}</Text>
+            <Text style={styles.detailText}>Host: {formatValue(device.host ?? device.address)}</Text>
           </View>
         ))}
       </Panel>

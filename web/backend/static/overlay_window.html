@@ -1107,9 +1107,11 @@
         const PLAYBACK_SYNC_POST_TRANSITION_DELAY_MS = 250;
         const OVERLAY_STATUS_FALLBACK_POLL_MS = 15000;
         const CONFIG_REFRESH_FALLBACK_POLL_MS = 30000;
+        const PROJECTOR_CLIENT_HEARTBEAT_MS = 15000;
         let mappingPlaybackSyncBySourceKey = new Map();
         let mappingServerTimeOffsetMs = 0;
         let mappingPlaybackHeartbeatTimer = null;
+        let projectorHeartbeatInterval = null;
         let overlayEventsConnected = false;
         let lastOverlayStatus = null;
         let isDragging = false;
@@ -1222,7 +1224,7 @@
                 src: '/backend-static/js/projection/animations/shadertoy_imported_animations.js',
                 deps: ['shadertoy_multi_pass'],
             },
-            outer_space_planet: {
+            planet_outer_space: {
                 src: '/backend-static/js/projection/animations/shadertoy_imported_animations.js',
                 deps: ['shadertoy_multi_pass'],
             },
@@ -1314,6 +1316,52 @@
                 src: '/backend-static/js/projection/animations/shadertoy_imported_animations.js',
                 deps: ['shadertoy_single_pass'],
             },
+            // Legacy individual files
+            star_psf_legacy: {
+                src: '/backend-static/js/projection/animations/star_psf.js',
+            },
+            alien_tech_legacy: {
+                src: '/backend-static/js/projection/animations/alien_tech.js',
+            },
+            maze_automata_legacy: {
+                src: '/backend-static/js/projection/animations/maze_automata.js',
+            },
+            planet_outer_space_legacy: {
+                src: '/backend-static/js/projection/animations/planet_outer_space.js',
+            },
+            alien_tunnel_legacy: {
+                src: '/backend-static/js/projection/animations/alien_tunnel.js',
+            },
+            alien_waterworld_legacy: {
+                src: '/backend-static/js/projection/animations/alien_waterworld.js',
+            },
+            alien_space_jockey_legacy: {
+                src: '/backend-static/js/projection/animations/alien_space_jockey.js',
+            },
+            alien_core_legacy: {
+                src: '/backend-static/js/projection/animations/alien_core.js',
+            },
+            volcanic_legacy: {
+                src: '/backend-static/js/projection/animations/volcanic.js',
+            },
+            kepler_256o_legacy: {
+                src: '/backend-static/js/projection/animations/kepler_256o.js',
+            },
+            night_skyline_buffered_legacy: {
+                src: '/backend-static/js/projection/animations/night_skyline_buffered.js',
+            },
+            vaporwave_0001_legacy: {
+                src: '/backend-static/js/projection/animations/vaporwave_0001.js',
+            },
+            anime_background_3_legacy: {
+                src: '/backend-static/js/projection/animations/anime_background_3.js',
+            },
+            grid_and_lines_legacy: {
+                src: '/backend-static/js/projection/animations/grid_and_lines.js',
+            },
+            anime_background_legacy: {
+                src: '/backend-static/js/projection/animations/anime_background.js',
+            },            },
         };
 
         function loadScriptOnce(src) {
@@ -1821,6 +1869,7 @@
             }
             startDataUpdates();
             startOverlayStatusPolling();
+            startProjectorClientHeartbeat();
         }
 
         async function bootstrapFromUrl() {
@@ -1900,6 +1949,50 @@
                     console.error('Overlay refresh polling failed:', error);
                 }
             }, CONFIG_REFRESH_FALLBACK_POLL_MS);
+        }
+
+        async function sendProjectorClientHeartbeat() {
+            if (!currentConfigId) {
+                return;
+            }
+
+            try {
+                await fetch('/api/overlay/projector-clients/heartbeat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    cache: 'no-store',
+                    keepalive: true,
+                    body: JSON.stringify({
+                        config_id: Number(currentConfigId) || null,
+                        path: window.location.pathname,
+                        query: window.location.search.replace(/^\?/, ''),
+                        document_visibility: document.visibilityState || '',
+                    }),
+                });
+            } catch (error) {
+                console.error('Projector heartbeat failed:', error);
+            }
+        }
+
+        function stopProjectorClientHeartbeat() {
+            if (!projectorHeartbeatInterval) {
+                return;
+            }
+            clearInterval(projectorHeartbeatInterval);
+            projectorHeartbeatInterval = null;
+        }
+
+        function startProjectorClientHeartbeat() {
+            stopProjectorClientHeartbeat();
+            if (!currentConfigId) {
+                return;
+            }
+            sendProjectorClientHeartbeat();
+            projectorHeartbeatInterval = setInterval(() => {
+                sendProjectorClientHeartbeat();
+            }, PROJECTOR_CLIENT_HEARTBEAT_MS);
         }
         
         // Initialize from parent window
@@ -4736,6 +4829,16 @@
                     }
                 }
             }
+        });
+
+        document.addEventListener('visibilitychange', () => {
+            if (currentConfigId) {
+                sendProjectorClientHeartbeat();
+            }
+        });
+
+        window.addEventListener('beforeunload', () => {
+            stopProjectorClientHeartbeat();
         });
         
         // Data update functions

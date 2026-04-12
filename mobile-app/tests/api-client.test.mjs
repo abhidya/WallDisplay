@@ -141,6 +141,10 @@ test('NanoDlnaApiClient normalizes nested backend payloads into mobile-friendly 
     jsonResponse({ data: { renderers: [{ projector: 'alpha' }] } }),
     jsonResponse({ data: { projectors: [{ id: 'p-1', name: 'Front wall' }] } }),
     jsonResponse({ data: { scenes: [{ id: 'scene-1', name: 'Grid' }] } }),
+    jsonResponse({ data: { projector_id: 'p-1', status: 'running' } }),
+    jsonResponse({ data: { devices: [{ id: 'air-1', name: 'Apple TV' }] } }),
+    jsonResponse({ data: { devices: [{ id: 'air-2', name: 'Living Room' }] } }),
+    jsonResponse({ data: { devices: [{ id: 'air-3', name: 'Combined' }] } }),
     jsonResponse({ photos: [{ id: 3, name: 'Poster' }] }),
     jsonResponse([{ id: 8, name: 'Main list' }]),
     jsonResponse({ status: 'healthy', health_score: 100 }),
@@ -157,6 +161,10 @@ test('NanoDlnaApiClient normalizes nested backend payloads into mobile-friendly 
   assert.deepEqual(await client.listRenderers(), [{ projector: 'alpha' }]);
   assert.deepEqual(await client.listProjectors(), [{ id: 'p-1', name: 'Front wall' }]);
   assert.deepEqual(await client.listRendererScenes(), [{ id: 'scene-1', name: 'Grid' }]);
+  assert.deepEqual(await client.getRendererStatus('p-1'), { projector_id: 'p-1', status: 'running' });
+  assert.deepEqual(await client.discoverAirPlayDevices(), { devices: [{ id: 'air-1', name: 'Apple TV' }] });
+  assert.deepEqual(await client.listAirPlayDevices(), { devices: [{ id: 'air-2', name: 'Living Room' }] });
+  assert.deepEqual(await client.getAllAirPlayDevices(), { devices: [{ id: 'air-3', name: 'Combined' }] });
   assert.deepEqual(await client.listPhotos(), [{ id: 3, name: 'Poster' }]);
   assert.deepEqual(await client.listMediaLists(), [{ id: 8, name: 'Main list' }]);
   assert.deepEqual(await client.getStreamingHealth(), { status: 'healthy', health_score: 100 });

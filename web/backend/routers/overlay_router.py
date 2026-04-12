@@ -1,3 +1,5 @@
+import ipaddress
+
 from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -24,7 +26,10 @@ from schemas.overlay import (
 from services.overlay_service import OverlayService
 from services.overlay_cast_service import get_overlay_cast_service
 from services.overlay_event_bus import overlay_events, notify_overlay_config_update
-from services.projector_redirect_runtime import get_recent_projector_requests
+from services.projector_redirect_runtime import (
+    get_recent_projector_requests,
+    record_projector_client_heartbeat,
+)
 from models.overlay import OverlayConfig
 
 router = APIRouter(prefix="/api/overlay", tags=["overlay"])
@@ -43,6 +48,56 @@ class ProjectorRedirectConfigPayload(BaseModel):
     client_ip: str = ""
     target_path: str = "/backend-static/overlay_window.html?config_id=5&controls=hidden"
     rules: List[ProjectorRedirectRulePayload] = []
+
+
+class ProjectorClientHeartbeatPayload(BaseModel):
+    config_id: Optional[int] = None
+    path: str = "/backend-static/overlay_window.html"
+    query: str = ""
+    document_visibility: str = ""
+
+
+def _normalize_ip_candidate(value: str) -> str:
+    candidate = str(value or "").strip().strip("\"'")
+    if not candidate:
+        return ""
+    if candidate.lower().startswith("for="):
+        candidate = candidate[4:].strip().strip("\"'")
+    if candidate.startswith("[") and "]" in candidate:
+        candidate = candidate[1:candidate.index("]")]
+    elif candidate.count(":") == 1 and "." in candidate:
+        candidate = candidate.rsplit(":", 1)[0]
+    if candidate.startswith("::ffff:"):
+        candidate = candidate[7:]
+    try:
+        return str(ipaddress.ip_address(candidate))
+    except ValueError:
+        return candidate
+
+
+def _get_request_client_ip(request: Request) -> str:
+    x_forwarded_for = request.headers.get("x-forwarded-for", "")
+    if x_forwarded_for:
+        for value in x_forwarded_for.split(","):
+            candidate = _normalize_ip_candidate(value)
+            if candidate and candidate.lower() != "unknown":
+                return candidate
+
+    forwarded = request.headers.get("forwarded", "")
+    if forwarded:
+        for entry in forwarded.split(","):
+            for part in entry.split(";"):
+                part = part.strip()
+                if part.lower().startswith("for="):
+                    candidate = _normalize_ip_candidate(part)
+                    if candidate and candidate.lower() != "unknown":
+                        return candidate
+
+    x_real_ip = _normalize_ip_candidate(request.headers.get("x-real-ip", ""))
+    if x_real_ip:
+        return x_real_ip
+
+    return _normalize_ip_candidate(request.client.host if request.client else "")
 
 @router.post("/configs", response_model=OverlayConfigResponse)
 async def create_overlay_config(
@@ -257,6 +312,25 @@ async def get_recent_projector_redirect_requests(
 ):
     try:
         return {"items": get_recent_projector_requests(limit=limit)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/projector-clients/heartbeat")
+async def heartbeat_projector_client(
+    payload: ProjectorClientHeartbeatPayload,
+    request: Request,
+):
+    try:
+        client = record_projector_client_heartbeat(
+            client_ip=_get_request_client_ip(request),
+            path=payload.path,
+            query=payload.query,
+            config_id=payload.config_id,
+            document_visibility=payload.document_visibility,
+            user_agent=request.headers.get("user-agent", ""),
+        )
+        return {"status": "ok", "client": client}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

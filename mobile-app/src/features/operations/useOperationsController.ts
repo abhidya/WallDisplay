@@ -27,6 +27,7 @@ export interface OperationsController {
   actionMessage: string | null;
   actionHistory: ActionHistoryEntry[];
   analytics: StreamingAnalytics | null;
+  airplayDevices: JsonRecord[];
   streamingHealth: StreamingHealthResponse | null;
   capabilities: LocalCapabilitySummary[];
   deferredFeatures: DeferredFeatureSummary[];
@@ -37,6 +38,7 @@ export interface OperationsController {
   overlayConfigs: OverlayConfigSummary[];
   overlayStatus: OverlayStatusResponse | null;
   overlayCastSessions: OverlayCastSessionSummary[];
+  rendererStatus: JsonRecord | null;
   projectors: RendererProjectorSummary[];
   projectionConfigs: ProjectionConfigSummary[];
   recentProjectionSession: ProjectionSessionSummary | null;
@@ -55,6 +57,7 @@ export interface OperationsController {
   launchSelectedProjection: () => Promise<void>;
   runOverlaySync: () => Promise<void>;
   runOverlayCastStop: (sessionId: string) => Promise<void>;
+  refreshRendererStatus: () => Promise<void>;
   runRendererPause: () => Promise<void>;
   runRendererResume: () => Promise<void>;
   runRendererStartDefault: () => Promise<void>;
@@ -81,6 +84,7 @@ export function useOperationsController(client: ControlPlaneClient): OperationsC
   const [actionHistory, setActionHistory] = useState<ActionHistoryEntry[]>([]);
   const [deferredFeatures, setDeferredFeatures] = useState<DeferredFeatureSummary[]>([]);
   const [analytics, setAnalytics] = useState<StreamingAnalytics | null>(null);
+  const [airplayDevices, setAirplayDevices] = useState<JsonRecord[]>([]);
   const [streamingHealth, setStreamingHealth] = useState<StreamingHealthResponse | null>(null);
   const [sessions, setSessions] = useState<StreamingSessionSummary[]>([]);
   const [renderers, setRenderers] = useState<RendererInstanceSummary[]>([]);
@@ -89,6 +93,7 @@ export function useOperationsController(client: ControlPlaneClient): OperationsC
   const [overlayConfigs, setOverlayConfigs] = useState<OverlayConfigSummary[]>([]);
   const [overlayStatus, setOverlayStatus] = useState<OverlayStatusResponse | null>(null);
   const [overlayCastSessions, setOverlayCastSessions] = useState<OverlayCastSessionSummary[]>([]);
+  const [rendererStatus, setRendererStatus] = useState<JsonRecord | null>(null);
   const [mappingScenes, setMappingScenes] = useState<MappingSceneSummary[]>([]);
   const [sceneRanks, setSceneRanks] = useState<SceneRankSummary[]>([]);
   const [sceneControlPresets, setSceneControlPresets] = useState<SceneControlPresetSummary[]>([]);
@@ -157,12 +162,14 @@ export function useOperationsController(client: ControlPlaneClient): OperationsC
         setCapabilities(capabilityPayload);
         setActionHistory(actionHistoryPayload);
         setDeferredFeatures(deferredPayload);
+        setAirplayDevices([]);
         setRenderers([]);
         setProjectors([]);
         setRendererScenes([]);
         setOverlayConfigs([]);
         setOverlayStatus(null);
         setOverlayCastSessions([]);
+        setRendererStatus(null);
         setMappingScenes([]);
         setSceneRanks([]);
         setSceneControlPresets([]);
@@ -183,6 +190,7 @@ export function useOperationsController(client: ControlPlaneClient): OperationsC
         overlayPayload,
         overlayStatusPayload,
         overlayCastSessionsPayload,
+        airplayDevicesPayload,
         mappingScenesPayload,
         sceneRanksPayload,
         sceneControlPresetsPayload,
@@ -197,6 +205,7 @@ export function useOperationsController(client: ControlPlaneClient): OperationsC
         client.listOverlayConfigs(),
         client.getOverlayStatus(),
         client.listOverlayCastSessions(),
+        client.getAllAirPlayDevices(),
         client.listMappingScenes(),
         client.listSceneRanks(),
         client.listSceneControlPresets(),
@@ -216,6 +225,11 @@ export function useOperationsController(client: ControlPlaneClient): OperationsC
       setOverlayConfigs(overlayPayload);
       setOverlayStatus(overlayStatusPayload);
       setOverlayCastSessions(overlayCastSessionsPayload);
+      setAirplayDevices(
+        Array.isArray(airplayDevicesPayload?.devices)
+          ? (airplayDevicesPayload.devices as JsonRecord[])
+          : [],
+      );
       setMappingScenes(mappingScenesPayload);
       setSceneRanks(sceneRanksPayload);
       setSceneControlPresets(sceneControlPresetsPayload);
@@ -374,6 +388,34 @@ export function useOperationsController(client: ControlPlaneClient): OperationsC
     [client, describeActionMessage, runAction],
   );
 
+  const refreshRendererStatus = useCallback(async () => {
+    if (!selectedProjectorId) {
+      setError('Select a projector first.');
+      return;
+    }
+
+    setActionLoadingKey('refresh-renderer-status');
+    setError(null);
+    try {
+      const payload = await client.getRendererStatus(selectedProjectorId);
+      if (!mountedRef.current) {
+        return;
+      }
+      setRendererStatus(payload);
+      setActionMessage('Renderer status refreshed.');
+    } catch (statusError) {
+      if (mountedRef.current) {
+        setError(
+          statusError instanceof Error ? statusError.message : 'Failed to load renderer status.',
+        );
+      }
+    } finally {
+      if (mountedRef.current) {
+        setActionLoadingKey(null);
+      }
+    }
+  }, [client, selectedProjectorId]);
+
   const runStreamingSessionComplete = useCallback(
     async (sessionId: string) => {
       await runAction(
@@ -477,6 +519,7 @@ export function useOperationsController(client: ControlPlaneClient): OperationsC
       actionMessage,
       actionHistory,
       analytics,
+      airplayDevices,
       streamingHealth,
       capabilities,
       deferredFeatures,
@@ -489,6 +532,7 @@ export function useOperationsController(client: ControlPlaneClient): OperationsC
       overlayConfigs,
       overlayCastSessions,
       overlayStatus,
+      rendererStatus,
       projectors,
       projectionConfigs,
       recentProjectionSession,
@@ -496,6 +540,7 @@ export function useOperationsController(client: ControlPlaneClient): OperationsC
       renderers,
       runOverlaySync,
       runOverlayCastStop,
+      refreshRendererStatus,
       runRendererPause,
       runRendererResume,
       runRendererStartDefault,
@@ -519,6 +564,7 @@ export function useOperationsController(client: ControlPlaneClient): OperationsC
       actionMessage,
       actionHistory,
       analytics,
+      airplayDevices,
       streamingHealth,
       capabilities,
       deferredFeatures,
@@ -531,6 +577,7 @@ export function useOperationsController(client: ControlPlaneClient): OperationsC
       overlayConfigs,
       overlayCastSessions,
       overlayStatus,
+      rendererStatus,
       projectors,
       projectionConfigs,
       recentProjectionSession,
@@ -538,6 +585,7 @@ export function useOperationsController(client: ControlPlaneClient): OperationsC
       renderers,
       runOverlaySync,
       runOverlayCastStop,
+      refreshRendererStatus,
       runRendererPause,
       runRendererResume,
       runRendererStartDefault,

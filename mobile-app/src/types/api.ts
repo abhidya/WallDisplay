@@ -30,8 +30,16 @@ export interface DeviceDetail extends DeviceSummary {
   streaming_port?: number;
   updated_at?: string;
   playback_started_at?: string;
+  manager_status?: string;
   overlay_cast_status?: string;
   overlay_cast_session_id?: string;
+  overlay_cast_uptime_seconds?: number;
+  overlay_cast_current_step?: string;
+  overlay_cast_ffmpeg_speed?: number | null;
+  overlay_cast_ffmpeg_fps?: number | null;
+  overlay_cast_ffmpeg_bitrate_kbps?: number | null;
+  overlay_cast_active_clients?: number;
+  overlay_cast_started_at?: string | null;
 }
 
 export interface DeviceControlMode extends JsonRecord {

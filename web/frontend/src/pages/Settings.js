@@ -3,6 +3,7 @@ import {
   Accordion,
   AccordionDetails,
   AccordionSummary,
+  Collapse,
   Grid,
   Paper,
   Typography,
@@ -46,6 +47,8 @@ import {
   Add as AddIcon,
   Delete as DeleteIcon,
   ExpandMore as ExpandMoreIcon,
+  KeyboardArrowDown as KeyboardArrowDownIcon,
+  KeyboardArrowUp as KeyboardArrowUpIcon,
 } from '@mui/icons-material';
 import {
   InfoOutlined as InfoIcon,
@@ -129,6 +132,7 @@ function Settings() {
   });
   const [overlayConfigs, setOverlayConfigs] = useState([]);
   const [recentProjectorRequests, setRecentProjectorRequests] = useState([]);
+  const [expandedProjectorClients, setExpandedProjectorClients] = useState({});
   const [serviceDiagnostics, setServiceDiagnostics] = useState(null);
   const [selectedIncidentId, setSelectedIncidentId] = useState('');
   const [selectedIncidentDetail, setSelectedIncidentDetail] = useState(null);
@@ -496,6 +500,29 @@ function Settings() {
     })),
   ];
 
+  const groupedRecentProjectorRequests = recentProjectorRequests.reduce((groups, item, index) => {
+    const clientIp = (item.client_ip || '').trim() || 'Unknown client';
+    const existingGroup = groups.find((group) => group.clientIp === clientIp);
+    if (existingGroup) {
+      existingGroup.requests.push(item);
+      return groups;
+    }
+    groups.push({
+      clientIp,
+      groupKey: `${clientIp}-${index}`,
+      latestRequest: item,
+      requests: [item],
+    });
+    return groups;
+  }, []);
+
+  const toggleProjectorClientGroup = (groupKey) => {
+    setExpandedProjectorClients((current) => ({
+      ...current,
+      [groupKey]: !current[groupKey],
+    }));
+  };
+
   const currentRun = serviceDiagnostics?.current_run || null;
   const recentIncidents = serviceDiagnostics?.recent_incidents || [];
   const recentRuns = serviceDiagnostics?.recent_runs || [];
@@ -623,6 +650,7 @@ function Settings() {
               <Table size="small">
                 <TableHead>
                   <TableRow>
+                    <TableCell width={72}>Rows</TableCell>
                     <TableCell>Time</TableCell>
                     <TableCell>Client IP</TableCell>
                     <TableCell>Request</TableCell>
@@ -631,17 +659,77 @@ function Settings() {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {recentProjectorRequests.length ? recentProjectorRequests.map((item, index) => (
-                    <TableRow key={`${item.timestamp}-${index}`}>
-                      <TableCell>{item.timestamp?.replace('T', ' ').replace(/\.\d+.*$/, 'Z') || '-'}</TableCell>
-                      <TableCell>{item.client_ip || '-'}</TableCell>
-                      <TableCell>{item.method} {item.path}{item.query ? `?${item.query}` : ''}</TableCell>
-                      <TableCell>{item.matched_rule_name || '-'}</TableCell>
-                      <TableCell>{item.redirected ? item.redirect_target : '-'}</TableCell>
-                    </TableRow>
-                  )) : (
+                  {groupedRecentProjectorRequests.length ? groupedRecentProjectorRequests.map((group) => {
+                    const hasHistory = group.requests.length > 1;
+                    const isExpanded = Boolean(expandedProjectorClients[group.groupKey]);
+                    const latestRequest = group.latestRequest;
+                    const historyRequests = group.requests.slice(1);
+
+                    return (
+                      <React.Fragment key={group.groupKey}>
+                        <TableRow>
+                          <TableCell>
+                            {hasHistory ? (
+                              <IconButton
+                                size="small"
+                                onClick={() => toggleProjectorClientGroup(group.groupKey)}
+                                aria-label={isExpanded ? `Hide requests for ${group.clientIp}` : `Show requests for ${group.clientIp}`}
+                              >
+                                {isExpanded ? <KeyboardArrowUpIcon fontSize="inherit" /> : <KeyboardArrowDownIcon fontSize="inherit" />}
+                              </IconButton>
+                            ) : (
+                              <Chip size="small" label="1" variant="outlined" />
+                            )}
+                          </TableCell>
+                          <TableCell>{latestRequest.timestamp?.replace('T', ' ').replace(/\.\d+.*$/, 'Z') || '-'}</TableCell>
+                          <TableCell>
+                            <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
+                              <Box component="span">{group.clientIp}</Box>
+                              {hasHistory && <Chip size="small" label={`${group.requests.length} requests`} />}
+                            </Stack>
+                          </TableCell>
+                          <TableCell>{latestRequest.method} {latestRequest.path}{latestRequest.query ? `?${latestRequest.query}` : ''}</TableCell>
+                          <TableCell>{latestRequest.matched_rule_name || '-'}</TableCell>
+                          <TableCell>{latestRequest.redirected ? latestRequest.redirect_target : '-'}</TableCell>
+                        </TableRow>
+                        {hasHistory && (
+                          <TableRow>
+                            <TableCell colSpan={6} sx={{ py: 0, borderBottom: isExpanded ? undefined : 0 }}>
+                              <Collapse in={isExpanded} timeout="auto" unmountOnExit>
+                                <Box sx={{ px: 2, py: 1.5, bgcolor: 'action.hover' }}>
+                                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                                    Older requests from {group.clientIp}
+                                  </Typography>
+                                  <Table size="small">
+                                    <TableHead>
+                                      <TableRow>
+                                        <TableCell>Time</TableCell>
+                                        <TableCell>Request</TableCell>
+                                        <TableCell>Rule</TableCell>
+                                        <TableCell>Redirect</TableCell>
+                                      </TableRow>
+                                    </TableHead>
+                                    <TableBody>
+                                      {historyRequests.map((request, requestIndex) => (
+                                        <TableRow key={`${group.groupKey}-history-${request.timestamp || requestIndex}`}>
+                                          <TableCell>{request.timestamp?.replace('T', ' ').replace(/\.\d+.*$/, 'Z') || '-'}</TableCell>
+                                          <TableCell>{request.method} {request.path}{request.query ? `?${request.query}` : ''}</TableCell>
+                                          <TableCell>{request.matched_rule_name || '-'}</TableCell>
+                                          <TableCell>{request.redirected ? request.redirect_target : '-'}</TableCell>
+                                        </TableRow>
+                                      ))}
+                                    </TableBody>
+                                  </Table>
+                                </Box>
+                              </Collapse>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </React.Fragment>
+                    );
+                  }) : (
                     <TableRow>
-                      <TableCell colSpan={5}>
+                      <TableCell colSpan={6}>
                         <Typography variant="body2" color="text.secondary">
                           No recent projector navigation requests recorded yet.
                         </Typography>

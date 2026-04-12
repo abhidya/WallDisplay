@@ -166,7 +166,7 @@ export function DevicesScreen({
             : 'Remote mode reads the shared `/api/v2/discovery` control plane so operators can see backend health and capability coverage.'
         }
       >
-        <View style={styles.keyValueGrid}>
+	            <View style={styles.keyValueGrid}>
           <View style={styles.keyValueItem}>
             <Text style={styles.keyLabel}>System running</Text>
             <Text style={styles.keyValue}>
@@ -342,30 +342,79 @@ export function DevicesScreen({
                   {formatValue(selectedDevice?.seconds_since_seen)}
                 </Text>
               </View>
-              <View style={styles.keyValueItem}>
-                <Text style={styles.keyLabel}>Overlay cast</Text>
-                <Text style={styles.keyValue}>
-                  {formatValue(selectedDevice?.overlay_cast_status ?? selectedDevice?.active_overlay_cast)}
-                </Text>
-              </View>
-              <View style={styles.keyValueItem}>
-                <Text style={styles.keyLabel}>Updated at</Text>
-                <Text style={styles.keyValue}>{formatValue(selectedDevice?.updated_at)}</Text>
-              </View>
+	              <View style={styles.keyValueItem}>
+	                <Text style={styles.keyLabel}>Overlay cast</Text>
+	                <Text style={styles.keyValue}>
+	                  {formatValue(selectedDevice?.overlay_cast_status ?? selectedDevice?.active_overlay_cast)}
+	                </Text>
+	              </View>
+	              <View style={styles.keyValueItem}>
+	                <Text style={styles.keyLabel}>Manager status</Text>
+	                <Text style={styles.keyValue}>{formatValue(selectedDevice?.manager_status)}</Text>
+	              </View>
+	              <View style={styles.keyValueItem}>
+	                <Text style={styles.keyLabel}>Updated at</Text>
+	                <Text style={styles.keyValue}>{formatValue(selectedDevice?.updated_at)}</Text>
+	              </View>
               <View style={styles.keyValueItem}>
                 <Text style={styles.keyLabel}>Location</Text>
                 <Text style={styles.keyValue}>{formatValue(selectedDevice?.location)}</Text>
               </View>
             </View>
 
-            {controlMode?.reason ? (
-              <Text style={styles.noteText}>
+	            {controlMode?.reason ? (
+	              <Text style={styles.noteText}>
                 Control reason: {controlMode.reason}
                 {controlMode.expires_at ? ` • Expires: ${controlMode.expires_at}` : ''}
-              </Text>
-            ) : null}
+	              </Text>
+	            ) : null}
 
-            <View style={styles.actions}>
+	            {selectedDevice?.active_overlay_cast ? (
+	              <View style={styles.overlayCastCard}>
+	                <Text style={styles.sectionTitle}>Overlay cast detail</Text>
+	                <Text style={styles.detailText}>
+	                  Step: {formatValue(selectedDevice.overlay_cast_current_step)}
+	                </Text>
+	                <Text style={styles.detailText}>
+	                  Uptime: {formatValue(selectedDevice.overlay_cast_uptime_seconds)}
+	                </Text>
+	                <Text style={styles.detailText}>
+	                  Speed:{' '}
+	                  {formatValue(
+	                    selectedDevice.overlay_cast_ffmpeg_speed !== null &&
+	                      selectedDevice.overlay_cast_ffmpeg_speed !== undefined
+	                      ? `${selectedDevice.overlay_cast_ffmpeg_speed.toFixed(2)}x`
+	                      : null,
+	                  )}
+	                </Text>
+	                <Text style={styles.detailText}>
+	                  FPS:{' '}
+	                  {formatValue(
+	                    selectedDevice.overlay_cast_ffmpeg_fps !== null &&
+	                      selectedDevice.overlay_cast_ffmpeg_fps !== undefined
+	                      ? selectedDevice.overlay_cast_ffmpeg_fps.toFixed(1)
+	                      : null,
+	                  )}
+	                </Text>
+	                <Text style={styles.detailText}>
+	                  Bitrate:{' '}
+	                  {formatValue(
+	                    selectedDevice.overlay_cast_ffmpeg_bitrate_kbps !== null &&
+	                      selectedDevice.overlay_cast_ffmpeg_bitrate_kbps !== undefined
+	                      ? `${Math.round(selectedDevice.overlay_cast_ffmpeg_bitrate_kbps)} kbps`
+	                      : null,
+	                  )}
+	                </Text>
+	                <Text style={styles.detailText}>
+	                  Relay clients: {formatValue(selectedDevice.overlay_cast_active_clients, '0')}
+	                </Text>
+	                <Text style={styles.detailText}>
+	                  Started: {formatValue(selectedDevice.overlay_cast_started_at)}
+	                </Text>
+	              </View>
+	            ) : null}
+
+	            <View style={styles.actions}>
               <ActionButton
                 label={detailLoading ? 'Refreshing detail...' : 'Refresh detail'}
                 onPress={() => void refreshSelectedDevice()}
@@ -559,6 +608,14 @@ const styles = StyleSheet.create({
     color: colors.mutedText,
     fontSize: 13,
     lineHeight: 18,
+  },
+  overlayCastCard: {
+    gap: 6,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.elevatedPanel,
   },
   backendCard: {
     gap: 6,

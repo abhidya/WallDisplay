@@ -1,3 +1,4 @@
+import ipaddress
 import logging
 import time
 from datetime import datetime, timezone
@@ -6,6 +7,7 @@ from urllib.parse import urlparse
 
 from models.device import DeviceModel
 from services.overlay_cast_service import get_overlay_cast_service
+from services.projector_redirect_runtime import get_recent_live_projector_client
 
 logger = logging.getLogger(__name__)
 
@@ -192,18 +194,10 @@ class DeviceViewService:
                 break
 
         if not active_session:
-            return {
-                "active_overlay_cast": False,
-                "overlay_cast_status": None,
-                "overlay_cast_started_at": None,
-                "overlay_cast_uptime_seconds": None,
-                "overlay_cast_current_step": None,
-                "overlay_cast_ffmpeg_speed": None,
-                "overlay_cast_ffmpeg_fps": None,
-                "overlay_cast_ffmpeg_bitrate_kbps": None,
-                "overlay_cast_active_clients": 0,
-                "overlay_cast_session_id": None,
-            }
+            direct_client_state = self.get_direct_overlay_client_state(device)
+            if direct_client_state:
+                return direct_client_state
+            return self.empty_overlay_cast_state()
 
         started_at_raw = active_session.get("started_at")
         started_at = None
@@ -225,6 +219,7 @@ class DeviceViewService:
 
         return {
             "active_overlay_cast": True,
+            "overlay_cast_source": "backend_cast",
             "overlay_cast_status": active_session.get("status"),
             "overlay_cast_started_at": started_at_raw,
             "overlay_cast_uptime_seconds": overlay_cast_uptime_seconds,
@@ -234,7 +229,115 @@ class DeviceViewService:
             "overlay_cast_ffmpeg_bitrate_kbps": active_session.get("ffmpeg_bitrate_kbps"),
             "overlay_cast_active_clients": active_session.get("active_clients", 0),
             "overlay_cast_session_id": active_session.get("session_id"),
+            "overlay_cast_last_seen_at": None,
+            "overlay_cast_direct_url": None,
+            "overlay_cast_direct_config_id": None,
+            "overlay_cast_direct_visibility": None,
         }
+
+    def empty_overlay_cast_state(self) -> Dict[str, Any]:
+        return {
+            "active_overlay_cast": False,
+            "overlay_cast_source": None,
+            "overlay_cast_status": None,
+            "overlay_cast_started_at": None,
+            "overlay_cast_uptime_seconds": None,
+            "overlay_cast_current_step": None,
+            "overlay_cast_ffmpeg_speed": None,
+            "overlay_cast_ffmpeg_fps": None,
+            "overlay_cast_ffmpeg_bitrate_kbps": None,
+            "overlay_cast_active_clients": 0,
+            "overlay_cast_session_id": None,
+            "overlay_cast_last_seen_at": None,
+            "overlay_cast_direct_url": None,
+            "overlay_cast_direct_config_id": None,
+            "overlay_cast_direct_visibility": None,
+        }
+
+    def get_direct_overlay_client_state(self, device: DeviceModel) -> Optional[Dict[str, Any]]:
+        client_state = None
+        for candidate_host in self.get_device_host_candidates(device):
+            client_state = get_recent_live_projector_client(candidate_host)
+            if client_state:
+                break
+
+        if not client_state:
+            return None
+
+        started_at_raw = client_state.get("first_seen_at") or client_state.get("last_seen_at")
+        last_seen_at = client_state.get("last_seen_at")
+        started_at = self.parse_datetime(started_at_raw)
+        overlay_cast_uptime_seconds = None
+        if started_at is not None:
+            now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+            overlay_cast_uptime_seconds = max(
+                0.0,
+                (now_utc - started_at.replace(tzinfo=None)).total_seconds(),
+            )
+
+        direct_url = client_state.get("path") or ""
+        direct_query = client_state.get("query") or ""
+        if direct_query:
+            direct_url = f"{direct_url}?{direct_query}"
+
+        return {
+            "active_overlay_cast": True,
+            "overlay_cast_source": "direct_client",
+            "overlay_cast_status": "direct-html",
+            "overlay_cast_started_at": started_at_raw,
+            "overlay_cast_uptime_seconds": overlay_cast_uptime_seconds,
+            "overlay_cast_current_step": "overlay-window-open",
+            "overlay_cast_ffmpeg_speed": None,
+            "overlay_cast_ffmpeg_fps": None,
+            "overlay_cast_ffmpeg_bitrate_kbps": None,
+            "overlay_cast_active_clients": 1,
+            "overlay_cast_session_id": f"direct-client:{client_state.get('client_ip')}",
+            "overlay_cast_last_seen_at": last_seen_at,
+            "overlay_cast_direct_url": direct_url or None,
+            "overlay_cast_direct_config_id": client_state.get("config_id"),
+            "overlay_cast_direct_visibility": client_state.get("document_visibility") or None,
+        }
+
+    def get_device_host_candidates(self, device: DeviceModel) -> list[str]:
+        candidates = []
+        for raw_value in (device.hostname, device.action_url, device.location):
+            normalized = self.normalize_host_candidate(raw_value)
+            if normalized and normalized not in candidates:
+                candidates.append(normalized)
+        return candidates
+
+    def normalize_host_candidate(self, value: Optional[str]) -> str:
+        candidate = str(value or "").strip().strip("\"'")
+        if not candidate:
+            return ""
+
+        parsed = urlparse(candidate)
+        if parsed.hostname:
+            candidate = parsed.hostname
+        elif candidate.startswith("[") and "]" in candidate:
+            candidate = candidate[1:candidate.index("]")]
+        elif candidate.count(":") == 1 and "." in candidate:
+            candidate = candidate.rsplit(":", 1)[0]
+
+        if candidate.startswith("::ffff:"):
+            candidate = candidate[7:]
+
+        try:
+            return str(ipaddress.ip_address(candidate))
+        except ValueError:
+            return candidate.lower()
+
+    def parse_datetime(self, value: Optional[Any]) -> Optional[datetime]:
+        if not value:
+            return None
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            try:
+                return datetime.fromisoformat(value)
+            except ValueError:
+                return None
+        return None
 
     def overlay_session_matches_device(self, session: Dict[str, Any], device: DeviceModel) -> bool:
         device_id = session.get("device_id")

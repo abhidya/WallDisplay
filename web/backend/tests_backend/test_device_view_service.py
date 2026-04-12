@@ -64,6 +64,10 @@ def test_build_device_dict_includes_manager_status_and_overlay(monkeypatch, devi
             ]
         ),
     )
+    monkeypatch.setattr(
+        "web.backend.services.device_view_service.get_recent_live_projector_client",
+        lambda _client_ip: None,
+    )
 
     view_service = DeviceViewService(device_manager)
     device_dict = view_service.build_device_dict(device)
@@ -72,6 +76,7 @@ def test_build_device_dict_includes_manager_status_and_overlay(monkeypatch, devi
     assert device_dict["availability"] == "offline"
     assert device_dict["manager_is_playing"] is True
     assert device_dict["active_overlay_cast"] is True
+    assert device_dict["overlay_cast_source"] == "backend_cast"
     assert device_dict["overlay_cast_session_id"] == "cast-1"
     assert device_dict["reconnect_count"] == 2
     assert device_dict["created_at"] == "2026-01-01T00:00:00Z"
@@ -103,11 +108,16 @@ def test_build_device_dict_returns_empty_overlay_state_when_no_session(monkeypat
         "web.backend.services.device_view_service.get_overlay_cast_service",
         lambda: _FakeCastService([]),
     )
+    monkeypatch.setattr(
+        "web.backend.services.device_view_service.get_recent_live_projector_client",
+        lambda _client_ip: None,
+    )
 
     view_service = DeviceViewService(device_manager)
     device_dict = view_service.build_device_dict(device)
 
     assert device_dict["active_overlay_cast"] is False
+    assert device_dict["overlay_cast_source"] is None
     assert device_dict["overlay_cast_status"] is None
     assert device_dict["availability"] == "offline"
 
@@ -156,6 +166,10 @@ def test_build_device_detail_dict_includes_core_device_and_streaming_details(mon
         "web.backend.services.device_view_service.get_overlay_cast_service",
         lambda: _FakeCastService([]),
     )
+    monkeypatch.setattr(
+        "web.backend.services.device_view_service.get_recent_live_projector_client",
+        lambda _client_ip: None,
+    )
 
     fake_registry = SimpleNamespace(get_sessions_for_device=lambda device_name: [session] if device_name == device.name else [])
     monkeypatch.setattr(
@@ -171,3 +185,55 @@ def test_build_device_detail_dict_includes_core_device_and_streaming_details(mon
     assert device_dict["streaming_sessions"] == 1
     assert device_dict["streaming_session_ids"] == ["sess-1"]
     assert device_dict["streaming_details"]["server_port"] == 9001
+
+
+def test_build_device_dict_uses_live_direct_overlay_client_when_ip_matches(monkeypatch, device_manager):
+    device = SimpleNamespace(
+        id=4,
+        name="Projector C",
+        type="projector",
+        hostname="10.0.0.80",
+        action_url=None,
+        friendly_name="Projector C",
+        manufacturer="Test",
+        location=None,
+        status="connected",
+        is_playing=False,
+        current_video=None,
+        playback_position=None,
+        playback_duration=None,
+        playback_progress=None,
+        config=None,
+        playback_started_at=None,
+        created_at=None,
+        updated_at=None,
+    )
+
+    monkeypatch.setattr(
+        "web.backend.services.device_view_service.get_overlay_cast_service",
+        lambda: _FakeCastService([]),
+    )
+    monkeypatch.setattr(
+        "web.backend.services.device_view_service.get_recent_live_projector_client",
+        lambda client_ip: {
+            "client_ip": client_ip,
+            "path": "/backend-static/overlay_window.html",
+            "query": "config_id=7&controls=hidden",
+            "config_id": 7,
+            "document_visibility": "visible",
+            "first_seen_at": "2026-01-02T12:00:00+00:00",
+            "last_seen_at": "2026-01-02T12:00:30+00:00",
+            "heartbeat_count": 3,
+        } if client_ip == "10.0.0.80" else None,
+    )
+
+    view_service = DeviceViewService(device_manager)
+    device_dict = view_service.build_device_dict(device)
+
+    assert device_dict["active_overlay_cast"] is True
+    assert device_dict["overlay_cast_source"] == "direct_client"
+    assert device_dict["overlay_cast_status"] == "direct-html"
+    assert device_dict["overlay_cast_direct_config_id"] == 7
+    assert device_dict["overlay_cast_direct_visibility"] == "visible"
+    assert device_dict["overlay_cast_direct_url"] == "/backend-static/overlay_window.html?config_id=7&controls=hidden"
+    assert device_dict["overlay_cast_session_id"] == "direct-client:10.0.0.80"

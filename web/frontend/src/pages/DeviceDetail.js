@@ -3,9 +3,6 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   Box,
   Button,
-  Card,
-  CardContent,
-  CardActions,
   CircularProgress,
   Chip,
   Divider,
@@ -99,6 +96,31 @@ function getAvailabilityColor(availability) {
     default:
       return 'default';
   }
+}
+
+function getProjectionChipProps(device) {
+  if (!device?.active_overlay_cast) {
+    return { label: 'stopped', color: 'default' };
+  }
+
+  if (device.overlay_cast_source === 'direct_client') {
+    return { label: 'direct html', color: 'info' };
+  }
+
+  return {
+    label: device.overlay_cast_status || 'running',
+    color: 'success',
+  };
+}
+
+function getProjectionSourceLabel(device) {
+  if (device?.overlay_cast_source === 'direct_client') {
+    return 'Direct browser client';
+  }
+  if (device?.overlay_cast_source === 'backend_cast') {
+    return 'Backend relay cast';
+  }
+  return 'Unknown';
 }
 
 function DeviceDetail() {
@@ -461,16 +483,18 @@ function DeviceDetail() {
               <ListItemText
                 primary="Overlay Projection"
                 secondary={
-                  <Chip
-                    label={device.active_overlay_cast ? (device.overlay_cast_status || 'running') : 'stopped'}
-                    color={device.active_overlay_cast ? 'success' : 'default'}
-                    size="small"
-                  />
+                  <Chip {...getProjectionChipProps(device)} size="small" />
                 }
               />
             </ListItem>
             {device.active_overlay_cast && (
               <>
+                <ListItem>
+                  <ListItemIcon>
+                    <InfoIcon />
+                  </ListItemIcon>
+                  <ListItemText primary="Projection Source" secondary={getProjectionSourceLabel(device)} />
+                </ListItem>
                 <ListItem>
                   <ListItemIcon>
                     <InfoIcon />
@@ -487,27 +511,58 @@ function DeviceDetail() {
                   <ListItemIcon>
                     <InfoIcon />
                   </ListItemIcon>
-                  <ListItemText
-                    primary="Encoder Health"
-                    secondary={[
-                      device.overlay_cast_ffmpeg_speed !== null && device.overlay_cast_ffmpeg_speed !== undefined ? `speed ${device.overlay_cast_ffmpeg_speed.toFixed(2)}x` : null,
-                      device.overlay_cast_ffmpeg_fps !== null && device.overlay_cast_ffmpeg_fps !== undefined ? `fps ${device.overlay_cast_ffmpeg_fps.toFixed(1)}` : null,
-                      device.overlay_cast_ffmpeg_bitrate_kbps !== null && device.overlay_cast_ffmpeg_bitrate_kbps !== undefined ? `${Math.round(device.overlay_cast_ffmpeg_bitrate_kbps)} kbps` : null,
-                    ].filter(Boolean).join(' • ') || 'No metrics'}
-                  />
-                </ListItem>
-                <ListItem>
-                  <ListItemIcon>
-                    <InfoIcon />
-                  </ListItemIcon>
-                  <ListItemText primary="Relay Clients" secondary={device.overlay_cast_active_clients ?? 0} />
-                </ListItem>
-                <ListItem>
-                  <ListItemIcon>
-                    <InfoIcon />
-                  </ListItemIcon>
                   <ListItemText primary="Projection Started" secondary={formatTimestamp(device.overlay_cast_started_at)} />
                 </ListItem>
+                {device.overlay_cast_source === 'direct_client' ? (
+                  <>
+                    <ListItem>
+                      <ListItemIcon>
+                        <InfoIcon />
+                      </ListItemIcon>
+                      <ListItemText primary="Last Client Heartbeat" secondary={formatTimestamp(device.overlay_cast_last_seen_at)} />
+                    </ListItem>
+                    <ListItem>
+                      <ListItemIcon>
+                        <LinkIcon />
+                      </ListItemIcon>
+                      <ListItemText primary="Direct Overlay URL" secondary={device.overlay_cast_direct_url || 'No data'} />
+                    </ListItem>
+                    <ListItem>
+                      <ListItemIcon>
+                        <InfoIcon />
+                      </ListItemIcon>
+                      <ListItemText primary="Overlay Config ID" secondary={device.overlay_cast_direct_config_id ?? 'No data'} />
+                    </ListItem>
+                    <ListItem>
+                      <ListItemIcon>
+                        <ComputerIcon />
+                      </ListItemIcon>
+                      <ListItemText primary="Document Visibility" secondary={device.overlay_cast_direct_visibility || 'No data'} />
+                    </ListItem>
+                  </>
+                ) : (
+                  <>
+                    <ListItem>
+                      <ListItemIcon>
+                        <InfoIcon />
+                      </ListItemIcon>
+                      <ListItemText
+                        primary="Encoder Health"
+                        secondary={[
+                          device.overlay_cast_ffmpeg_speed !== null && device.overlay_cast_ffmpeg_speed !== undefined ? `speed ${device.overlay_cast_ffmpeg_speed.toFixed(2)}x` : null,
+                          device.overlay_cast_ffmpeg_fps !== null && device.overlay_cast_ffmpeg_fps !== undefined ? `fps ${device.overlay_cast_ffmpeg_fps.toFixed(1)}` : null,
+                          device.overlay_cast_ffmpeg_bitrate_kbps !== null && device.overlay_cast_ffmpeg_bitrate_kbps !== undefined ? `${Math.round(device.overlay_cast_ffmpeg_bitrate_kbps)} kbps` : null,
+                        ].filter(Boolean).join(' • ') || 'No metrics'}
+                      />
+                    </ListItem>
+                    <ListItem>
+                      <ListItemIcon>
+                        <InfoIcon />
+                      </ListItemIcon>
+                      <ListItemText primary="Relay Clients" secondary={device.overlay_cast_active_clients ?? 0} />
+                    </ListItem>
+                  </>
+                )}
               </>
             )}
             <ListItem>

@@ -83,16 +83,53 @@ class AnimationEngine {
                 this.animationClasses.set(entry.id, AnimationClass);
             }
         });
+
+        if (typeof StarPsfAnimation !== 'undefined') {
+            this.animationClasses.set('star_psf', StarPsfAnimation);
+        }
+        if (typeof AlienTechAnimation !== 'undefined') {
+            this.animationClasses.set('alien_tech', AlienTechAnimation);
+        }
+        if (typeof MazeAutomataAnimation !== 'undefined') {
+            this.animationClasses.set('maze_automata', MazeAutomataAnimation);
+        }
+        if (typeof PlanetOuterSpaceAnimation !== 'undefined') {
+            this.animationClasses.set('planet_outer_space', PlanetOuterSpaceAnimation);
+        }
+        if (typeof AlienTunnelAnimation !== 'undefined') {
+            this.animationClasses.set('alien_tunnel', AlienTunnelAnimation);
+        }
+        if (typeof AlienWaterworldAnimation !== 'undefined') {
+            this.animationClasses.set('alien_waterworld', AlienWaterworldAnimation);
+        }
+        if (typeof AlienSpaceJockeyAnimation !== 'undefined') {
+            this.animationClasses.set('alien_space_jockey', AlienSpaceJockeyAnimation);
+        }
+        if (typeof AlienCoreAnimation !== 'undefined') {
+            this.animationClasses.set('alien_core', AlienCoreAnimation);
+        }
+        if (typeof VolcanicAnimation !== 'undefined') {
+            this.animationClasses.set('volcanic', VolcanicAnimation);
+        }
+        if (typeof Kepler256oAnimation !== 'undefined') {
+            this.animationClasses.set('kepler_256o', Kepler256oAnimation);
+        }
+        if (typeof NightSkylineBufferedAnimation !== 'undefined') {
+            this.animationClasses.set('night_skyline_buffered', NightSkylineBufferedAnimation);
+        }
+        if (typeof Vaporwave0001Animation !== 'undefined') {
+            this.animationClasses.set('vaporwave_0001', Vaporwave0001Animation);
+        }
+        if (typeof AnimeBackground3Animation !== 'undefined') {
+            this.animationClasses.set('anime_background_3', AnimeBackground3Animation);
     }
-    
-    setMaskImage(maskImage) {
-        this.maskImage = maskImage;
-    }
-    
-    createAnimation(type, zone, container) {
-        const AnimationClass = this.animationClasses.get(type);
-        if (!AnimationClass) {
-            console.warn(`Animation type '${type}' not found`);
+        }
+        if (typeof GridAndLinesAnimation !== 'undefined') {
+            this.animationClasses.set('grid_and_lines', GridAndLinesAnimation);
+        }
+        if (typeof AnimeBackgroundAnimation !== 'undefined') {
+            this.animationClasses.set('anime_background', AnimeBackgroundAnimation);
+        }            console.warn(`Animation type '${type}' not found`);
             return null;
         }
         
