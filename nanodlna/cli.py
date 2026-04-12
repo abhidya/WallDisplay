@@ -212,13 +212,13 @@ def play(args):
             return
     
     # Handle config file mode
+    # Handle config file mode
     elif args.config_file:
         logging.info(f"Using configuration file: {args.config_file}")
         try:
             with open(args.config_file, 'r') as f:
                 config_data = json.load(f)
             
-            # Filtered devices list
             filtered_devices = []
             device_to_video = {}
             
@@ -227,7 +227,6 @@ def play(args):
                     device_name = config_entry['device_name']
                     video_path = config_entry['video_file']
                     
-                    # Find matching device in the discovered devices
                     for device in devices:
                         if device['friendly_name'] == device_name:
                             filtered_devices.append(device)
@@ -244,83 +243,99 @@ def play(args):
         except (json.JSONDecodeError, FileNotFoundError) as e:
             logging.error(f"Error loading configuration file: {e}")
             return
-    
-        # Status of media
-        status = {}
+            
+        # Start streaming server ONCE for all files
+        files = {}
+        for device_name, video_file in device_to_video.items():
+            if not os.path.exists(video_file):
+                logging.error(f"Video file not found: {video_file}")
+                continue
+            
+            # Using basename to avoid file collisions if names are identical? 
+            # We'll prefix with device_name to be safe
+            safe_name = f"{device_name.replace(' ', '_')}_{os.path.basename(video_file)}"
+            files[safe_name] = video_file
+            
+            # Also add subtitle if needed
+            if getattr(args, 'use_subtitle', True):
+                subtitle_path = get_subtitle_path(video_file)
+                if subtitle_path:
+                    files[f"sub_{safe_name}"] = subtitle_path
+                    
+        if not files:
+            logging.error("No valid media files found to stream.")
+            return
+            
+        # Get serve_ip
+        target_ip = None
+        if len(devices) > 0:
+            target_ip = devices[0].get("hostname")
+            
+        serve_ip = getattr(args, "serve_ip", None) or getattr(args, "local_host", None)
+        if not serve_ip and target_ip:
+            serve_ip = streaming.get_serve_ip(target_ip)
+            
+        url_dict, _ = streaming.start_server(files, serve_ip)
+        logging.info(f"Stream server started. URLs available: {len(url_dict)}")
         
-        # For each device, start streaming
-        for device in devices:
+        status = {}
+        threads = []
+        
+        def play_on_device(device, video_file, safe_name):
+            device_name = device['friendly_name']
             try:
-                # Get appropriate media file
-                device_name = device['friendly_name']
-                if device_name in device_to_video:
-                    media_file = device_to_video[device_name]
-                    logging.info(f"Using video from config for {device_name}: {media_file}")
-                else:
-                    logging.error(f"No media file specified for device {device_name}")
-                    continue
-                    
-                # Check if file exists
-                if not os.path.exists(media_file):
-                    logging.error(f"Media file not found: {media_file}")
-                    continue
-                    
-                logging.info(f"Starting streaming server for {media_file}")
-                
-                # Prepare the media for streaming
-                files = {"file_video": media_file}
-                
-                # Identify subtitle if present
-                if getattr(args, 'use_subtitle', True):
-                    subtitle_path = get_subtitle_path(media_file)
-                    if subtitle_path:
-                        files["file_subtitle"] = subtitle_path
-                        logging.info(f"Found subtitle: {subtitle_path}")
-                
-                # Get serve_ip
-                target_ip = device.get("hostname")
-                serve_ip = getattr(args, "serve_ip", None) or getattr(args, "local_host", None)
-                if not serve_ip and target_ip:
-                    serve_ip = streaming.get_serve_ip(target_ip)
-                    
-                # Start streaming
-                url_dict, _ = streaming.start_server(files, serve_ip)
-                logging.info(f"Stream available at: {url_dict}")
-                
                 # Package files_urls as expected by dlna.play
-                files_urls = url_dict
-
-                # Prepare and send the play message
+                files_urls = {"file_video": url_dict[safe_name]}
+                
+                # Check for subtitle
+                if getattr(args, 'use_subtitle', True):
+                    sub_key = f"sub_{safe_name}"
+                    if sub_key in url_dict:
+                        files_urls["file_subtitle"] = url_dict[sub_key]
+                
                 status[device_name] = "playing"
-                try:
-                    dlna.play(files_urls, device, args)
-                    logging.info(f"Successfully playing on device: {device_name}")
-                except Exception as e:
-                    logging.error(f"Failed to play on device: {device_name}. Error: {str(e)}")
-                    status[device_name] = "error"
-                    
+                dlna.play(files_urls, device, args)
+                logging.info(f"Successfully playing on device: {device_name}")
+                
+                # Progress bar
+                video_duration = dlna.get_video_duration(device)
+                if video_duration:
+                    with tqdm(total=video_duration, desc=f"Playing on {device_name}", ncols=80) as pbar:
+                        for _ in range(video_duration):
+                            time.sleep(1)
+                            pbar.update(1)
+                        
+                        if getattr(args, 'loop', False):
+                            time.sleep(max(0, video_duration - 5))
+                            dlna.play(files_urls, device, args)
+                
             except Exception as e:
-                logging.error(f"Error playing on device {device.get('friendly_name', 'unknown')}: {e}")
+                logging.error(f"Error playing on device {device_name}: {e}")
                 status[device_name] = f"error: {str(e)}"
         
+        # Start threads for each device
+        for device in devices:
+            device_name = device['friendly_name']
+            video_file = device_to_video.get(device_name)
+            safe_name = f"{device_name.replace(' ', '_')}_{os.path.basename(video_file)}"
+            
+            t = threading.Thread(target=play_on_device, args=(device, video_file, safe_name))
+            t.daemon = True
+            t.start()
+            threads.append(t)
+            
         # Summary
         logging.info("\nPlayback status summary:")
         for device_name, device_status in status.items():
             logging.info(f"Device: {device_name}, Status: {device_status}")
-        
-        # Wait for user interrupt
+            
         try:
-            # Create a thread to run in the background
-            thread = threading.Thread(target=lambda: None)
-            thread.daemon = True
-            
-            # Register signal handler for graceful exit
+            # Wait for user interrupt
             signal.signal(signal.SIGINT, lambda sig, frame: signal_handler_main(sig, frame, devices))
-            
-            if len(devices) > 0:
-                logging.info("Press Ctrl+C to stop playback")
-                thread.start()
-                thread.join()  # This will block until Ctrl+C
+            logging.info("Press Ctrl+C to stop playback")
+            for t in threads:
+                while t.is_alive():
+                    t.join(1.0)
         except KeyboardInterrupt:
             signal_handler_main(signal.SIGINT, None, devices)
         except Exception as e:

@@ -34,9 +34,9 @@ from web.backend.models.projection import ProjectionConfig
 
 # Clear and re-register models to avoid conflicts
 try:
-    print(f"INFO: web/backend/tests_backend/conftest.py: Clearing metadata and mappers")
-    Base.metadata.clear()
-    clear_mappers()
+    print(f"INFO: web/backend/tests_backend/conftest.py: Skipping metadata clear")
+    # Base.metadata.clear()
+    # clear_mappers()
     
     # Re-import models after clearing to ensure clean registration
     from web.backend.models.device import DeviceModel as _DeviceModel
