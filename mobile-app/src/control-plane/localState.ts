@@ -72,6 +72,8 @@ export interface LocalControlPlaneState {
   sceneControlPresets: SceneControlPresetSummary[];
   projectionConfigs: ProjectionConfigSummary[];
   projectionSessions: ProjectionSessionSummary[];
+  structuredLightingSessions: JsonRecord[];
+  projectionAnimations: JsonRecord[];
 }
 
 const LOCAL_STATE_KEY = 'nano-dlna/mobile-app/local-control-plane-state/v1';
@@ -344,6 +346,8 @@ function createInitialState(): LocalControlPlaneState {
     sceneControlPresets: [],
     projectionConfigs: [],
     projectionSessions: [],
+    structuredLightingSessions: [],
+    projectionAnimations: [],
   };
 }
 
@@ -377,6 +381,8 @@ function ensureStateShape(state: LocalControlPlaneState): LocalControlPlaneState
     deferredFeatures: state.deferredFeatures?.length
       ? state.deferredFeatures
       : createInitialState().deferredFeatures,
+    structuredLightingSessions: state.structuredLightingSessions?.length ? state.structuredLightingSessions : createInitialState().structuredLightingSessions,
+    projectionAnimations: state.projectionAnimations?.length ? state.projectionAnimations : createInitialState().projectionAnimations,
   };
 }
 

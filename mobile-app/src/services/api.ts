@@ -566,6 +566,58 @@ export class NanoDlnaApiClient {
     });
   }
 
+  async duplicateOverlayConfig(configId: number | string): Promise<OverlayConfigSummary> {
+    return this.requestJson<OverlayConfigSummary>(`/overlay/configs/${configId}/duplicate`, {
+      method: 'POST',
+    });
+  }
+
+  async createOverlayStream(payload: JsonRecord): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>('/overlay/stream', {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
+  async getOverlayWindowInit(projectorId?: string): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>('/overlay/window-init', {
+      query: projectorId ? { projector_id: projectorId } : {},
+    });
+  }
+
+  async getOverlayWindowRefreshState(projectorId?: string): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>('/overlay/window-refresh-state', {
+      query: projectorId ? { projector_id: projectorId } : {},
+    });
+  }
+
+  async getOverlayWidgetData(projectorId?: string): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>('/overlay/widget-data', {
+      query: projectorId ? { projector_id: projectorId } : {},
+    });
+  }
+
+  async heartbeatProjectorClient(payload: JsonRecord): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>('/overlay/projector-clients/heartbeat', {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
+  async getOverlayPlaybackSync(projectorId?: string): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>('/overlay/playback-sync', {
+      query: projectorId ? { projector_id: projectorId } : {},
+    });
+  }
+
+  async getBrightnessStatus(): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>('/overlay/brightness/status');
+  }
+
+  getOverlayEventsUrl(): string {
+    return this.buildApiUrl('/overlay/events');
+  }
+
   async getOverlayBrightness(): Promise<JsonRecord> {
     return this.requestJson<JsonRecord>('/overlay/brightness');
   }
@@ -690,6 +742,68 @@ export class NanoDlnaApiClient {
     return asArray<SceneControlPresetSummary>(payload);
   }
 
+  async createProjectionConfig(payload: JsonRecord): Promise<ProjectionConfigSummary> {
+    return this.requestJson<ProjectionConfigSummary>('/projection/configs', {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
+  async getProjectionConfig(configId: number | string): Promise<ProjectionConfigSummary> {
+    return this.requestJson<ProjectionConfigSummary>(`/projection/configs/${configId}`);
+  }
+
+  async updateProjectionConfig(configId: number | string, payload: JsonRecord): Promise<ProjectionConfigSummary> {
+    return this.requestJson<ProjectionConfigSummary>(`/projection/configs/${configId}`, {
+      method: 'PUT',
+      body: payload,
+    });
+  }
+
+  async deleteProjectionConfig(configId: number | string): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/projection/configs/${configId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async duplicateProjectionConfig(configId: number | string): Promise<ProjectionConfigSummary> {
+    return this.requestJson<ProjectionConfigSummary>(`/projection/configs/${configId}/duplicate`, {
+      method: 'POST',
+    });
+  }
+
+  async createProjectionSession(payload: JsonRecord): Promise<ProjectionSessionSummary> {
+    return this.requestJson<ProjectionSessionSummary>('/projection/sessions/create', {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
+  async deleteProjectionSession(sessionId: string): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/projection/sessions/${sessionId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async uploadProjectionMask(formData: FormData): Promise<JsonRecord> {
+    return requestUpload<JsonRecord>(this.apiHttp, '/projection/mask', formData);
+  }
+
+  async getProjectionMask(maskId: string): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/projection/masks/${maskId}`);
+  }
+
+  getProjectionMaskImageUrl(sessionId: string): string {
+    return this.buildApiUrl(`/projection/masks/${sessionId}/image`);
+  }
+
+  async importCodepenAnimation(payload: JsonRecord): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>('/projection/animations/import', {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
   async listProjectionConfigs(): Promise<ProjectionConfigSummary[]> {
     const payload = await this.requestJson<unknown>('/projection/configs');
     return asArray<ProjectionConfigSummary>(payload);
@@ -735,6 +849,104 @@ export class NanoDlnaApiClient {
     return this.requestJson<JsonRecord>(`/projection/animation-lists/${id}`, {
       method: 'DELETE',
     });
+  }
+
+  async startStructuredLightingWorker(payload: JsonRecord): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>('/structured-lighting/worker/start', {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
+  async stopStructuredLightingWorker(): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>('/structured-lighting/worker/stop', {
+      method: 'POST',
+    });
+  }
+
+  async confirmStructuredLightingWorkerReady(workerId: string): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/structured-lighting/worker/${workerId}/confirm-ready`, {
+      method: 'POST',
+    });
+  }
+
+  async decodeStructuredLightingSession(sessionId: string, payload: JsonRecord = {}): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/structured-lighting/sessions/${sessionId}/decode`, {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
+  async runStructuredLightingPreviewTuning(sessionId: string, payload: JsonRecord = {}): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/structured-lighting/sessions/${sessionId}/preview-tuning`, {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
+  async getStructuredLightingPreviewTuning(sessionId: string): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/structured-lighting/sessions/${sessionId}/preview-tuning`);
+  }
+
+  async runStructuredLightingTuningSearch(sessionId: string, payload: JsonRecord = {}): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/structured-lighting/sessions/${sessionId}/tuning-search`, {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
+  async getStructuredLightingTuningSearch(sessionId: string): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/structured-lighting/sessions/${sessionId}/tuning-search`);
+  }
+
+  async getStructuredLightingCalibration(sessionId: string): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/structured-lighting/sessions/${sessionId}/calibration`);
+  }
+
+  async getStructuredLightingArtifactReview(sessionId: string): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/structured-lighting/sessions/${sessionId}/artifacts/review`);
+  }
+
+  async updateStructuredLightingReview(sessionId: string, payload: JsonRecord): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/structured-lighting/sessions/${sessionId}/review`, {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
+  async publishStructuredLightingMappingScene(sessionId: string, payload: JsonRecord = {}): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/structured-lighting/sessions/${sessionId}/publish-mapping-scene`, {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
+  getStructuredLightingStepImageUrl(sessionId: string, stepIndex: number | string): string {
+    return this.buildApiUrl(`/structured-lighting/sessions/${sessionId}/steps/${stepIndex}/image`);
+  }
+
+  getStructuredLightingCaptureImageUrl(sessionId: string, stepIndex: number | string): string {
+    return this.buildApiUrl(`/structured-lighting/sessions/${sessionId}/captures/${stepIndex}/image`);
+  }
+
+  getStructuredLightingArtifactPreviewUrl(sessionId: string, previewId: string): string {
+    return this.buildApiUrl(`/structured-lighting/sessions/${sessionId}/artifacts/previews/${previewId}`);
+  }
+
+  getStructuredLightingPreviewTuningPreviewUrl(sessionId: string, candidateId: string, previewName: string): string {
+    return this.buildApiUrl(`/structured-lighting/sessions/${sessionId}/preview-tuning/${candidateId}/previews/${previewName}`);
+  }
+
+  getStructuredLightingTuningSearchPreviewUrl(sessionId: string, candidateId: string, previewName: string): string {
+    return this.buildApiUrl(`/structured-lighting/sessions/${sessionId}/tuning-search/${candidateId}/previews/${previewName}`);
+  }
+
+  getStructuredLightingExportUrl(sessionId: string): string {
+    return this.buildApiUrl(`/structured-lighting/sessions/${sessionId}/export`);
+  }
+
+  async uploadStructuredLightingCapture(sessionId: string, formData: FormData): Promise<JsonRecord> {
+    return requestUpload<JsonRecord>(this.apiHttp, `/structured-lighting/sessions/${sessionId}/captures`, formData);
   }
 
   async getStructuredLightingCapabilities(): Promise<JsonRecord> {
@@ -937,20 +1149,16 @@ export function createServiceModules(apiBaseUrl: string = DEFAULT_API_BASE_URL) 
       return api.get<JsonRecord[]>('/overlay/configs', { query: params });
     },
     getConfig: (configId: number | string) => api.get<JsonRecord>(`/overlay/configs/${configId}`),
-    createConfig: (payload: JsonRecord) => api.post<JsonRecord>('/overlay/configs', { body: payload }),
+    createConfig: (payload: JsonRecord) => client.createOverlayConfig(payload),
     updateConfig: (configId: number | string, payload: JsonRecord) =>
       api.put<JsonRecord>(`/overlay/configs/${configId}`, { body: payload }),
-    deleteConfig: (configId: number | string) =>
-      api.delete<JsonRecord>(`/overlay/configs/${configId}`),
-    duplicateConfig: (configId: number | string) =>
-      api.post<JsonRecord>(`/overlay/configs/${configId}/duplicate`),
-    getGlobalApiConfigs: () => api.get<JsonRecord>('/overlay/global-api-configs'),
-    updateGlobalApiConfigs: (payload: JsonRecord) => api.put<JsonRecord>('/overlay/global-api-configs', { body: payload }),
-    getProjectorRedirectConfig: () => api.get<JsonRecord>('/overlay/projector-redirect'),
-    updateProjectorRedirectConfig: (payload: JsonRecord) => api.put<JsonRecord>('/overlay/projector-redirect', { body: payload }),
-    getRecentProjectorRedirectRequests: (limit = 50) => api.get<JsonRecord[]>('/overlay/projector-redirect/recent', {
-      query: { limit },
-    }),
+    deleteConfig: (configId: number | string) => client.deleteOverlayConfig(configId),
+    duplicateConfig: (configId: number | string) => client.duplicateOverlayConfig(configId),
+    getGlobalApiConfigs: () => client.getGlobalApiConfigs(),
+    updateGlobalApiConfigs: (payload: JsonRecord) => client.updateGlobalApiConfigs(payload),
+    getProjectorRedirectConfig: () => client.getProjectorRedirectConfig(),
+    updateProjectorRedirectConfig: (payload: JsonRecord) => client.updateProjectorRedirectConfig(payload),
+    getRecentProjectorRedirectRequests: (limit = 50) => client.getRecentProjectorRedirectRequests(limit),
     listTemplates: () => api.get<JsonRecord[]>('/overlay/templates'),
     createConfigFromTemplate: (
       templateId: number | string,
@@ -960,43 +1168,51 @@ export function createServiceModules(apiBaseUrl: string = DEFAULT_API_BASE_URL) 
       api.post<JsonRecord>(`/overlay/configs/from-template/${templateId}`, {
         query: { video_id: videoId, name },
       }),
-    getBrightness: () => api.get<JsonRecord>('/overlay/brightness'),
-    setBrightness: (brightness: number) =>
-      api.post<JsonRecord>('/overlay/brightness', { query: { brightness } }),
-    exportMp4: (payload: JsonRecord) => api.post<Blob>('/overlay/export', { body: payload, parseAs: 'blob', timeout: 0 }),
-    startCast: (payload: JsonRecord) => api.post<JsonRecord>('/overlay/cast', { body: payload }),
-    listCastSessions: () => api.get<JsonRecord[]>('/overlay/cast/sessions'),
-    stopCastSession: (sessionId: string) => api.delete<JsonRecord>(`/overlay/cast/sessions/${sessionId}`),
+    getBrightness: () => client.getOverlayBrightness(),
+    setBrightness: (brightness: number) => client.setOverlayBrightness(brightness),
+    exportMp4: (payload: JsonRecord) => client.exportOverlayMp4(payload),
+    startCast: (payload: JsonRecord) => client.startOverlayCast(payload),
+    listCastSessions: () => client.listOverlayCastSessions(),
+    stopCastSession: (sessionId: string) => client.stopOverlayCastSession(sessionId),
+    createStream: (payload: JsonRecord) => client.createOverlayStream(payload),
+    getWindowInit: (projectorId?: string) => client.getOverlayWindowInit(projectorId),
+    getWindowRefreshState: (projectorId?: string) => client.getOverlayWindowRefreshState(projectorId),
+    getWidgetData: (projectorId?: string) => client.getOverlayWidgetData(projectorId),
+    heartbeatProjectorClient: (payload: JsonRecord) => client.heartbeatProjectorClient(payload),
+    getPlaybackSync: (projectorId?: string) => client.getOverlayPlaybackSync(projectorId),
+    getBrightnessStatus: () => client.getBrightnessStatus(),
+    getEventsUrl: () => client.getOverlayEventsUrl(),
   };
 
   const structuredLightingApi = {
-    getCapabilities: () => api.get<JsonRecord>('/structured-lighting/capabilities'),
-    getStatus: () => api.get<JsonRecord>('/structured-lighting/status'),
-    startWorker: (payload: JsonRecord) => api.post<JsonRecord>('/structured-lighting/worker/start', { body: payload }),
-    stopWorker: () => api.post<JsonRecord>('/structured-lighting/worker/stop'),
-    confirmWorkerReady: (workerId: string) => api.post<JsonRecord>(`/structured-lighting/worker/${workerId}/confirm-ready`),
-    listSessions: () => api.get<JsonRecord[]>('/structured-lighting/sessions'),
-    createSession: (payload: JsonRecord) => api.post<JsonRecord>('/structured-lighting/sessions', { body: payload }),
-    deleteSession: (sessionId: string) => api.delete<JsonRecord>(`/structured-lighting/sessions/${sessionId}`),
+    getCapabilities: () => client.getStructuredLightingCapabilities(),
+    getStatus: () => client.getStructuredLightingStatus(),
+    startWorker: (payload: JsonRecord) => client.startStructuredLightingWorker(payload),
+    stopWorker: () => client.stopStructuredLightingWorker(),
+    confirmWorkerReady: (workerId: string) => client.confirmStructuredLightingWorkerReady(workerId),
+    listSessions: () => client.listStructuredLightingSessions(),
+    createSession: (payload: JsonRecord) => client.createStructuredLightingSession(payload),
+    deleteSession: (sessionId: string) => client.deleteStructuredLightingSession(sessionId),
     getCapturePlan: (sessionId: string) => api.get<JsonRecord>(`/structured-lighting/sessions/${sessionId}/capture-plan`),
-    getRuntime: (sessionId: string) => api.get<JsonRecord>(`/structured-lighting/sessions/${sessionId}/runtime`),
-    listCaptures: (sessionId: string) => api.get<JsonRecord[]>(`/structured-lighting/sessions/${sessionId}/captures`),
-    decodeSession: (sessionId: string, payload: JsonRecord = {}) => api.post<JsonRecord>(`/structured-lighting/sessions/${sessionId}/decode`, { body: payload }),
-    runPreviewTuning: (sessionId: string, payload: JsonRecord = {}) => api.post<JsonRecord>(`/structured-lighting/sessions/${sessionId}/preview-tuning`, { body: payload }),
-    getPreviewTuning: (sessionId: string) => api.get<JsonRecord>(`/structured-lighting/sessions/${sessionId}/preview-tuning`),
-    runTuningSearch: (sessionId: string, payload: JsonRecord = {}) => api.post<JsonRecord>(`/structured-lighting/sessions/${sessionId}/tuning-search`, { body: payload }),
-    getTuningSearch: (sessionId: string) => api.get<JsonRecord>(`/structured-lighting/sessions/${sessionId}/tuning-search`),
-    getCalibration: (sessionId: string) => api.get<JsonRecord>(`/structured-lighting/sessions/${sessionId}/calibration`),
-    getArtifactReview: (sessionId: string) => api.get<JsonRecord>(`/structured-lighting/sessions/${sessionId}/artifacts/review`),
-    updateReview: (sessionId: string, payload: JsonRecord) => api.post<JsonRecord>(`/structured-lighting/sessions/${sessionId}/review`, { body: payload }),
-    startSession: (sessionId: string) => api.post<JsonRecord>(`/structured-lighting/sessions/${sessionId}/start`),
-    publishMappingScene: (sessionId: string, payload: JsonRecord = {}) => api.post<JsonRecord>(`/structured-lighting/sessions/${sessionId}/publish-mapping-scene`, { body: payload }),
-    getStepImageUrl: (sessionId: string, stepIndex: number | string) => buildApiUrl(`/structured-lighting/sessions/${sessionId}/steps/${stepIndex}/image`),
-    getCaptureImageUrl: (sessionId: string, stepIndex: number | string) => buildApiUrl(`/structured-lighting/sessions/${sessionId}/captures/${stepIndex}/image`),
-    getArtifactPreviewUrl: (sessionId: string, previewId: string) => buildApiUrl(`/structured-lighting/sessions/${sessionId}/artifacts/previews/${previewId}`),
-    getPreviewTuningPreviewUrl: (sessionId: string, candidateId: string, previewName: string) => buildApiUrl(`/structured-lighting/sessions/${sessionId}/preview-tuning/${candidateId}/previews/${previewName}`),
-    getTuningSearchPreviewUrl: (sessionId: string, candidateId: string, previewName: string) => buildApiUrl(`/structured-lighting/sessions/${sessionId}/tuning-search/${candidateId}/previews/${previewName}`),
-    getExportUrl: (sessionId: string) => buildApiUrl(`/structured-lighting/sessions/${sessionId}/export`),
+    getRuntime: (sessionId: string) => client.getStructuredLightingRuntime(sessionId),
+    listCaptures: (sessionId: string) => client.listStructuredLightingCaptures(sessionId),
+    decodeSession: (sessionId: string, payload: JsonRecord = {}) => client.decodeStructuredLightingSession(sessionId, payload),
+    runPreviewTuning: (sessionId: string, payload: JsonRecord = {}) => client.runStructuredLightingPreviewTuning(sessionId, payload),
+    getPreviewTuning: (sessionId: string) => client.getStructuredLightingPreviewTuning(sessionId),
+    runTuningSearch: (sessionId: string, payload: JsonRecord = {}) => client.runStructuredLightingTuningSearch(sessionId, payload),
+    getTuningSearch: (sessionId: string) => client.getStructuredLightingTuningSearch(sessionId),
+    getCalibration: (sessionId: string) => client.getStructuredLightingCalibration(sessionId),
+    getArtifactReview: (sessionId: string) => client.getStructuredLightingArtifactReview(sessionId),
+    updateReview: (sessionId: string, payload: JsonRecord) => client.updateStructuredLightingReview(sessionId, payload),
+    startSession: (sessionId: string) => client.startStructuredLightingSession(sessionId),
+    publishMappingScene: (sessionId: string, payload: JsonRecord = {}) => client.publishStructuredLightingMappingScene(sessionId, payload),
+    getStepImageUrl: (sessionId: string, stepIndex: number | string) => client.getStructuredLightingStepImageUrl(sessionId, stepIndex),
+    getCaptureImageUrl: (sessionId: string, stepIndex: number | string) => client.getStructuredLightingCaptureImageUrl(sessionId, stepIndex),
+    getArtifactPreviewUrl: (sessionId: string, previewId: string) => client.getStructuredLightingArtifactPreviewUrl(sessionId, previewId),
+    getPreviewTuningPreviewUrl: (sessionId: string, candidateId: string, previewName: string) => client.getStructuredLightingPreviewTuningPreviewUrl(sessionId, candidateId, previewName),
+    getTuningSearchPreviewUrl: (sessionId: string, candidateId: string, previewName: string) => client.getStructuredLightingTuningSearchPreviewUrl(sessionId, candidateId, previewName),
+    getExportUrl: (sessionId: string) => client.getStructuredLightingExportUrl(sessionId),
+    uploadCapture: (sessionId: string, formData: FormData) => client.uploadStructuredLightingCapture(sessionId, formData),
   };
 
   const videoApi = {
@@ -1095,7 +1311,21 @@ export function createServiceModules(apiBaseUrl: string = DEFAULT_API_BASE_URL) 
   };
 
   const projectionApi = {
+    listConfigs: () => client.listProjectionConfigs(),
+    getConfig: (id: number | string) => client.getProjectionConfig(id),
+    createConfig: (data: JsonRecord) => client.createProjectionConfig(data),
+    updateConfig: (id: number | string, data: JsonRecord) => client.updateProjectionConfig(id, data),
+    deleteConfig: (id: number | string) => client.deleteProjectionConfig(id),
+    duplicateConfig: (id: number | string) => client.duplicateProjectionConfig(id),
+    launchConfig: (id: number | string) => client.launchProjectionConfig(id),
+    createSession: (data: JsonRecord) => client.createProjectionSession(data),
+    getSession: (id: string) => client.getProjectionSession(id),
+    deleteSession: (id: string) => client.deleteProjectionSession(id),
+    uploadMask: (formData: FormData) => client.uploadProjectionMask(formData),
+    getMask: (maskId: string) => client.getProjectionMask(maskId),
+    getMaskImageUrl: (sessionId: string) => client.getProjectionMaskImageUrl(sessionId),
     listAnimations: () => api.get<JsonRecord>('/projection/animations'),
+    importCodepenAnimation: (data: JsonRecord) => client.importCodepenAnimation(data),
     listAnimationLists: () => api.get<JsonRecord[]>('/projection/animation-lists'),
     getAnimationList: (id: number | string) => api.get<JsonRecord>(`/projection/animation-lists/${id}`),
     createAnimationList: (data: JsonRecord) => api.post<JsonRecord>('/projection/animation-lists', { body: data }),
