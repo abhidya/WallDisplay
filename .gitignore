@@ -238,6 +238,9 @@ nanodlna.db
 
 # Media files
 *.mp4
+
+# Codex local state
+.codex/
 *.avi
 *.mkv
 *.mov
