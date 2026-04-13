@@ -1100,9 +1100,9 @@
         const MAPPING_TARGET_FRAME_MS = 1000 / 30;
         const MAPPING_MEDIUM_TARGET_FRAME_MS = 1000 / 24;
         const MAPPING_HEAVY_TARGET_FRAME_MS = 1000 / 20;
-        const MAPPING_PROJECTION_TARGET_FRAME_MS = 1000 / 15;
-        const MAPPING_PROJECTION_MEDIUM_TARGET_FRAME_MS = 1000 / 12;
-        const MAPPING_PROJECTION_HEAVY_TARGET_FRAME_MS = 1000 / 10;
+        const MAPPING_PROJECTION_TARGET_FRAME_MS = 1000 / 8;
+        const MAPPING_PROJECTION_MEDIUM_TARGET_FRAME_MS = 1000 / 8;
+        const MAPPING_PROJECTION_HEAVY_TARGET_FRAME_MS = 1000 / 8;
         const MAPPING_HIDDEN_TARGET_FRAME_MS = 1000 / 5;
         const PLAYBACK_SYNC_MIN_POLL_MS = 2000;
         const PLAYBACK_SYNC_FALLBACK_POLL_MS = 15000;
@@ -3506,7 +3506,8 @@
             mappingLastRenderTimestamp = 0;
             const loop = (timestamp) => {
                 const targetFrameMs = getMappingTargetFrameMs();
-                if (!mappingLastRenderTimestamp || (timestamp - mappingLastRenderTimestamp) >= targetFrameMs) {
+                const elapsedMs = mappingLastRenderTimestamp ? (timestamp - mappingLastRenderTimestamp) : targetFrameMs;
+                if (!mappingLastRenderTimestamp || elapsedMs >= targetFrameMs) {
                     mappingLastRenderTimestamp = timestamp;
                     if (mappingDirty || mappingSceneNeedsContinuousRender()) {
                         renderMappingScene();

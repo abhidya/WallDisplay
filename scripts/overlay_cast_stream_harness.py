@@ -2639,6 +2639,13 @@ async def run_overlay_profile(args: argparse.Namespace) -> dict[str, Any]:
     task_ms = (_metric_value(end_metrics, "TaskDuration") - _metric_value(start_metrics, "TaskDuration")) * 1000
     script_ms = (_metric_value(end_metrics, "ScriptDuration") - _metric_value(start_metrics, "ScriptDuration")) * 1000
     layout_ms = (_metric_value(end_metrics, "LayoutDuration") - _metric_value(start_metrics, "LayoutDuration")) * 1000
+    heap_used_mb = _metric_value(end_metrics, "JSHeapUsedSize") / (1024 * 1024)
+    heap_total_mb = _metric_value(end_metrics, "JSHeapTotalSize") / (1024 * 1024)
+    heap_used_delta_mb = (
+        _metric_value(end_metrics, "JSHeapUsedSize") - _metric_value(start_metrics, "JSHeapUsedSize")
+    ) / (1024 * 1024)
+    nodes_total = int(_metric_value(end_metrics, "Nodes"))
+    listeners_total = int(_metric_value(end_metrics, "JSEventListeners"))
 
     return {
         "benchmark_mode": "overlay_profile",
@@ -2652,6 +2659,11 @@ async def run_overlay_profile(args: argparse.Namespace) -> dict[str, Any]:
         "cpu_task_ms": round(task_ms, 3),
         "cpu_script_ms": round(script_ms, 3),
         "cpu_layout_ms": round(layout_ms, 3),
+        "js_heap_used_mb": round(heap_used_mb, 3),
+        "js_heap_total_mb": round(heap_total_mb, 3),
+        "js_heap_used_delta_mb": round(heap_used_delta_mb, 3),
+        "dom_nodes_total": nodes_total,
+        "js_event_listeners_total": listeners_total,
         "network_requests_total": len(resource_entries),
         "network_requests_api": len(api_resources),
         "network_transfer_kb": round(transfer_bytes / 1024.0, 2),
