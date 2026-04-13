@@ -137,7 +137,25 @@ def test_load_devices_from_config_resolves_relative_video_paths(tmp_path):
         update_device_status=lambda *_args, **_kwargs: True,
     )
 
-    result = service.load_devices_from_config(str(config_path))
+    class _FakeDeviceModel:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+        def to_dict(self):
+            return {
+                "name": self.name,
+                "status": self.status,
+                "config": self.config,
+            }
+
+    import web.backend.services.device_discovery_service as discovery_module
+
+    original_device_model = discovery_module.DeviceModel
+    discovery_module.DeviceModel = _FakeDeviceModel
+    try:
+        result = service.load_devices_from_config(str(config_path))
+    finally:
+        discovery_module.DeviceModel = original_device_model
 
     assert len(result) == 1
     assert result[0]["name"] == "Device A"

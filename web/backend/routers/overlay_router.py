@@ -217,12 +217,13 @@ async def create_overlay_stream(
 @router.get("/window-init", response_model=OverlayWindowInitResponse)
 async def get_overlay_window_init(
     config_id: int = Query(..., description="Overlay configuration ID"),
+    projection_mode: bool = Query(False, description="Trim payload for projector overlay playback"),
     db: Session = Depends(get_db)
 ):
     """Build a self-contained payload for bootstrapping overlay_window.html via URL params."""
     try:
         service = OverlayService(db)
-        return service.get_window_init_payload(config_id)
+        return service.get_window_init_payload(config_id, projection_mode=projection_mode)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as e:

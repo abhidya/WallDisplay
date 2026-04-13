@@ -98,9 +98,10 @@ def test_decode_session_persists_calibration_record(tmp_path):
     decode_manifest = decode_dir / "decode_manifest.json"
     decode_manifest.write_text('{"status":"completed"}', encoding="utf-8")
 
-    def fake_decode(session_id, sample_step):
+    def fake_decode(session_id, sample_step, tuning_params=None):
         assert session_id == session["session_id"]
         assert sample_step == 2
+        assert tuning_params is None
         return {
             "status": "completed",
             "started_at": "2026-03-24T00:00:00",
@@ -450,6 +451,7 @@ def test_cast_to_resolved_device_tracks_session_for_unregistered_device():
             target_device=target_device,
             selected_device_id="dlna_10.0.0.45_3500",
             content_url="http://127.0.0.1:9010/step.png",
+            content_type="image/png",
             title="Wall Calibration - Reference White",
         )
     )

@@ -23,6 +23,7 @@ from models.photo import PhotoModel
 from models.photo_list import PhotoList
 from models.video import VideoModel
 from schemas.overlay import (
+    ApiConfigs,
     OverlayConfigCreate,
     OverlayConfigUpdate,
     OverlayConfigResponse,
@@ -397,19 +398,65 @@ class OverlayService:
             config_id=config_id
         )
 
-    def get_window_init_payload(self, config_id: int) -> OverlayWindowInitResponse:
+    def get_window_init_payload(self, config_id: int, projection_mode: bool = False) -> OverlayWindowInitResponse:
         config = self.db.query(OverlayConfig).filter(OverlayConfig.id == config_id).first()
         if not config:
             raise ValueError("Configuration not found")
 
         stream_info = self.create_stream(config.video_id, config_id)
+        config_payload = self._to_response(config, include_global_api_configs=not projection_mode)
+        mapping_scene = stream_info.mapping_scene
+        if projection_mode:
+            config_payload = self._minimize_window_init_config(config_payload)
+            mapping_scene = self._minimize_mapping_scene_payload(mapping_scene)
         return OverlayWindowInitResponse(
-            config=self._to_response(config, include_global_api_configs=True),
+            config=config_payload,
             background_type=stream_info.background_type,
             streaming_url=stream_info.streaming_url,
             video_path=stream_info.video_path,
-            mapping_scene=stream_info.mapping_scene,
+            mapping_scene=mapping_scene,
+            revision=self._build_window_refresh_revision(config),
         )
+
+    def _minimize_window_init_config(self, config: OverlayConfigResponse) -> OverlayConfigResponse:
+        visible_widgets = [widget for widget in (config.widgets or []) if getattr(widget, "visible", True) is not False]
+        return config.model_copy(
+            update={
+                "widgets": visible_widgets,
+                "api_configs": ApiConfigs(),
+            }
+        )
+
+    def _minimize_mapping_scene_payload(self, mapping_scene: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if not mapping_scene:
+            return mapping_scene
+
+        shared_media_sets: Dict[str, List[Dict[str, Any]]] = {}
+        media_set_keys: Dict[str, str] = {}
+        next_key = 1
+        minimized_groups = []
+
+        for group in mapping_scene.get("groups") or []:
+            next_group = dict(group)
+            media_items = next_group.get("media_items")
+            if isinstance(media_items, list) and len(media_items) > 1:
+                signature = json.dumps(media_items, sort_keys=True, separators=(",", ":"))
+                shared_key = media_set_keys.get(signature)
+                if shared_key is None:
+                    shared_key = f"media_set_{next_key}"
+                    next_key += 1
+                    media_set_keys[signature] = shared_key
+                    shared_media_sets[shared_key] = media_items
+                next_group["media_items_key"] = shared_key
+                next_group.pop("media_items", None)
+                next_group.pop("media_urls", None)
+            minimized_groups.append(next_group)
+
+        return {
+            **mapping_scene,
+            "groups": minimized_groups,
+            "shared_media_sets": shared_media_sets,
+        }
 
     def get_window_refresh_state(self, config_id: int) -> dict:
         config = self.db.query(OverlayConfig).filter(OverlayConfig.id == config_id).first()

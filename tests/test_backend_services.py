@@ -1,273 +1,309 @@
 #!/usr/bin/env python3
 """
-Backend service layer tests for improved coverage
+Backend service layer tests aligned with current service APIs.
 """
-import pytest
-from unittest.mock import Mock, patch, MagicMock, AsyncMock
-import sys
+import importlib
 import os
-from datetime import datetime
+import sys
+import threading
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'web', 'backend'))
+import pytest
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "web" / "backend"))
+
+
+@pytest.fixture
+def mock_db():
+    return Mock()
+
+
+@pytest.fixture
+def runtime_stub():
+    runtime = SimpleNamespace()
+    runtime.device_status = {}
+    runtime.device_state_lock = threading.RLock()
+    runtime.connectivity_timeout = 30
+    runtime.get_device = lambda _name: None
+    runtime.devices = []
+    runtime.get_devices = lambda: runtime.devices
+    runtime.auto_play_video = Mock(return_value=True)
+    runtime.get_assigned_video = lambda _name: None
+    return runtime
 
 
 class TestDeviceService:
-    """Test DeviceService"""
-    
     @pytest.fixture
-    def mock_db(self):
-        """Mock database session"""
-        return Mock()
-    
-    @pytest.fixture
-    def mock_device_manager(self):
-        """Mock device manager"""
-        manager = Mock()
-        manager.get_devices.return_value = []
-        manager.get_device.return_value = None
-        return manager
-    
-    @pytest.fixture
-    def device_service(self, mock_db, mock_device_manager):
-        """Create device service with mocks"""
-        from web.backend.services.device_service import DeviceService
-        service = DeviceService(mock_db, mock_device_manager)
-        return service
-    
-    def test_get_devices_empty(self, device_service, mock_device_manager, mock_db):
-        """Test getting devices when none exist"""
-        # Mock the database query
-        mock_db.query().offset().limit().all.return_value = []
-        
-        devices = device_service.get_devices()
-        assert devices == []
-    
-    def test_get_devices_with_data(self, device_service, mock_device_manager):
-        """Test getting devices with data"""
-        mock_device = Mock()
-        mock_device.name = "Test Device"
-        mock_device.hostname = "192.168.1.100"
-        mock_device.is_playing = False
-        mock_device_manager.get_devices.return_value = [mock_device]
-        
-        devices = device_service.get_devices()
-        assert len(devices) == 1
-        assert devices[0]["name"] == "Test Device"
-    
-    def test_play_video(self, device_service, mock_device_manager, mock_db):
-        """Test playing video on device"""
-        mock_device_manager.play_video_on_device.return_value = True
-        
+    def device_service(self, mock_db, runtime_stub):
+        device_service_module = importlib.import_module("services.device_service")
+        return device_service_module.DeviceService(mock_db, runtime=runtime_stub)
+
+    def test_get_devices_empty(self, device_service, mock_db):
+        query = mock_db.query.return_value
+        query.offset.return_value.limit.return_value.all.return_value = []
+
+        assert device_service.get_devices() == []
+
+    def test_get_devices_serializes_database_rows(self, device_service, mock_db):
+        query = mock_db.query.return_value
+        db_device = SimpleNamespace(id=1, name="Test Device")
+        query.offset.return_value.limit.return_value.all.return_value = [db_device]
+        device_service._device_to_dict = Mock(return_value={"id": 1, "name": "Test Device"})
+
+        result = device_service.get_devices(skip=5, limit=10)
+
+        assert result == [{"id": 1, "name": "Test Device"}]
+        device_service._device_to_dict.assert_called_once_with(db_device)
+        query.offset.assert_called_once_with(5)
+        query.offset.return_value.limit.assert_called_once_with(10)
+
+    def test_play_video_delegates_to_playback_service(self, device_service):
+        device_service.device_playback_service.play_video = Mock(return_value=True)
+
         result = device_service.play_video(1, "test.mp4", loop=True)
-        assert result == {"status": "playing", "video": "test.mp4"}
-    
-    def test_stop_device(self, device_service, mock_device_manager):
-        """Test stopping device playback"""
-        mock_device_manager.stop_device.return_value = True
-        
-        result = device_service.stop_device(1)
-        assert result == {"status": "stopped"}
+
+        assert result is True
+        device_service.device_playback_service.play_video.assert_called_once_with(1, "test.mp4", True)
+
+    def test_stop_video_delegates_to_playback_service(self, device_service):
+        device_service.device_playback_service.stop_video = Mock(return_value=True)
+
+        result = device_service.stop_video(1)
+
+        assert result is True
+        device_service.device_playback_service.stop_video.assert_called_once_with(1)
 
 
 class TestVideoService:
-    """Test VideoService"""
-    
     @pytest.fixture
-    def mock_db(self):
-        """Mock database session"""
-        return Mock()
-    
+    def mock_streaming_service(self):
+        service = Mock()
+        service.get_serve_ip.return_value = "10.0.0.63"
+        return service
+
     @pytest.fixture
-    def video_service(self, mock_db):
-        """Create video service"""
-        from web.backend.services.video_service import VideoService
-        return VideoService(mock_db)
-    
-    @patch('os.walk')
-    def test_scan_videos_empty(self, mock_walk, video_service):
-        """Test scanning videos when none exist"""
-        mock_walk.return_value = []
-        
-        videos = video_service.scan_videos("/videos")
-        assert videos == []
-    
-    @patch('os.walk')
-    @patch('os.path.getsize')
-    @patch('os.path.getmtime')
-    def test_scan_videos_with_files(self, mock_mtime, mock_size, mock_walk, video_service):
-        """Test scanning videos with files"""
-        mock_walk.return_value = [
-            ("/videos", [], ["test.mp4", "test.avi", "not_video.txt"])
-        ]
-        mock_size.return_value = 1000000  # 1MB
-        mock_mtime.return_value = 1234567890
-        
-        videos = video_service.scan_videos("/videos")
-        assert len(videos) == 2  # Only video files
-        assert videos[0]["name"] == "test.mp4"
-        assert videos[1]["name"] == "test.avi"
-    
-    def test_get_videos_paginated(self, video_service, mock_db):
-        """Test getting videos with pagination"""
-        mock_db.query().filter().count.return_value = 0
-        mock_db.query().filter().offset().limit().all.return_value = []
-        
-        result = video_service.get_videos(page=1, per_page=20)
-        assert result["items"] == []
-        assert result["total"] == 0
-        assert result["page"] == 1
-        assert result["per_page"] == 20
+    def video_service(self, mock_db, mock_streaming_service):
+        video_service_module = importlib.import_module("services.video_service")
+        return video_service_module.VideoService(mock_db, mock_streaming_service)
+
+    def test_scan_directory_empty(self, video_service, monkeypatch):
+        monkeypatch.setattr("services.video_service.os.path.exists", lambda _path: True)
+        monkeypatch.setattr("services.video_service.os.path.isdir", lambda _path: True)
+        monkeypatch.setattr("services.video_service.os.walk", lambda _path: [])
+
+        assert video_service.scan_directory("/videos") == []
+
+    def test_scan_directory_adds_only_video_files(self, video_service, monkeypatch):
+        monkeypatch.setattr("services.video_service.os.path.exists", lambda _path: True)
+        monkeypatch.setattr("services.video_service.os.path.isdir", lambda _path: True)
+        monkeypatch.setattr(
+            "services.video_service.os.walk",
+            lambda _path: [
+                ("/videos", [], ["test.mp4", "clip.avi", "notes.txt"]),
+            ],
+        )
+        video_one = SimpleNamespace(name="test")
+        video_two = SimpleNamespace(name="clip")
+        video_service.get_video_by_path = Mock(side_effect=[None, None])
+        video_service.create_video = Mock(side_effect=[video_one, video_two])
+
+        result = video_service.scan_directory("/videos")
+
+        assert result == [video_one, video_two]
+        created = [call.args[0] for call in video_service.create_video.call_args_list]
+        assert [video.name for video in created] == ["test", "clip"]
+        assert [video.path for video in created] == ["/videos/test.mp4", "/videos/clip.avi"]
+        assert [video.category for video in created] == ["background", "background"]
+        assert [video.source_type for video in created] == ["directory_scan", "directory_scan"]
+
+    def test_get_videos_returns_database_rows(self, video_service, mock_db):
+        query = mock_db.query.return_value
+        rows = [SimpleNamespace(id=1, name="Test Video")]
+        query.offset.return_value.limit.return_value.all.return_value = rows
+
+        result = video_service.get_videos(skip=2, limit=20)
+
+        assert result == rows
+        query.offset.assert_called_once_with(2)
+        query.offset.return_value.limit.assert_called_once_with(20)
 
 
 class TestStreamingService:
-    """Test StreamingService"""
-    
     @pytest.fixture
-    def mock_config(self):
-        """Mock configuration"""
-        config = Mock()
-        config.stream_base_url = "http://localhost:8888"
-        config.stream_protocol = "http"
-        config.videos_dir = "/videos"
-        return config
-    
-    @pytest.fixture
-    def streaming_service(self, mock_config):
-        """Create streaming service"""
-        with patch('web.backend.core.streaming_service.Config') as mock_config_class:
-            mock_config_class.return_value = mock_config
-            
-            from web.backend.core.streaming_service import StreamingService
-            return StreamingService()
-    
-    def test_get_stream_url(self, streaming_service):
-        """Test generating stream URL"""
-        url = streaming_service.get_stream_url("/videos/test.mp4")
-        assert url == "http://localhost:8888/stream/videos/test.mp4"
-    
-    @patch('os.path.exists')
-    def test_validate_video_path_valid(self, mock_exists, streaming_service):
-        """Test validating valid video path"""
-        mock_exists.return_value = True
-        
-        valid = streaming_service.validate_video_path("/videos/test.mp4")
-        assert valid is True
-    
-    @patch('os.path.exists')
-    def test_validate_video_path_invalid(self, mock_exists, streaming_service):
-        """Test validating invalid video path"""
-        mock_exists.return_value = False
-        
-        valid = streaming_service.validate_video_path("/invalid/test.mp4")
-        assert valid is False
+    def streaming_service(self):
+        streaming_registry_module = importlib.import_module("core.streaming_registry")
+        streaming_registry_module.StreamingSessionRegistry._instance = None
+
+        streaming_service_module = importlib.import_module("core.streaming_service")
+        service = streaming_service_module.StreamingService(runtime=None)
+        yield service
+
+        service.registry.stop_monitoring()
+        streaming_registry_module.StreamingSessionRegistry._instance = None
+
+    def test_normalize_file_name(self, streaming_service):
+        assert streaming_service.normalize_file_name("Tést Video 01!.mp4") == "test-video-01.mp4"
+
+    def test_get_or_create_stream_reuses_existing_mapping(self, streaming_service):
+        streaming_service.file_to_session_map = {
+            "10.0.0.5:9011/uploads/videos/test-video.mp4": "session-1",
+        }
+
+        result = streaming_service.get_or_create_stream(
+            "/tmp/uploads/videos/test-video.mp4",
+            device_name="Projector A",
+        )
+
+        assert result == {
+            "port": 9011,
+            "url": "http://10.0.0.5:9011/uploads/videos/test-video.mp4",
+        }
+
+    def test_get_or_create_stream_starts_new_server_when_missing(self, streaming_service):
+        streaming_service.get_serve_ip = Mock(return_value="10.0.0.5")
+        server = SimpleNamespace(server_address=("10.0.0.5", 9012))
+        streaming_service.start_server = Mock(
+            return_value=(
+                {"sample.mp4": "http://10.0.0.5:9012/sample.mp4"},
+                server,
+            )
+        )
+
+        result = streaming_service.get_or_create_stream(
+            "/videos/sample.mp4",
+            device_name="Projector A",
+        )
+
+        assert result == {
+            "port": 9012,
+            "url": "http://10.0.0.5:9012/sample.mp4",
+        }
+        streaming_service.start_server.assert_called_once_with(
+            files={"sample.mp4": "/videos/sample.mp4"},
+            serve_ip="10.0.0.5",
+            port_range=(9010, 9100),
+            device_name="Projector A",
+            stream_type="device_stream",
+            consumer_id=None,
+        )
 
 
 class TestBrightnessControlService:
-    """Test BrightnessControlService"""
-    
     @pytest.fixture
-    def mock_device_manager(self):
-        """Mock device manager"""
-        manager = Mock()
-        manager.get_devices.return_value = []
-        return manager
-    
-    @pytest.fixture
-    def brightness_service(self, mock_device_manager):
-        """Create brightness control service"""
-        with patch('web.backend.services.brightness_control_service.DeviceManager') as mock_manager_class:
-            mock_manager_class.get_instance.return_value = mock_device_manager
-            
-            from web.backend.services.brightness_control_service import BrightnessControlService
-            service = BrightnessControlService()
-            service.device_manager = mock_device_manager
-            return service
-    
-    def test_get_brightness_no_devices(self, brightness_service):
-        """Test getting brightness with no devices"""
-        brightness = brightness_service.get_brightness()
-        assert brightness == 100  # Default
-    
-    def test_set_brightness(self, brightness_service, mock_device_manager):
-        """Test setting brightness"""
-        mock_device = Mock()
-        mock_device.name = "Test Device"
-        mock_device_manager.get_devices.return_value = [mock_device]
-        
+    def brightness_service(self, monkeypatch, runtime_stub):
+        brightness_module = importlib.import_module("services.brightness_control_service")
+        monkeypatch.setattr(brightness_module, "get_app_runtime", lambda: runtime_stub)
+        monkeypatch.setattr(brightness_module, "create_black_video", lambda duration=86400: "/tmp/black.mp4")
+        monkeypatch.setattr(
+            brightness_module,
+            "get_overlay_cast_service",
+            lambda: SimpleNamespace(list_sessions=lambda: []),
+        )
+        return brightness_module.BrightnessControlService()
+
+    def test_get_status_reports_no_devices(self, brightness_service):
+        status = brightness_service.get_status()
+
+        assert status["blackout_active"] is False
+        assert status["playing_devices"] == []
+        assert status["backed_up_devices"] == []
+        assert status["playing_count"] == 0
+        assert status["total_devices"] == 0
+
+    def test_set_brightness_updates_without_blackout_transition(self, brightness_service):
         result = brightness_service.set_brightness(50)
-        assert result["brightness"] == 50
-        mock_device.set_brightness.assert_called_once_with(50)
-    
-    @patch('os.path.exists')
-    def test_activate_blackout_no_video(self, mock_exists, brightness_service):
-        """Test activating blackout when black video doesn't exist"""
-        mock_exists.return_value = False
-        
-        with pytest.raises(Exception, match="Black video not found"):
-            brightness_service.activate_blackout()
-    
-    def test_deactivate_blackout_not_active(self, brightness_service):
-        """Test deactivating blackout when not active"""
-        brightness_service.blackout_active = False
-        
-        result = brightness_service.deactivate_blackout()
+
+        assert result == {
+            "brightness": 50,
+            "status": "updated",
+            "blackout_active": False,
+            "message": "Brightness set to 50%",
+        }
+
+    def test_set_brightness_to_zero_errors_when_black_video_missing(self, brightness_service, runtime_stub, monkeypatch):
+        runtime_stub.devices = [
+            SimpleNamespace(
+                name="Projector A",
+                status="connected",
+                hostname=None,
+                action_url=None,
+                is_playing=False,
+                current_video=None,
+            )
+        ]
+        monkeypatch.setattr("services.brightness_control_service.os.path.exists", lambda _path: False)
+
+        result = brightness_service.set_brightness(0)
+
+        assert result == {
+            "brightness": 0,
+            "status": "error",
+            "error": "Black video file not available",
+        }
+
+    def test_set_brightness_deactivates_existing_blackout(self, brightness_service):
+        brightness_service.is_blackout_active = True
+
+        result = brightness_service.set_brightness(75)
+
+        assert result["status"] == "blackout_deactivated"
         assert result["blackout_active"] is False
-        assert result["message"] == "Blackout is not currently active"
+        assert result["restored_devices"] == []
+        assert result["device_count"] == 0
 
 
-class TestStreamingRegistry:
-    """Test StreamingRegistry"""
-    
+class TestStreamingSessionRegistry:
     @pytest.fixture
     def streaming_registry(self):
-        """Create streaming registry"""
-        from web.backend.core.streaming_registry import StreamingRegistry
-        return StreamingRegistry()
-    
+        registry_module = importlib.import_module("core.streaming_registry")
+        registry_module.StreamingSessionRegistry._instance = None
+        registry = registry_module.StreamingSessionRegistry.get_instance()
+        yield registry
+        registry.stop_monitoring()
+        registry_module.StreamingSessionRegistry._instance = None
+
     def test_register_session(self, streaming_registry):
-        """Test registering streaming session"""
-        session_id = streaming_registry.register_session(
+        session = streaming_registry.register_session(
             device_name="Test Device",
             video_path="/videos/test.mp4",
-            streaming_url="http://localhost:8888/stream/test.mp4",
-            streaming_port=8888
+            server_ip="127.0.0.1",
+            server_port=8888,
         )
-        
-        assert session_id is not None
+
         sessions = streaming_registry.get_active_sessions()
+        assert session.session_id
         assert len(sessions) == 1
-        assert sessions[0]["device_name"] == "Test Device"
-    
+        assert sessions[0].device_name == "Test Device"
+        assert sessions[0].server_port == 8888
+
     def test_unregister_session(self, streaming_registry):
-        """Test unregistering streaming session"""
-        session_id = streaming_registry.register_session(
+        session = streaming_registry.register_session(
             device_name="Test Device",
             video_path="/videos/test.mp4",
-            streaming_url="http://localhost:8888/stream/test.mp4",
-            streaming_port=8888
+            server_ip="127.0.0.1",
+            server_port=8888,
         )
-        
-        streaming_registry.unregister_session(session_id)
-        sessions = streaming_registry.get_active_sessions()
-        assert len(sessions) == 0
-    
-    def test_get_session_by_device(self, streaming_registry):
-        """Test getting session by device name"""
-        session_id = streaming_registry.register_session(
+
+        assert streaming_registry.unregister_session(session.session_id) is True
+        assert streaming_registry.get_active_sessions() == []
+
+    def test_get_sessions_for_device(self, streaming_registry):
+        session = streaming_registry.register_session(
             device_name="Test Device",
             video_path="/videos/test.mp4",
-            streaming_url="http://localhost:8888/stream/test.mp4",
-            streaming_port=8888
+            server_ip="127.0.0.1",
+            server_port=8888,
         )
-        
-        session = streaming_registry.get_session_by_device("Test Device")
-        assert session is not None
-        assert session["id"] == session_id
-        
-        # Non-existent device
-        session = streaming_registry.get_session_by_device("Unknown Device")
-        assert session is None
+
+        sessions = streaming_registry.get_sessions_for_device("Test Device")
+
+        assert len(sessions) == 1
+        assert sessions[0].session_id == session.session_id
+        assert streaming_registry.get_sessions_for_device("Unknown Device") == []
 
 
 if __name__ == "__main__":

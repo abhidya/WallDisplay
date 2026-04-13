@@ -263,59 +263,13 @@ class TestDeviceManager(unittest.TestCase):
             # Verify the play method was called with the streaming URL
             mock_play.assert_called_once_with(streaming_url, True)
     
-    @patch('core.device_manager.DeviceManager._discover_dlna_devices')
-    @patch('core.dlna_device.DLNADevice.play')
-    @patch('time.sleep')  # Patch time.sleep to prevent timeouts
-    def test_discovery_loop_device_config(self, mock_sleep, mock_play, mock_discover):
-        """Test that the discovery loop correctly processes device configurations"""
-        # Set up mocks
-        mock_play.return_value = True
-        mock_sleep.return_value = None  # Make sleep do nothing
+    def test_discovery_loop_delegates_to_discovery_coordinator(self):
+        """Test that the discovery loop delegates to DiscoveryCoordinator"""
+        self.device_manager.discovery_coordinator.run_loop = Mock()
 
-        # Make _discover_dlna_devices return our test devices
-        discovered_devices = [
-            {
-                "device_name": "TestDevice1",
-                "friendly_name": "TestDevice1",
-                "type": "dlna",
-                "hostname": "192.168.1.100",
-                "location": "http://192.168.1.100:49152/device.xml",
-                "action_url": "http://192.168.1.100:49152/AVTransport/Control"
-            }
-        ]
-        mock_discover.return_value = discovered_devices
+        self.device_manager._discovery_loop()
 
-        # Load configurations into ConfigService
-        config_service = ConfigService.get_instance()
-        for device_config in self.test_config:
-            config_service.add_device_config(
-                device_config["device_name"],
-                device_config.copy(),
-                source="test"
-            )
-
-        # Temporarily reduce discovery interval for testing
-        original_interval = self.device_manager.discovery_interval
-        self.device_manager.discovery_interval = 0.1
-
-        try:
-            # Start discovery, but make it run only once by injecting a function that will 
-            # set discovery_running to False after one iteration
-            def stop_discovery_after_loop(*args, **kwargs):
-                self.device_manager.discovery_running = False
-                return None
-            
-            mock_sleep.side_effect = stop_discovery_after_loop
-            
-            # Start discovery in the main thread for testing
-            self.device_manager.discovery_running = True
-            self.device_manager._discovery_loop()
-            
-            # Assert mock_play was called for TestDevice1
-            mock_play.assert_called()
-        finally:
-            # Restore original interval
-            self.device_manager.discovery_interval = original_interval
+        self.device_manager.discovery_coordinator.run_loop.assert_called_once_with()
     
     def test_thread_safety_register_device(self):
         """Test thread safety of device registration"""

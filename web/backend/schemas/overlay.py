@@ -95,6 +95,7 @@ class OverlayWindowInitResponse(BaseModel):
     streaming_url: Optional[str] = None
     video_path: Optional[str] = None
     mapping_scene: Optional[Dict[str, Any]] = None
+    revision: Optional[str] = None
 
 
 class OverlayCastStartRequest(BaseModel):

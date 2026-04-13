@@ -37,7 +37,7 @@ def test_device_manager_devices_property_uses_inventory_service():
 
 def test_register_device_rebinds_core_device_to_owning_manager(monkeypatch):
     monkeypatch.setattr(
-        "web.backend.services.device_lifecycle_service.DLNADevice",
+        "services.device_lifecycle_service.DLNADevice",
         lambda info: SimpleNamespace(name=info["device_name"], device_info=info, device_manager="global"),
     )
 
