@@ -30,3 +30,4 @@ sse-starlette~=3.3.3
 jsonschema~=4.26.0
 httpx~=0.28.1
 zeroconf
+pyngrok~=7.1.5
