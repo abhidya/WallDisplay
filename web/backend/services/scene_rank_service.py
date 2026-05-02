@@ -2,9 +2,9 @@ from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
-from models.mapping_scene import MappingScene
-from models.scene_rank import SceneRank
-from schemas.scene_rank import SceneRankCreate, SceneRankResponse, SceneRankUpdate
+from web.backend.models.mapping_scene import MappingScene
+from web.backend.models.scene_rank import SceneRank
+from web.backend.schemas.scene_rank import SceneRankCreate, SceneRankResponse, SceneRankUpdate
 
 
 class SceneRankService:

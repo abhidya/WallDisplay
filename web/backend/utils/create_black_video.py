@@ -81,8 +81,8 @@ def create_minimal_black_video_fallback(output_path: str, width: int, height: in
     """
     logger.warning("Using fallback method to create black video (limited compatibility)")
     
-    # For now, we'll just create an empty file as a placeholder
-    # In production, you'd want to ensure ffmpeg is installed
+    # Last-resort fallback: write an empty placeholder file so callers do not
+    # crash immediately. This is not a valid video for most devices.
     with open(output_path, 'wb') as f:
         f.write(b'')  # Empty file as placeholder
     

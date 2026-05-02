@@ -137,9 +137,9 @@ class TestFrontendComponents(unittest.TestCase):
                 self.assertTrue("kill" in content or "pkill" in content, 
                                "run_dashboard.sh does not contain process termination commands")
                 
-                # Verify environment activation
-                self.assertTrue("venv/bin/activate" in content, 
-                               "run_dashboard.sh does not activate virtual environment")
+                # Verify environment/bootstrap wiring through common_env.sh
+                self.assertTrue('scripts/common_env.sh' in content or 'source "$SCRIPT_DIR/scripts/common_env.sh"' in content,
+                               "run_dashboard.sh does not source common environment setup")
     
     def test_dashboard_path_handling(self):
         """Test path handling in dashboard scripts"""
@@ -151,14 +151,11 @@ class TestFrontendComponents(unittest.TestCase):
                 with open(script_path, 'r') as f:
                     content = f.read()
                     
-                    # Verify ROOT_DIR usage
-                    self.assertTrue("ROOT_DIR=" in content or "root_dir=" in content or "$(pwd)" in content,
-                                   f"{script_name} does not capture root directory")
-                    
-                    # Check for cd commands followed by relative paths
-                    if "cd " in content and "./" in content:
-                        self.assertTrue("$ROOT_DIR" in content or "$(pwd)" in content,
-                                      f"{script_name} uses relative paths without root directory reference")
+                    # Verify script anchors itself to its own location or shared env root.
+                    self.assertTrue(
+                        'SCRIPT_DIR=' in content or 'NANODLNA_ROOT_DIR' in content or '$(pwd)' in content,
+                        f"{script_name} does not anchor paths to a stable base directory"
+                    )
     
     def test_device_discovery_api(self):
         """Test device discovery API endpoint (mock version)"""

@@ -5,9 +5,9 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
-from models.device import DeviceModel
-from services.overlay_cast_service import get_overlay_cast_service
-from services.projector_redirect_runtime import get_recent_live_projector_client
+from web.backend.models.device import DeviceModel
+from web.backend.services.overlay_cast_service import get_overlay_cast_service
+from web.backend.services.projector_redirect_runtime import get_recent_live_projector_client
 
 logger = logging.getLogger(__name__)
 

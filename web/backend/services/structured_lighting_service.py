@@ -8,18 +8,26 @@ import threading
 import uuid
 import zipfile
 import asyncio
-from datetime import datetime
+from datetime import UTC, datetime
 from io import BytesIO
 from typing import Dict, List, Optional
 from urllib.parse import urlparse
 
 from PIL import Image
-from core.streaming_service import get_streaming_service
+from web.backend.core.streaming_service import get_streaming_service
 from discovery.base import CastingMethod, Device, DeviceCapability
-from services.app_runtime import get_app_runtime
+from web.backend.services.app_runtime import get_app_runtime
 
 
 WORKER_TIMEOUT_SECONDS = 15
+
+
+def _utcnow() -> datetime:
+    return datetime.now(UTC)
+
+
+def _utcnow_iso() -> str:
+    return _utcnow().isoformat()
 
 
 class StructuredLightingService:
@@ -89,7 +97,7 @@ class StructuredLightingService:
         state: str = "idle",
         message: Optional[str] = None,
     ) -> Dict:
-        now = datetime.utcnow()
+        now = _utcnow()
         with self._lock:
             self._refresh_worker_process_state_locked()
             self._worker.update({
@@ -151,7 +159,7 @@ class StructuredLightingService:
                 cwd=os.path.dirname(worker_script),
                 start_new_session=True,
             )
-            now = datetime.utcnow().isoformat()
+            now = _utcnow_iso()
             self._worker.update({
                 "worker_id": worker_id,
                 "state": "starting",
@@ -200,7 +208,7 @@ class StructuredLightingService:
                 "message": "Host capture worker stopped.",
                 "process_state": "stopped",
                 "process_pid": None,
-                "process_exited_at": datetime.utcnow().isoformat(),
+                "process_exited_at": _utcnow_iso(),
                 "operator_ready": False,
             })
             return self._get_worker_status()
@@ -238,7 +246,7 @@ class StructuredLightingService:
             session["decode"] = self._default_decode_state()
             session["calibration"] = self._default_calibration_state()
             session["review"] = self._default_review_state()
-            session["updated_at"] = datetime.utcnow().isoformat()
+            session["updated_at"] = _utcnow_iso()
             self._persist_session(session)
             return dict(session)
 
@@ -274,14 +282,14 @@ class StructuredLightingService:
                 current_step_index = session.get("current_step_index", 0)
                 if current_step_index >= len(plan["steps"]):
                     session["status"] = "completed"
-                    session["updated_at"] = datetime.utcnow().isoformat()
+                    session["updated_at"] = _utcnow_iso()
                     self._persist_session(session)
                     continue
                 step = plan["steps"][current_step_index]
                 if session["presentation_mode"] == "dlna_step":
                     self._present_step_via_dlna(session, step)
                 session["status"] = "capturing"
-                session["updated_at"] = datetime.utcnow().isoformat()
+                session["updated_at"] = _utcnow_iso()
                 self._persist_session(session)
                 return {
                     "session_id": session["session_id"],
@@ -328,7 +336,7 @@ class StructuredLightingService:
                 "step_kind": step["kind"] if step else "unknown",
                 "filename": stored_name,
                 "stored_path": stored_path,
-                "captured_at": datetime.utcnow().isoformat(),
+                "captured_at": _utcnow_iso(),
             }
             session["captures"] = captures
 
@@ -338,13 +346,13 @@ class StructuredLightingService:
                 captured_steps.sort()
             session["captured_step_indices"] = captured_steps
             session["captured_frames"] = len(captured_steps)
-            session["last_capture_at"] = datetime.utcnow().isoformat()
+            session["last_capture_at"] = _utcnow_iso()
             session["current_step_index"] = step_index + 1
             session["status"] = "ready" if session["captured_frames"] < session["pattern_frame_count"] else "completed"
             session["decode"] = self._default_decode_state()
             session["calibration"] = self._default_calibration_state()
             session["review"] = self._default_review_state()
-            session["updated_at"] = datetime.utcnow().isoformat()
+            session["updated_at"] = _utcnow_iso()
             self._persist_session(session)
             return dict(session)
 
@@ -392,7 +400,7 @@ class StructuredLightingService:
             session["decode"] = {
                 **self._default_decode_state(),
                 "status": "running",
-                "started_at": datetime.utcnow().isoformat(),
+                "started_at": _utcnow_iso(),
                 "message": "Decoding graycode captures and generating repaired projector layers.",
                 "progress": {
                     "phase": "initializing",
@@ -403,7 +411,7 @@ class StructuredLightingService:
             session["calibration"] = self._default_calibration_state()
             session["review"] = self._default_review_state()
             session["tuning_search"] = self._default_tuning_search_state()
-            session["updated_at"] = datetime.utcnow().isoformat()
+            session["updated_at"] = _utcnow_iso()
             self._persist_session(session)
 
         try:
@@ -420,10 +428,10 @@ class StructuredLightingService:
                         **self._default_decode_state(),
                         "status": "failed",
                         "started_at": session.get("decode", {}).get("started_at"),
-                        "finished_at": datetime.utcnow().isoformat(),
+                        "finished_at": _utcnow_iso(),
                         "message": str(exc),
                     }
-                    session["updated_at"] = datetime.utcnow().isoformat()
+                    session["updated_at"] = _utcnow_iso()
                     self._persist_session(session)
                     return dict(session)
             raise
@@ -435,7 +443,7 @@ class StructuredLightingService:
             session["decode"] = result
             session["calibration"] = self._build_calibration_record(session, result)
             session["review"] = self._build_review_state(result)
-            session["updated_at"] = datetime.utcnow().isoformat()
+            session["updated_at"] = _utcnow_iso()
             self._persist_session(session)
             return dict(session)
 
@@ -485,7 +493,7 @@ class StructuredLightingService:
                     "label": "Preparing tuning search",
                 },
             }
-            session["updated_at"] = datetime.utcnow().isoformat()
+            session["updated_at"] = _utcnow_iso()
             self._persist_session(session)
 
         candidates = []
@@ -508,7 +516,7 @@ class StructuredLightingService:
                         },
                         "candidates": list(candidates),
                     }
-                    session["updated_at"] = datetime.utcnow().isoformat()
+                    session["updated_at"] = _utcnow_iso()
                     self._persist_session(session)
             result = self._generate_filtered_projector_masks(
                 session_id=session_id,
@@ -554,7 +562,7 @@ class StructuredLightingService:
                         },
                         "candidates": list(candidates),
                     }
-                    session["updated_at"] = datetime.utcnow().isoformat()
+                    session["updated_at"] = _utcnow_iso()
                     self._persist_session(session)
 
         with self._lock:
@@ -564,7 +572,7 @@ class StructuredLightingService:
             session["tuning_search"] = {
                 "status": "completed",
                 "message": f"Generated {len(candidates)} tuning candidates.",
-                "generated_at": datetime.utcnow().isoformat(),
+                "generated_at": _utcnow_iso(),
                 "sample_step": sample_step,
                 "base_tuning_params": base_params,
                 "parameter_grid": parameter_grid or {},
@@ -576,7 +584,7 @@ class StructuredLightingService:
                     "label": "Parameter search completed",
                 },
             }
-            session["updated_at"] = datetime.utcnow().isoformat()
+            session["updated_at"] = _utcnow_iso()
             self._persist_session(session)
             return dict(session["tuning_search"])
 
@@ -625,7 +633,7 @@ class StructuredLightingService:
                     "label": "Preparing preview tuning",
                 },
             }
-            session["updated_at"] = datetime.utcnow().isoformat()
+            session["updated_at"] = _utcnow_iso()
             self._persist_session(session)
 
         candidates = []
@@ -648,7 +656,7 @@ class StructuredLightingService:
                         },
                         "candidates": list(candidates),
                     }
-                    session["updated_at"] = datetime.utcnow().isoformat()
+                    session["updated_at"] = _utcnow_iso()
                     self._persist_session(session)
 
             cam2proj, white_path, black_path = self._decode_raw_cam2proj(
@@ -697,7 +705,7 @@ class StructuredLightingService:
                         },
                         "candidates": list(candidates),
                     }
-                    session["updated_at"] = datetime.utcnow().isoformat()
+                    session["updated_at"] = _utcnow_iso()
                     self._persist_session(session)
 
         with self._lock:
@@ -707,7 +715,7 @@ class StructuredLightingService:
             session["preview_tuning"] = {
                 "status": "completed",
                 "message": f"Generated {len(candidates)} preview candidates.",
-                "generated_at": datetime.utcnow().isoformat(),
+                "generated_at": _utcnow_iso(),
                 "sample_step": sample_step,
                 "base_tuning_params": base_params,
                 "parameter_grid": parameter_grid or {},
@@ -719,7 +727,7 @@ class StructuredLightingService:
                     "label": "Preview tuning completed",
                 },
             }
-            session["updated_at"] = datetime.utcnow().isoformat()
+            session["updated_at"] = _utcnow_iso()
             self._persist_session(session)
             return dict(session["preview_tuning"])
 
@@ -799,14 +807,14 @@ class StructuredLightingService:
             review["status"] = verdict
             review["notes"] = notes or ""
             review["reviewed_by"] = reviewed_by or ""
-            review["updated_at"] = datetime.utcnow().isoformat()
+            review["updated_at"] = _utcnow_iso()
             review["accepted_at"] = review["updated_at"] if verdict == "accepted" else None
             review["message"] = (
                 "Session accepted for export." if verdict == "accepted"
                 else "Session marked for recapture."
             )
             session["review"] = review
-            session["updated_at"] = datetime.utcnow().isoformat()
+            session["updated_at"] = _utcnow_iso()
             self._persist_session(session)
             return dict(session)
 
@@ -901,7 +909,7 @@ class StructuredLightingService:
             if not session:
                 return False
             session["status"] = "deleted"
-            session["updated_at"] = datetime.utcnow().isoformat()
+            session["updated_at"] = _utcnow_iso()
             self._persist_session(session)
             return True
 
@@ -916,7 +924,7 @@ class StructuredLightingService:
         hold_ms: int,
         notes: Optional[str] = None,
     ) -> Dict:
-        now = datetime.utcnow().isoformat()
+        now = _utcnow_iso()
         bit_planes_x = max(1, math.ceil(math.log2(max(2, projector_width))))
         bit_planes_y = max(1, math.ceil(math.log2(max(2, projector_height))))
         pattern_frame_count = self._graycode_pattern_count(projector_width, projector_height)
@@ -1144,8 +1152,8 @@ class StructuredLightingService:
         self._set_decode_progress(session_id, phase="finalizing", label="Writing decode artifacts", percent=96)
         manifest = {
             "status": "completed",
-            "started_at": datetime.utcnow().isoformat(),
-            "finished_at": datetime.utcnow().isoformat(),
+            "started_at": _utcnow_iso(),
+            "finished_at": _utcnow_iso(),
             "message": "Gray-code decode completed.",
             "progress": {
                 "phase": "completed",
@@ -1187,21 +1195,49 @@ class StructuredLightingService:
     def _generate_graycode_patterns(self, projector_width: int, projector_height: int):
         try:
             import cv2
+        except ImportError:
+            cv2 = None
+
+        if cv2 is not None:
+            if hasattr(cv2, "structured_light_GrayCodePattern"):
+                graycode = cv2.structured_light_GrayCodePattern.create(projector_width, projector_height)
+            elif hasattr(cv2, "structured_light") and hasattr(cv2.structured_light, "GrayCodePattern_create"):
+                graycode = cv2.structured_light.GrayCodePattern_create(projector_width, projector_height)
+            else:
+                graycode = None
+
+            if graycode is not None:
+                graycode.setWhiteThreshold(5)
+                graycode.setBlackThreshold(40)
+                ok, patterns = graycode.generate()
+                if not ok:
+                    raise RuntimeError("Pattern generation failed.")
+                return patterns
+
+        try:
+            import numpy as np
         except ImportError as exc:
-            raise RuntimeError("OpenCV structured light module is unavailable.") from exc
+            raise RuntimeError("OpenCV structured light module is unavailable and numpy fallback is missing.") from exc
 
-        if hasattr(cv2, "structured_light_GrayCodePattern"):
-            graycode = cv2.structured_light_GrayCodePattern.create(projector_width, projector_height)
-        elif hasattr(cv2, "structured_light") and hasattr(cv2.structured_light, "GrayCodePattern_create"):
-            graycode = cv2.structured_light.GrayCodePattern_create(projector_width, projector_height)
-        else:
-            raise RuntimeError("OpenCV structured light module is unavailable.")
+        bit_planes_x = max(1, math.ceil(math.log2(max(2, projector_width))))
+        bit_planes_y = max(1, math.ceil(math.log2(max(2, projector_height))))
+        xs = np.arange(projector_width, dtype=np.uint32)
+        ys = np.arange(projector_height, dtype=np.uint32)
 
-        graycode.setWhiteThreshold(5)
-        graycode.setBlackThreshold(40)
-        ok, patterns = graycode.generate()
-        if not ok:
-            raise RuntimeError("Pattern generation failed.")
+        def _gray(v):
+            return v ^ (v >> 1)
+
+        gray_x = _gray(xs)
+        gray_y = _gray(ys)
+        patterns = []
+        for bit in range(bit_planes_x - 1, -1, -1):
+            row = (((gray_x >> bit) & 1) * 255).astype(np.uint8)
+            patterns.append(np.tile(row, (projector_height, 1)))
+            patterns.append(np.tile((255 - row).astype(np.uint8), (projector_height, 1)))
+        for bit in range(bit_planes_y - 1, -1, -1):
+            col = (((gray_y >> bit) & 1) * 255).astype(np.uint8).reshape(projector_height, 1)
+            patterns.append(np.tile(col, (1, projector_width)))
+            patterns.append(np.tile((255 - col).astype(np.uint8), (1, projector_width)))
         return patterns
 
     def _graycode_pattern_count(self, projector_width: int, projector_height: int) -> int:
@@ -2003,7 +2039,7 @@ class StructuredLightingService:
             last_seen_dt = datetime.fromisoformat(last_seen)
         except ValueError:
             return False
-        return (datetime.utcnow() - last_seen_dt).total_seconds() <= WORKER_TIMEOUT_SECONDS
+        return (_utcnow() - last_seen_dt).total_seconds() <= WORKER_TIMEOUT_SECONDS
 
     def _get_worker_status(self) -> Dict:
         with self._lock:
@@ -2034,7 +2070,7 @@ class StructuredLightingService:
         self._worker["process_state"] = "stopped"
         self._worker["connected"] = False
         self._worker["state"] = "stopped"
-        self._worker["process_exited_at"] = datetime.utcnow().isoformat()
+        self._worker["process_exited_at"] = _utcnow_iso()
         self._worker["last_exit_code"] = return_code
         self._worker["process_pid"] = None
         self._worker["operator_ready"] = False
@@ -2398,7 +2434,7 @@ class StructuredLightingService:
                 "percent": max(0, min(int(percent), 100)),
             }
             session["decode"] = decode
-            session["updated_at"] = datetime.utcnow().isoformat()
+            session["updated_at"] = _utcnow_iso()
             self._persist_session(session)
 
     def _default_tuning_params(self) -> Dict:
@@ -2669,7 +2705,7 @@ class StructuredLightingService:
         return {
             "status": "completed",
             "message": "Calibration record generated from Gray-code decode.",
-            "generated_at": datetime.utcnow().isoformat(),
+            "generated_at": _utcnow_iso(),
             "summary": summary,
             "artifacts": {
                 "cam2proj": artifacts.get("cam2proj"),
@@ -2691,7 +2727,7 @@ class StructuredLightingService:
             "notes": "",
             "reviewed_by": "",
             "accepted_at": None,
-            "updated_at": datetime.utcnow().isoformat(),
+            "updated_at": _utcnow_iso(),
         }
 
 

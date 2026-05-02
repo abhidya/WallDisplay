@@ -10,22 +10,22 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Optional
 
-from core.config_service import ConfigService
-from core.device_manager import DeviceManager, get_device_manager
-from core.streaming_registry import StreamingSessionRegistry
-from discovery.discovery_manager import DiscoveryManager
-from services.device_inventory_service import DeviceInventoryService
-from services.device_lifecycle_service import DeviceLifecycleService
-from services.playback_intent_service import PlaybackIntentService
-from services.runtime_playback_service import RuntimePlaybackService
-from services.runtime_registry_service import RuntimeRegistryService
-from services.unified_discovery_lifecycle_service import UnifiedDiscoveryLifecycleService
+from web.backend.core.config_service import ConfigService
+from web.backend.core.device_manager import DeviceManager, get_device_manager
+from web.backend.core.streaming_registry import StreamingSessionRegistry
+from web.backend.discovery.discovery_manager import DiscoveryManager
+from web.backend.services.device_inventory_service import DeviceInventoryService
+from web.backend.services.device_lifecycle_service import DeviceLifecycleService
+from web.backend.services.playback_intent_service import PlaybackIntentService
+from web.backend.services.runtime_playback_service import RuntimePlaybackService
+from web.backend.services.runtime_registry_service import RuntimeRegistryService
+from web.backend.services.unified_discovery_lifecycle_service import UnifiedDiscoveryLifecycleService
 
 logger = logging.getLogger(__name__)
 
 
 def _start_discovery_migration(runtime: "AppRuntime"):
-    from discovery.migration import start_discovery_migration
+    from web.backend.discovery.migration import start_discovery_migration
 
     return start_discovery_migration(runtime)
 

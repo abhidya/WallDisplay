@@ -9,11 +9,11 @@ from typing import List, Dict, Any, Optional
 import asyncio
 import logging
 
-from database.database import get_db
+from web.backend.database.database import get_db
 from discovery.discovery_manager import DiscoveryManager
 from discovery.config import ConfigurationManager
 from discovery.base import CastingMethod, DeviceCapability
-from services.app_runtime import get_app_runtime
+from web.backend.services.app_runtime import get_app_runtime
 from discovery.config.schema import (
     DeviceConfig, 
     GlobalConfig, 

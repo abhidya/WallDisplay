@@ -7,6 +7,8 @@ import time
 import ipaddress
 from urllib.parse import urlsplit
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -15,21 +17,31 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 
-from database.database import init_db, get_db, SessionLocal
-from routers import device_router, video_router, streaming_router, renderer_router, overlay_router, projection_router, log_router, mapping_router, media_library_router, structured_lighting_router, widget_router
-from routers.diagnostics_router import router as diagnostics_router
-from routers.photo_router import router as photo_router
-from routers.photo_list_router import router as photo_list_router
-from api.discovery_router import router as discovery_router
-from core.twisted_streaming import get_instance as get_twisted_streaming
-from core.streaming_service import get_streaming_service
-from services.overlay_cast_service import get_overlay_cast_service
-from services.app_runtime import get_app_runtime
-from services.mask_preprocessing_service import get_mask_preprocessing_service
-from services.video_preprocessing_service import get_video_preprocessing_service
-from services.overlay_service import OverlayService
-from services.projector_redirect_runtime import record_projector_request
-from services.service_diagnostics_service import get_service_diagnostics_service
+from web.backend.database.database import init_db, get_db, SessionLocal
+from web.backend.routers.device_router import router as device_router
+from web.backend.routers.video_router import router as video_router
+from web.backend.routers.streaming_router import router as streaming_router
+from web.backend.routers.renderer_router import router as renderer_router
+from web.backend.routers.overlay_router import router as overlay_router
+from web.backend.routers.projection_router import router as projection_router
+from web.backend.routers.log_router import router as log_router
+from web.backend.routers.mapping_router import router as mapping_router
+from web.backend.routers.media_library_router import router as media_library_router
+from web.backend.routers.structured_lighting_router import router as structured_lighting_router
+from web.backend.routers.widget_router import router as widget_router
+from web.backend.routers.diagnostics_router import router as diagnostics_router
+from web.backend.routers.photo_router import router as photo_router
+from web.backend.routers.photo_list_router import router as photo_list_router
+from web.backend.api.discovery_router import router as discovery_router
+from web.backend.core.twisted_streaming import get_instance as get_twisted_streaming
+from web.backend.core.streaming_service import get_streaming_service
+from web.backend.services.overlay_cast_service import get_overlay_cast_service
+from web.backend.services.app_runtime import get_app_runtime
+from web.backend.services.mask_preprocessing_service import get_mask_preprocessing_service
+from web.backend.services.video_preprocessing_service import get_video_preprocessing_service
+from web.backend.services.overlay_service import OverlayService
+from web.backend.services.projector_redirect_runtime import record_projector_request
+from web.backend.services.service_diagnostics_service import get_service_diagnostics_service
 
 # Configure logging - check if already configured by run.py
 import logging.handlers
@@ -160,7 +172,11 @@ def _request_targets_html_document(request: Request) -> bool:
         return True
 
     accept = (request.headers.get("accept") or "").lower()
-    return "text/html" in accept
+    if "text/html" in accept:
+        return True
+
+    request_path = request.url.path or ""
+    return request.method in {"GET", "HEAD"} and request_path == "/" and accept in {"", "*/*"}
 
 
 def _target_matches_request(request: Request, target_path: str) -> bool:
@@ -204,11 +220,21 @@ def _should_redirect_request(request: Request, redirect_config: Optional[Dict[st
         }
     return None
 
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    await startup_event()
+    try:
+        yield
+    finally:
+        await shutdown_event()
+
+
 # Create FastAPI app
 app = FastAPI(
     title="nano-dlna Dashboard",
     description="Web dashboard for managing DLNA and Transcreen projectors",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 
@@ -273,8 +299,8 @@ app.include_router(projection_router)  # Projection router already has /api pref
 app.include_router(mapping_router)
 app.include_router(media_library_router)
 app.include_router(widget_router)
-app.include_router(structured_lighting_router.router)
-app.include_router(log_router.router)  # Log streaming router
+app.include_router(structured_lighting_router)
+app.include_router(log_router)  # Log streaming router
 app.include_router(diagnostics_router)
 app.include_router(discovery_router)  # New unified discovery API (already has /api/v2/discovery prefix)
 
@@ -357,7 +383,6 @@ def _get_startup_config_files(root_dir: str, backend_dir: str) -> List[str]:
     return unique_paths
 
 # Mount static files for the frontend
-@app.on_event("startup")
 async def startup_event():
     global device_manager, streaming_service, streaming_registry, renderer_service, migration_adapter, video_preprocessing_service, mask_preprocessing_service
     
@@ -368,7 +393,7 @@ async def startup_event():
     
     # Initialize log aggregation service
     try:
-        from log_aggregation_service import get_log_aggregation_service, setup_log_collectors
+        from web.backend.log_aggregation_service import get_log_aggregation_service, setup_log_collectors
         log_service = get_log_aggregation_service()
         setup_log_collectors()
         await log_service.start()
@@ -490,7 +515,6 @@ async def startup_event():
         logger.error(f"Error loading devices from config: {e}")
         logger.error(f"Exception details: {traceback.format_exc()}")
 
-@app.on_event("shutdown")
 async def shutdown_event():
     global migration_adapter, video_preprocessing_service, mask_preprocessing_service
     logger.info("Shutting down nano-dlna Dashboard API")
@@ -499,7 +523,7 @@ async def shutdown_event():
     
     # Stop log aggregation service
     try:
-        from log_aggregation_service import get_log_aggregation_service
+        from web.backend.log_aggregation_service import get_log_aggregation_service
         log_service = get_log_aggregation_service()
         await log_service.stop()
         logger.info("Log aggregation service stopped")
@@ -563,4 +587,4 @@ app.mount("/backend-static", StaticFiles(directory=static_dir), name="backend-st
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("web.backend.main:app", host="0.0.0.0", port=8000, reload=True)

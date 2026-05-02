@@ -10,11 +10,11 @@ from urllib.parse import urlparse
 from typing import Any, Dict, Optional
 import threading
 
-from core.dlna_device import DLNADevice
-from core.transcreen_device import TranscreenDevice
-from core.config_service import ConfigService
-from database.database import get_db
-from models.device import DeviceModel
+from web.backend.core.dlna_device import DLNADevice
+from web.backend.core.transcreen_device import TranscreenDevice
+from web.backend.core.config_service import ConfigService
+from web.backend.database.database import get_db
+from web.backend.models.device import DeviceModel
 
 from .discovery_manager import DiscoveryManager
 from .base import Device, CastingMethod, DeviceCapability

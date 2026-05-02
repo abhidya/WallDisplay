@@ -5,7 +5,7 @@ import unittest
 import numpy as np
 
 # Import the module to test
-from core.depth_processing.core.segmentation import DepthSegmenter
+from web.backend.core.depth_processing.core.segmentation import DepthSegmenter
 
 class TestDepthSegmenter(unittest.TestCase):
     """Tests for the DepthSegmenter class"""

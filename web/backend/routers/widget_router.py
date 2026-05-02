@@ -1,13 +1,13 @@
 from fastapi import APIRouter, HTTPException
 
-from services.widgets.dothebay_lgbtq import getDoTheBayWidgetData
-
 router = APIRouter(prefix="/api/widgets", tags=["widgets"])
 
 
 @router.get("/dothebay-lgbtq")
 async def get_dothebay_lgbtq_widget_data():
     try:
+        from services.widgets.dothebay_lgbtq import getDoTheBayWidgetData
+
         payload = getDoTheBayWidgetData()
         if payload.get("events") or payload.get("fetchedAt"):
             return payload

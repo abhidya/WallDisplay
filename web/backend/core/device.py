@@ -18,6 +18,7 @@ class Device(ABC):
         self.is_playing = False
         self.streaming_url = None
         self.streaming_port = None
+        self.device_manager = None
         self._lock = threading.Lock()  # Lock for thread-safe status updates
 
     def update_status(self, status: str) -> None:

@@ -6,9 +6,9 @@ from typing import Optional, Tuple
 
 from PIL import Image
 
-from database.database import SessionLocal
-from models.mapping_scene import MappingScene
-from services.optimization_limiter import OPTIMIZATION_SEMAPHORE
+from web.backend.database.database import SessionLocal
+from web.backend.models.mapping_scene import MappingScene
+from web.backend.services.optimization_limiter import OPTIMIZATION_SEMAPHORE
 
 logger = logging.getLogger(__name__)
 

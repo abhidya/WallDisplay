@@ -7,14 +7,14 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from datetime import datetime
 
-from models.device import DeviceModel
-from schemas.device import DeviceCreate, DeviceUpdate
-from core.config_service import ConfigService
-from services.device_playback_service import DevicePlaybackService
-from services.device_discovery_service import DeviceDiscoveryService
-from services.device_runtime_sync_service import DeviceRuntimeSyncService
-from services.device_view_service import DeviceViewService
-from services.app_runtime import get_app_runtime
+from web.backend.models.device import DeviceModel
+from web.backend.schemas.device import DeviceCreate, DeviceUpdate
+from web.backend.core.config_service import ConfigService
+from web.backend.services.device_playback_service import DevicePlaybackService
+from web.backend.services.device_discovery_service import DeviceDiscoveryService
+from web.backend.services.device_runtime_sync_service import DeviceRuntimeSyncService
+from web.backend.services.device_view_service import DeviceViewService
+from web.backend.services.app_runtime import get_app_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -198,7 +198,6 @@ class DeviceService:
                 return None
             
             logger.debug(f"current_db_device_state.status after re-fetch: {current_db_device_state.status}")
-            # The manual override current_db_device_state.status = "offline" is now removed to observe true behavior.
             
             self.runtime_sync_service.register_and_update(
                 current_db_device_state,

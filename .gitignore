@@ -240,7 +240,6 @@ nanodlna.db
 *.mp4
 
 # Codex local state
-.codex/
 *.avi
 *.mkv
 *.mov
@@ -295,3 +294,11 @@ web/backend/uploads/structured_lighting/*/
 # Claude rules
 # .claude_rules.md - Keep this tracked for context restoration
 .omx/
+.codex/*
+!.codex/agents/
+!.codex/agents/**
+!.codex/skills/
+!.codex/skills/**
+.codex/skills/.system/**
+!.codex/prompts/
+!.codex/prompts/**

@@ -10,10 +10,10 @@ import subprocess
 import json
 from fastapi import Depends
 
-from models.video import VideoModel
-from schemas.video import VideoCreate, VideoUpdate
-from core.twisted_streaming import get_instance as get_twisted_streaming
-from database.database import ensure_sqlite_schema_compatibility, get_db
+from web.backend.models.video import VideoModel
+from web.backend.schemas.video import VideoCreate, VideoUpdate
+from web.backend.core.twisted_streaming import get_instance as get_twisted_streaming
+from web.backend.database.database import ensure_sqlite_schema_compatibility, get_db
 
 logger = logging.getLogger(__name__)
 

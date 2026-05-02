@@ -2,11 +2,11 @@ from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
-from models.media_directory import MediaDirectory
-from models.video import VideoModel
-from schemas.media_directory import MediaDirectoryCreate, MediaDirectoryResponse, MediaDirectoryUpdate
-from services.video_service import VideoService
-from core.twisted_streaming import get_instance as get_twisted_streaming
+from web.backend.models.media_directory import MediaDirectory
+from web.backend.models.video import VideoModel
+from web.backend.schemas.media_directory import MediaDirectoryCreate, MediaDirectoryResponse, MediaDirectoryUpdate
+from web.backend.services.video_service import VideoService
+from web.backend.core.twisted_streaming import get_instance as get_twisted_streaming
 
 
 class MediaDirectoryService:

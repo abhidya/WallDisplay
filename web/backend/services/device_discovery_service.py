@@ -5,9 +5,9 @@ import traceback
 from copy import deepcopy
 from typing import Any, Callable, Dict, List
 
-from core.config_service import ConfigService
-from core.streaming_registry import StreamingSessionRegistry
-from models.device import DeviceModel
+from web.backend.core.config_service import ConfigService
+from web.backend.core.streaming_registry import StreamingSessionRegistry
+from web.backend.models.device import DeviceModel
 
 logger = logging.getLogger(__name__)
 

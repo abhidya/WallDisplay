@@ -1,266 +1,130 @@
-# Nano-DLNA Test Infrastructure
+# nano-dlna Test Infrastructure
 
 ## Overview
 
-This document describes the comprehensive test infrastructure for the Nano-DLNA project, covering all testing aspects from unit tests to E2E tests, performance testing, and security validation.
+This document describes the test infrastructure that actually exists in the
+repository today. It is intentionally narrower than an aspirational testing
+roadmap: if a lane, directory, or tool is not committed in this repo, it is not
+documented here as active infrastructure.
 
-## Test Architecture
+## Active test lanes
 
-```
-tests/
-├── unit/                    # Unit tests for individual components
-├── integration/             # Integration tests for component interactions
-├── e2e/                    # End-to-end tests for complete workflows
-├── performance/            # Performance and load tests
-├── security/               # Security vulnerability tests
-├── contracts/              # API contract tests
-├── fixtures/               # Shared test fixtures and data
-├── factories/              # Test data factories
-├── utils/                  # Test utilities and helpers
-└── reports/               # Test execution reports
-
-web/
-├── backend/tests_backend/  # Backend-specific tests
-└── frontend/src/tests/     # Frontend component tests
+```text
+tests/                          Legacy Python tests, helpers, mocks
+tests/integration/              Older Python integration tests
+tests/performance/              Lightweight performance/load probe
+web/backend/tests_backend/      Backend service/runtime tests
+web/frontend/src/tests/         Frontend component tests
+mobile-app/tests/               Mobile control-plane tests
 ```
 
-## Test Categories
+Important support files:
 
-### 1. Unit Tests
-- **Purpose**: Test individual functions and classes in isolation
-- **Markers**: `@pytest.mark.unit`
-- **Coverage Target**: 90%
-- **Key Areas**:
-  - Core DLNA operations
-  - Device management logic
-  - Streaming service functions
-  - Data models and schemas
+- `tests/conftest.py`
+- `web/backend/tests_backend/conftest.py`
+- `tests/factories/`
+- `tests/mocks/`
+- `tests/utils/test_helpers.py`
 
-### 2. Integration Tests
-- **Purpose**: Test component interactions and data flow
-- **Markers**: `@pytest.mark.integration`
-- **Coverage Target**: 80%
-- **Key Areas**:
-  - Database operations
-  - API endpoint functionality
-  - Service layer interactions
-  - WebSocket communications
+## What is configured
 
-### 3. End-to-End Tests
-- **Purpose**: Test complete user workflows
-- **Markers**: `@pytest.mark.e2e`
-- **Framework**: Playwright/Cypress
-- **Key Scenarios**:
-  - Device discovery and connection
-  - Video playback workflow
-  - Multi-device synchronization
-  - Overlay configuration
+### Python
 
-### 4. Performance Tests
-- **Purpose**: Validate system performance under load
-- **Framework**: Locust/pytest-benchmark
-- **Key Metrics**:
-  - API response times
-  - Streaming throughput
-  - Concurrent device handling
-  - Memory usage patterns
+- Root pytest config lives in `pyproject.toml` and `pytest.ini`
+- Root Python test paths:
+  - `tests`
+  - `web/backend/tests_backend`
+- Coverage is configured for:
+  - `nanodlna`
+  - `web.backend`
 
-### 5. Security Tests
-- **Purpose**: Identify security vulnerabilities
-- **Tools**: bandit, safety, OWASP ZAP
-- **Key Areas**:
-  - Input validation
-  - Authentication/authorization
-  - SQL injection prevention
-  - XSS protection
+### Mobile
 
-## Test Execution Strategy
+- `mobile-app/package.json` provides:
+  - `npm test`
+  - `npm run typecheck`
 
-### Local Development
+### Performance
+
+- The repository contains `tests/performance/test_load.py`
+- `tests/validate_infrastructure.py` expects a performance marker in
+  `pytest.ini`; keep that validator aligned with actual pytest config if the
+  infra changes
+
+## What is not currently active infrastructure
+
+The repo does **not** currently contain committed first-class directories or
+tooling for:
+
+- `tests/e2e/`
+- `tests/security/`
+- `tests/contracts/`
+- `tests/fixtures/`
+- `tests/reports/`
+- Playwright/Cypress-based web E2E automation
+- bandit/safety/ZAP automation
+- Locust or pytest-benchmark integration
+
+If those capabilities are added later, document them only after the code and
+tooling land.
+
+## Execution paths
+
+### Legacy Python wrapper
+
 ```bash
-# Run all tests
 ./run_tests.sh
-
-# Run specific test categories
-./run_tests.sh --unit
-./run_tests.sh --integration
-./run_tests.sh --e2e
-
-# Run with coverage
-./run_tests.sh --coverage
-
-# Run in watch mode
-pytest-watch -n auto
 ```
 
-### CI/CD Pipeline
-```yaml
-test-pipeline:
-  - lint-and-format
-  - unit-tests
-  - integration-tests
-  - security-scan
-  - performance-tests
-  - e2e-tests
-  - coverage-report
-```
+Notes:
 
-## Test Data Management
+- uses `web/backend/venv/bin/python`
+- assumes that backend virtualenv already exists
+- enables `-n auto` in the wrapper, although xdist availability depends on the
+  environment actually used
 
-### Test Fixtures
-- Database fixtures with known state
-- Mock device configurations
-- Sample video files for streaming
-- WebSocket connection mocks
+### Backend-focused Python tests
 
-### Data Factories
-```python
-# Example factory usage
-device = DeviceFactory.create(
-    type="dlna",
-    status="connected",
-    capabilities=["play", "pause", "seek"]
-)
-```
-
-### Test Database
-- Isolated test database per test run
-- Automatic cleanup after tests
-- Seeded with representative data
-- Transaction rollback for isolation
-
-## Mocking Strategy
-
-### Core Mocks
-- `MockDLNADevice`: Simulates DLNA device behavior
-- `MockStreamingService`: Simulates video streaming
-- `MockWebSocket`: Simulates real-time communications
-- `MockDiscoveryService`: Simulates device discovery
-
-### External Service Mocks
-- Network requests (requests-mock)
-- File system operations
-- System time and delays
-- External API calls
-
-## Coverage Requirements
-
-### Minimum Coverage Thresholds
-- Overall: 85%
-- Core modules: 90%
-- API endpoints: 95%
-- Critical paths: 100%
-
-### Coverage Reporting
-- HTML reports in `htmlcov/`
-- XML reports for CI integration
-- Coverage badges in README
-- Historical coverage tracking
-
-## Performance Benchmarks
-
-### Response Time Targets
-- API endpoints: < 200ms (p95)
-- Device discovery: < 5s
-- Video start: < 3s
-- WebSocket latency: < 50ms
-
-### Load Testing Scenarios
-- 10 concurrent devices
-- 100 API requests/second
-- 1GB video streaming
-- 24-hour stability test
-
-## Security Testing
-
-### Automated Scans
-- Dependency vulnerability scanning
-- Static code analysis
-- Dynamic security testing
-- Container image scanning
-
-### Manual Testing
-- Penetration testing checklist
-- Authentication bypass attempts
-- Data validation testing
-- Session management review
-
-## Test Monitoring
-
-### Metrics Collection
-- Test execution time
-- Flaky test detection
-- Coverage trends
-- Performance regression
-
-### Reporting
-- Daily test summary emails
-- Slack notifications for failures
-- Dashboard with test metrics
-- Historical trend analysis
-
-## Best Practices
-
-### Test Writing Guidelines
-1. Follow AAA pattern (Arrange, Act, Assert)
-2. One assertion per test when possible
-3. Descriptive test names
-4. Isolated and independent tests
-5. Use fixtures for common setup
-
-### Test Maintenance
-1. Regular test review and cleanup
-2. Update tests with code changes
-3. Fix flaky tests immediately
-4. Maintain test documentation
-5. Review test performance
-
-### Test Review Checklist
-- [ ] Tests cover all code paths
-- [ ] Edge cases are tested
-- [ ] Error conditions are verified
-- [ ] Tests are maintainable
-- [ ] Performance impact is acceptable
-
-## Troubleshooting
-
-### Common Issues
-1. **Flaky Tests**: Use retry mechanisms and proper waits
-2. **Slow Tests**: Parallelize and optimize fixtures
-3. **Database Issues**: Ensure proper cleanup
-4. **Network Tests**: Use appropriate mocks
-5. **Coverage Gaps**: Add targeted tests
-
-### Debug Commands
 ```bash
-# Run with debugging
-pytest -vvs tests/unit/test_device.py::test_specific
-
-# Run with pdb on failure
-pytest --pdb
-
-# Show test execution order
-pytest --collect-only
-
-# Profile test execution
-pytest --profile
+cd web/backend
+venv/bin/python -m pytest tests_backend
 ```
 
-## Future Enhancements
+### Mobile tests
 
-### Planned Improvements
-1. Visual regression testing
-2. Accessibility testing automation
-3. Chaos engineering tests
-4. API fuzzing
-5. Mobile app testing
-6. Cross-browser compatibility
-7. Internationalization testing
-8. Performance profiling integration
+```bash
+cd mobile-app
+npm test
+npm run typecheck
+```
 
-### Research Areas
-1. AI-powered test generation
-2. Self-healing tests
-3. Predictive test selection
-4. Test impact analysis
-5. Automated test maintenance
+## Current reliability notes
+
+- The mobile test lane is the most consistently runnable automated path in the
+  repo.
+- Some older Python API/router tests are stale and should be considered cleanup
+  targets rather than trusted contract coverage.
+- Broad backend app imports can fail if optional dependencies are missing,
+  because `web.backend.main` mounts optional routers during import.
+- Backend Python tests are sensitive to working directory and import path setup
+  because the backend still mixes repo-root and `web/backend` absolute imports.
+
+## Fixtures and mocking strategy
+
+- Older Python tests rely heavily on mocks under `tests/mocks/`
+- Backend service tests rely heavily on `monkeypatch`, `SimpleNamespace`, and
+  focused seam injection
+- Temp DB setup lives in:
+  - `tests/utils/test_helpers.py`
+  - `web/backend/tests_backend/conftest.py`
+
+This means much of the backend coverage is service-level and mocked, not
+full-stack or hardware-backed.
+
+## Maintenance rules
+
+1. Update this file when adding or removing real test directories or tooling
+2. Do not document aspirational test categories as active infrastructure
+3. Verify live router/schema shapes before adding API contract assertions
+4. Keep required docs (`tests/README.md`, `tests/TEST_INFRASTRUCTURE.md`)
+   present because `tests/validate_infrastructure.py` checks for them

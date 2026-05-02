@@ -7,8 +7,8 @@ from PIL import Image
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from models.photo import PhotoModel
-from schemas.photo import PhotoCreate, PhotoUpdate
+from web.backend.models.photo import PhotoModel
+from web.backend.schemas.photo import PhotoCreate, PhotoUpdate
 
 
 class PhotoService:

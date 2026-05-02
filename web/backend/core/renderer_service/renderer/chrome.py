@@ -132,8 +132,7 @@ class ChromeRenderer(Renderer):
             # Extract the filename from the path
             video_filename = os.path.basename(video_file)
             
-            # Create the streaming URL - port will be determined when streaming actually starts
-            # For now, we'll use a placeholder that will be replaced when the streaming server starts
+            # Create a streaming URL token with an unresolved port placeholder.
             streaming_url = f"http://{self.host}:PORT_PLACEHOLDER/stream/{video_filename}"
             
             # Replace video source URLs in the HTML

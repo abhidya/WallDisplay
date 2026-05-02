@@ -5,9 +5,9 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from database.database import SessionLocal, get_db
-from schemas.photo import PhotoCreate, PhotoListResponseEnvelope, PhotoResponse, PhotoUploadResponse, PhotoUpdate
-from services.photo_service import PhotoService
+from web.backend.database.database import SessionLocal, get_db
+from web.backend.schemas.photo import PhotoCreate, PhotoListResponseEnvelope, PhotoResponse, PhotoUploadResponse, PhotoUpdate
+from web.backend.services.photo_service import PhotoService
 
 
 router = APIRouter(prefix="/photos", tags=["photos"], responses={404: {"description": "Not found"}})

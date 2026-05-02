@@ -32,7 +32,7 @@ This is the separate cross-platform rewrite shell for `nano-dlna`, built with Ex
 - The mobile shell keeps controller logic in `src/features/**` and presentation in `src/screens/**` to avoid coupling backend requests directly into screen components.
 - Selection state is shared across tabs so a device chosen in Devices is immediately reused by Media.
 - The UI intentionally favors operator actions and read-heavy diagnostics over authoring-heavy projection editors for now.
-- Current verification baseline is TypeScript-only; there are not yet dedicated `test` or `lint` npm scripts in `mobile-app/package.json`.
+- Current verification baseline includes Node-based control-plane tests (`npm test`) and TypeScript verification (`npm run typecheck`). A dedicated lint script still has not been added.
 
 ## Backend contract
 
@@ -56,6 +56,7 @@ Primary API groups:
 ```bash
 cd mobile-app
 npm install
+npm test
 npm run typecheck
 npm run ios
 ```
@@ -77,10 +78,11 @@ Typical addresses:
 ```bash
 cd mobile-app
 npm install
+npm test
 npm run typecheck
 ```
 
-The current repo state provides TypeScript verification for the Expo shell. If you need broader coverage, add mobile-specific test/lint scripts here rather than reaching into `web/frontend` or backend source.
+The current repo state provides both Node-based control-plane tests and TypeScript verification for the Expo shell. If you need broader coverage, add mobile-specific test/lint scripts here rather than reaching into `web/frontend` or backend source.
 
 ## Next parity candidates
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import asyncio
+import inspect
 import logging
 import json
 import os
@@ -60,7 +61,7 @@ class LogCollector:
     async def emit_log(self, event: LogEvent):
         for callback in self.callbacks:
             try:
-                if asyncio.iscoroutinefunction(callback):
+                if inspect.iscoroutinefunction(callback):
                     await callback(event)
                 else:
                     callback(event)

@@ -1,0 +1,23 @@
+{
+  "name": "nano-dlna-desktophut",
+  "description": "MCP server for bounded DesktopHut live-wallpaper downloads and nano-dlna video indexing",
+  "version": "1.0.0",
+  "server": {
+    "command": "python",
+    "args": ["/Users/abdulrehmanbhidya/PycharmProjects/nano-dlna/run_desktophut_mcp_server.py"],
+    "env": {
+      "PYTHONPATH": "/Users/abdulrehmanbhidya/PycharmProjects/nano-dlna:/Users/abdulrehmanbhidya/PycharmProjects/nano-dlna/web/backend"
+    }
+  },
+  "tools": [
+    "list_desktophut_categories",
+    "preview_desktophut_category",
+    "search_desktophut_videos",
+    "download_desktophut_category",
+    "download_desktophut_search",
+    "index_video_directory",
+    "download_and_index_desktophut_category",
+    "download_and_index_desktophut_search",
+    "download_fish_and_create_wall_scene"
+  ]
+}

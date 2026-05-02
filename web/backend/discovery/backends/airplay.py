@@ -34,13 +34,16 @@ class AirPlayDiscoveryBackend(DiscoveryBackend):
         self._zeroconf = None
         self._browser = None
         self._discovered_services = {}
+        self._zeroconf_unavailable_warning_logged = False
         
     async def discover_devices(self) -> List[Device]:
         """
         Discover AirPlay devices on the network using mDNS.
         """
         if not ZEROCONF_AVAILABLE:
-            logger.warning("Zeroconf not available, cannot discover AirPlay devices")
+            if not self._zeroconf_unavailable_warning_logged:
+                logger.warning("Zeroconf not available, cannot discover AirPlay devices")
+                self._zeroconf_unavailable_warning_logged = True
             return []
             
         logger.debug("Starting AirPlay device discovery")

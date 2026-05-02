@@ -4,7 +4,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
-from services.structured_lighting_service import get_structured_lighting_service
+from web.backend.services.structured_lighting_service import get_structured_lighting_service
 
 
 router = APIRouter(prefix="/api/structured-lighting", tags=["structured-lighting"])

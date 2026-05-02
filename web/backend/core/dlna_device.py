@@ -47,7 +47,6 @@ class DLNADevice(Device):
         # Video playback attributes
         self.current_video_duration = None  # Duration of current video in seconds
         self.current_video_path = None  # Local file path of current video
-        # self._looping = False # Removed, self._loop_enabled will be used
         
         # Playback progress tracking
         self.current_position = "00:00:00"

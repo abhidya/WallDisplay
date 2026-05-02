@@ -2,10 +2,10 @@ from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
-from models.mapping_scene import MappingScene
-from models.scene_control_preset import SceneControlPreset
-from models.scene_rank import SceneRank
-from schemas.scene_control_preset import (
+from web.backend.models.mapping_scene import MappingScene
+from web.backend.models.scene_control_preset import SceneControlPreset
+from web.backend.models.scene_rank import SceneRank
+from web.backend.schemas.scene_control_preset import (
     SceneControlPresetCreate,
     SceneControlPresetResponse,
     SceneControlPresetUpdate,

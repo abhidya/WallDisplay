@@ -10,10 +10,10 @@ from datetime import datetime
 from PIL import Image
 import numpy as np
 
-from database.database import get_db
-from services.mask_analyzer import MaskAnalyzer
-from services.projection_service import ProjectionService
-from schemas.projection import (
+from web.backend.database.database import get_db
+from web.backend.services.mask_analyzer import MaskAnalyzer
+from web.backend.services.projection_service import ProjectionService
+from web.backend.schemas.projection import (
     ProjectionConfigCreate,
     ProjectionConfigUpdate,
     ProjectionConfigResponse,

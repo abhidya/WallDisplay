@@ -1,7 +1,6 @@
 import os
 from sqlalchemy import create_engine, MetaData, inspect
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, declarative_base
 import logging
 
 logger = logging.getLogger(__name__)
@@ -254,18 +253,18 @@ def init_db():
     """
     # Import models here to ensure they are registered with Base.metadata
     # This avoids circular imports since this function is called after all modules are loaded
-    from models.device import DeviceModel
-    from models.video import VideoModel
-    from models.overlay import OverlayConfig
-    from models.projection import ProjectionConfig
-    from models.mapping_scene import MappingScene
-    from models.scene_rank import SceneRank
-    from models.scene_control_preset import SceneControlPreset
-    from models.media_directory import MediaDirectory
-    from models.media_list import MediaList
-    from models.media_channel import MediaChannel
-    from models.photo import PhotoModel
-    from models.photo_list import PhotoList
+    from web.backend.models.device import DeviceModel
+    from web.backend.models.video import VideoModel
+    from web.backend.models.overlay import OverlayConfig
+    from web.backend.models.projection import ProjectionConfig
+    from web.backend.models.mapping_scene import MappingScene
+    from web.backend.models.scene_rank import SceneRank
+    from web.backend.models.scene_control_preset import SceneControlPreset
+    from web.backend.models.media_directory import MediaDirectory
+    from web.backend.models.media_list import MediaList
+    from web.backend.models.media_channel import MediaChannel
+    from web.backend.models.photo import PhotoModel
+    from web.backend.models.photo_list import PhotoList
     
     # When running under pytest, skip the actual Base.metadata.create_all(bind=engine) call.
     # The test fixtures will handle creating tables on the temporary test database.

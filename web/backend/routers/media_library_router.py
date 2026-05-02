@@ -4,13 +4,13 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from database.database import get_db
-from schemas.media_channel import MediaChannelCreate, MediaChannelResponse, MediaChannelUpdate
-from schemas.media_directory import MediaDirectoryCreate, MediaDirectoryResponse, MediaDirectoryUpdate
-from schemas.media_list import MediaListCreate, MediaListResponse, MediaListUpdate
-from services.media_channel_service import MediaChannelService
-from services.media_directory_service import MediaDirectoryService
-from services.media_list_service import MediaListService
+from web.backend.database.database import get_db
+from web.backend.schemas.media_channel import MediaChannelCreate, MediaChannelResponse, MediaChannelUpdate
+from web.backend.schemas.media_directory import MediaDirectoryCreate, MediaDirectoryResponse, MediaDirectoryUpdate
+from web.backend.schemas.media_list import MediaListCreate, MediaListResponse, MediaListUpdate
+from web.backend.services.media_channel_service import MediaChannelService
+from web.backend.services.media_directory_service import MediaDirectoryService
+from web.backend.services.media_list_service import MediaListService
 
 
 router = APIRouter(prefix="/api/media-library", tags=["media-library"])

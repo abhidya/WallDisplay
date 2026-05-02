@@ -1,0 +1,22 @@
+{
+  "name": "nano-dlna-scene-control",
+  "description": "MCP server for nano-dlna mapping scenes, ranks, presets, and all-wall scene creation",
+  "version": "1.0.0",
+  "server": {
+    "command": "python",
+    "args": ["/Users/abdulrehmanbhidya/PycharmProjects/nano-dlna/run_scene_control_mcp_server.py"],
+    "env": {
+      "PYTHONPATH": "/Users/abdulrehmanbhidya/PycharmProjects/nano-dlna:/Users/abdulrehmanbhidya/PycharmProjects/nano-dlna/web/backend"
+    }
+  },
+  "tools": [
+    "list_mapping_scenes",
+    "create_mapping_scene",
+    "add_polygon_mask",
+    "update_scene_groups",
+    "create_scene_rank",
+    "create_scene_control_preset",
+    "create_scene_across_clients",
+    "create_all_walls_scene_from_media"
+  ]
+}

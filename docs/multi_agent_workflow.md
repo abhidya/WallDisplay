@@ -249,7 +249,7 @@ rm -rf uploads_agent*
    - Performance tests: Isolated agent
 
 4. **Communication**
-   - Document changes in CLAUDE_PROGRESS.md
+   - Document durable changes in maintained repo docs when needed
    - Use clear commit messages
    - Tag agent-specific work
 

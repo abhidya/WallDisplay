@@ -12,7 +12,7 @@ backend_dir = os.path.dirname(current_dir)
 sys.path.insert(0, backend_dir)
 
 from sqlalchemy import create_engine, text
-from database.database import DATABASE_URL
+from web.backend.database.database import DATABASE_URL
 
 logger = logging.getLogger(__name__)
 

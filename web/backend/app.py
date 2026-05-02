@@ -9,10 +9,13 @@ import sys
 import os
 
 # Add the current directory to the Python path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+backend_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.abspath(os.path.join(backend_dir, "..", ".."))
+sys.path.insert(0, backend_dir)
+sys.path.insert(0, project_root)
 
 # Import the FastAPI app from the main module
-from main import app
+from web.backend.main import app
 
 # This allows the file to be run directly
 if __name__ == "__main__":

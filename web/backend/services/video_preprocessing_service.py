@@ -3,11 +3,11 @@ import threading
 import time
 from typing import Optional
 
-from database.database import SessionLocal
-from models.video import VideoModel
-from core.twisted_streaming import get_instance as get_twisted_streaming
-from services.optimization_limiter import OPTIMIZATION_SEMAPHORE
-from services.video_service import VideoService
+from web.backend.database.database import SessionLocal
+from web.backend.models.video import VideoModel
+from web.backend.core.twisted_streaming import get_instance as get_twisted_streaming
+from web.backend.services.optimization_limiter import OPTIMIZATION_SEMAPHORE
+from web.backend.services.video_service import VideoService
 
 logger = logging.getLogger(__name__)
 

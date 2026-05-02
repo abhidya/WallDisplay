@@ -3,9 +3,9 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from database.database import get_db
-from schemas.photo_list import PhotoListCreate, PhotoListResponse, PhotoListUpdate
-from services.photo_list_service import PhotoListService
+from web.backend.database.database import get_db
+from web.backend.schemas.photo_list import PhotoListCreate, PhotoListResponse, PhotoListUpdate
+from web.backend.services.photo_list_service import PhotoListService
 
 
 router = APIRouter(prefix="/api/photo-lists", tags=["photo-lists"])

@@ -14,8 +14,8 @@ from typing import Dict, Any, Optional, List, Tuple
 from .renderer import Renderer, ChromeRenderer
 from ..dlna_device import DLNADevice
 from ..twisted_streaming import TwistedStreamingServer
-from database.database import get_db
-from services.app_runtime import get_app_runtime
+from web.backend.database.database import get_db
+from web.backend.services.app_runtime import get_app_runtime
 
 
 def _resolve_runtime_device(device_name: str):

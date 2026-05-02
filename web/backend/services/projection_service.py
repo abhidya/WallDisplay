@@ -3,8 +3,8 @@ from typing import List, Optional
 import json
 import logging
 
-from models.projection import ProjectionConfig
-from schemas.projection import ProjectionConfigCreate, ProjectionConfigUpdate, ProjectionConfigResponse
+from web.backend.models.projection import ProjectionConfig
+from web.backend.schemas.projection import ProjectionConfigCreate, ProjectionConfigUpdate, ProjectionConfigResponse
 
 logger = logging.getLogger(__name__)
 

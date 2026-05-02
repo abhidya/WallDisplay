@@ -8,7 +8,7 @@ import numpy as np
 from PIL import Image
 
 # Import the module to test
-from core.depth_processing.core.depth_loader import DepthLoader
+from web.backend.core.depth_processing.core.depth_loader import DepthLoader
 
 class TestDepthLoader(unittest.TestCase):
     """Tests for the DepthLoader class"""

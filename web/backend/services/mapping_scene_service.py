@@ -10,8 +10,8 @@ from fastapi import UploadFile
 from PIL import Image, ImageDraw
 from sqlalchemy.orm import Session
 
-from models.mapping_scene import MappingScene
-from schemas.mapping_scene import (
+from web.backend.models.mapping_scene import MappingScene
+from web.backend.schemas.mapping_scene import (
     MappingMask,
     MappingPoint,
     MappingSceneCreate,

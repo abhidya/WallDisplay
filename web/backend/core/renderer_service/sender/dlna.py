@@ -8,9 +8,9 @@ import time
 from typing import Dict, Optional
 
 from .base import Sender
-from core.twisted_streaming import TwistedStreamingServer
-from database.database import get_db
-from services.app_runtime import get_app_runtime
+from web.backend.core.twisted_streaming import TwistedStreamingServer
+from web.backend.database.database import get_db
+from web.backend.services.app_runtime import get_app_runtime
 
 
 def _resolve_runtime_device(target_id: str):

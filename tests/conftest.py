@@ -8,7 +8,9 @@ import shutil
 
 # Ensure the project root is on the Python path so that `web.backend` can be imported
 project_root = Path(__file__).parent.parent
+backend_root = project_root / 'web' / 'backend'
 sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(backend_root))
 
 # Set environment variable to indicate we're in test mode
 os.environ["PYTEST_CURRENT_TEST"] = "true"

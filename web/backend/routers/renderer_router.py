@@ -10,8 +10,8 @@ from typing import Dict, Any, List, Optional, Union
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 
-from core.renderer_service.service import RendererService
-from core.renderer_service.sender.airplay_discovery import AirPlayDiscovery
+from web.backend.core.renderer_service.service import RendererService
+from web.backend.core.renderer_service.sender.airplay_discovery import AirPlayDiscovery
 
 
 # Define the request and response models

@@ -1,64 +1,57 @@
-# nano-dlna Dashboard
+# nano-dlna Web Dashboard
 
-A web dashboard for managing DLNA and projector devices.
+The web operator surface for nano-dlna — a FastAPI backend serving REST APIs and a React frontend for device discovery, media management, overlay casting, projection mapping, and structured-lighting calibration.
 
-## Features
+For the full architecture overview, environment variables, and all start modes, see the [root README](../README.md).
 
-- Discover and manage DLNA devices on your network
-- Stream videos to DLNA-compatible devices
-- Upload and manage video files
-- Control playback (play, pause, stop, seek)
-
-## Running with Docker
-
-The easiest way to run the application is using Docker Compose:
-
-### Prerequisites
-
-1. Install Docker:
-   - For macOS: [Docker Desktop for Mac](https://docs.docker.com/desktop/install/mac-install/)
-   - For Windows: [Docker Desktop for Windows](https://docs.docker.com/desktop/install/windows-install/)
-   - For Linux: [Docker Engine](https://docs.docker.com/engine/install/)
-
-2. Make sure Docker is running before proceeding.
-
-### Starting the Application
+## Quick Start
 
 ```bash
-# Start the application
-./run_direct.sh
+# From repo root — full dashboard with DB reset and config import
+./run_dashboard.sh
 
-# Stop the application
+# Or from this directory — backend + frontend only, no DB reset
+./run_direct.sh
+```
+
+Stop:
+
+```bash
+# From repo root
+./stop_dashboard.sh
+
+# Or from this directory
 ./stop_direct.sh
 ```
 
-This will start both the backend API and the frontend web interface.
+Default URLs:
 
 - Frontend: http://localhost:3000
 - Backend API: http://localhost:8000
-- API Documentation: http://localhost:8000/docs
+- API docs: http://localhost:8000/docs
 
 ## Directory Structure
 
-- `backend/`: FastAPI backend
-- `frontend/`: React frontend
-- `data/`: Database and persistent data
-- `uploads/`: Uploaded video files
+- `backend/` — FastAPI backend (routers, services, models, discovery, core runtime)
+- `frontend/` — React dashboard (MUI pages, API client, hooks)
+- `data/` — SQLite database (default: `backend/nanodlna.db`)
+- `uploads/` — Uploaded media files
 
 ## Development
 
-For development, you can run the backend and frontend separately:
+Backend only:
 
 ```bash
-# Backend
 cd backend
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-python run.py --reload
+python run.py --reload --debug
+```
 
-# Frontend
+Frontend only:
+
+```bash
 cd frontend
 npm install
 npm start
 ```
+
+Configuration is via environment variables — see `scripts/common_env.sh` and the [root README](../README.md) for the full list.

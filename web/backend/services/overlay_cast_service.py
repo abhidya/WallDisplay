@@ -15,7 +15,7 @@ import shutil
 import tempfile
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Dict, Optional
 from urllib.parse import urlencode
@@ -41,6 +41,10 @@ FFMPEG_PROGRESS_KEYS = {"speed", "fps", "bitrate"}
 OVERLAY_STREAM_PATH = "/live.mp4"
 OVERLAY_STREAM_CONTENT_TYPE = "video/mp4"
 OVERLAY_DLNA_PROTOCOL_INFO = "http-get:*:video/mp4:*"
+
+
+def _utcnow() -> datetime:
+    return datetime.now(UTC)
 
 
 class ReusableThreadingHTTPServer(ThreadingHTTPServer):
@@ -125,7 +129,7 @@ class OverlayCastRelayHandler(BaseHTTPRequestHandler):
         client_id, client_queue = relay_state.register_client()
         if session is not None:
             session.active_clients = relay_state.active_client_count
-            session.last_client_connected_at = datetime.utcnow()
+            session.last_client_connected_at = _utcnow()
             session.last_client_activity_at = session.last_client_connected_at
 
         try:
@@ -141,7 +145,7 @@ class OverlayCastRelayHandler(BaseHTTPRequestHandler):
                 self.wfile.write(chunk)
                 self.wfile.flush()
                 if session is not None:
-                    session.last_client_activity_at = datetime.utcnow()
+                    session.last_client_activity_at = _utcnow()
         except (BrokenPipeError, ConnectionResetError):
             logger.info("Overlay cast relay client disconnected during transfer")
         except Exception as exc:
@@ -150,7 +154,7 @@ class OverlayCastRelayHandler(BaseHTTPRequestHandler):
             relay_state.unregister_client(client_id)
             if session is not None:
                 session.active_clients = relay_state.active_client_count
-                session.last_client_disconnected_at = datetime.utcnow()
+                session.last_client_disconnected_at = _utcnow()
 
 
 @dataclass
@@ -163,8 +167,8 @@ class OverlayCastSession:
     stream_port: int
     status: str = "starting"
     archived: bool = False
-    started_at: datetime = field(default_factory=datetime.utcnow)
-    updated_at: datetime = field(default_factory=datetime.utcnow)
+    started_at: datetime = field(default_factory=_utcnow)
+    updated_at: datetime = field(default_factory=_utcnow)
     error: Optional[str] = None
     current_step: str = "queued"
     debug_log: list[str] = field(default_factory=list)
@@ -674,7 +678,7 @@ class OverlayCastService:
                     session.status == "running" and
                     session.active_clients == 0 and
                     session.last_client_disconnected_at is not None and
-                    (datetime.utcnow() - session.last_client_disconnected_at).total_seconds() > RELAY_IDLE_TIMEOUT_SECONDS
+                    (_utcnow() - session.last_client_disconnected_at).total_seconds() > RELAY_IDLE_TIMEOUT_SECONDS
                 ):
                     if session.relay_reconnect_attempts < 1:
                         session.relay_reconnect_attempts += 1
@@ -684,7 +688,7 @@ class OverlayCastService:
                             "Relay client disconnected; retrying DLNA handoff without metadata",
                         )
                         await self._direct_dlna_handshake(session, include_metadata=False)
-                        session.last_client_disconnected_at = datetime.utcnow()
+                        session.last_client_disconnected_at = _utcnow()
                     else:
                         raise RuntimeError("Relay client disconnected and did not reconnect")
                 await asyncio.sleep(1)
@@ -861,7 +865,7 @@ class OverlayCastService:
 
     def _log_step(self, session: OverlayCastSession, step: str, message: str):
         session.current_step = step
-        session.updated_at = datetime.utcnow()
+        session.updated_at = _utcnow()
         timestamp = session.updated_at.strftime("%H:%M:%S")
         session.debug_log.append(f"[{timestamp}] {step}: {message}")
         session.debug_log = session.debug_log[-30:]

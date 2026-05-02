@@ -1,5 +1,5 @@
 import requests
-from datetime import datetime
+from datetime import UTC, datetime
 
 from web.backend.schemas.overlay import ApiConfigs, OverlayConfigResponse, VideoTransform, Widget, WidgetPosition, WidgetSize
 from web.backend.services.overlay_service import OverlayService
@@ -170,7 +170,7 @@ def test_window_refresh_state_revision_changes_when_config_content_changes(tmp_p
             ],
             "api_configs": {},
             "created_at": None,
-            "updated_at": datetime.utcnow(),
+            "updated_at": datetime.now(UTC),
         },
     )()
 
@@ -208,7 +208,7 @@ def test_window_refresh_state_revision_changes_when_config_content_changes(tmp_p
             "rotation": 15,
         }
     ]
-    config.updated_at = datetime.utcnow()
+    config.updated_at = datetime.now(UTC)
 
     updated_state = service.get_window_refresh_state(config.id)
 
@@ -248,8 +248,8 @@ def test_minimize_window_init_config_drops_hidden_widgets_and_api_secrets():
             transit_stop_id="13915",
             spotify_access_token="secret",
         ),
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
 
     minimized = service._minimize_window_init_config(config)

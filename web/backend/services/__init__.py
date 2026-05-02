@@ -1,9 +1,7 @@
-from .device_service import DeviceService
-from .video_service import VideoService
-from .overlay_service import OverlayService
+"""Service package.
 
-__all__ = [
-    'DeviceService',
-    'VideoService',
-    'OverlayService',
-]
+Keep package init light; importing concrete services here creates circular
+import pressure during test collection and standalone module imports.
+"""
+
+__all__ = []

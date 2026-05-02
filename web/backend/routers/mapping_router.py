@@ -5,25 +5,25 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from database.database import get_db
-from models.mapping_scene import MappingScene
-from schemas.mapping_scene import (
+from web.backend.database.database import get_db
+from web.backend.models.mapping_scene import MappingScene
+from web.backend.schemas.mapping_scene import (
     MappingSceneCreate,
     MappingSceneResponse,
     MappingSceneUpdate,
     PolygonMaskCreateRequest,
 )
-from services.mapping_scene_service import MappingSceneService
-from schemas.scene_rank import SceneRankCreate, SceneRankResponse, SceneRankUpdate
-from services.scene_rank_service import SceneRankService
-from schemas.scene_control_preset import (
+from web.backend.services.mapping_scene_service import MappingSceneService
+from web.backend.schemas.scene_rank import SceneRankCreate, SceneRankResponse, SceneRankUpdate
+from web.backend.services.scene_rank_service import SceneRankService
+from web.backend.schemas.scene_control_preset import (
     SceneControlPresetCreate,
     SceneControlPresetResponse,
     SceneControlPresetUpdate,
 )
-from services.scene_control_preset_service import SceneControlPresetService
-from services.overlay_event_bus import notify_overlay_config_update
-from models.overlay import OverlayConfig
+from web.backend.services.scene_control_preset_service import SceneControlPresetService
+from web.backend.services.overlay_event_bus import notify_overlay_config_update
+from web.backend.models.overlay import OverlayConfig
 
 
 router = APIRouter(prefix="/api/mappings", tags=["mappings"])

@@ -16,9 +16,10 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from web.backend.core.database import Base
-from web.backend.models.device import Device
-from web.backend.models.video import Video
+from web.backend.database.database import Base
+from web.backend.models.device import DeviceModel
+from web.backend.models.video import VideoModel
+import random
 
 
 class TestTimer:
@@ -164,30 +165,40 @@ class DatabaseTestHelper:
     
     @staticmethod
     def seed_test_data(session: Session) -> Dict[str, List[Any]]:
-        """Seed database with test data."""
-        from tests.factories import DeviceFactory, VideoFactory
-        
-        # Create devices
+        """Seed database with simple representative data."""
         devices = []
         for i in range(5):
-            device = DeviceFactory.build()
-            db_device = Device(**device.__dict__)
+            db_device = DeviceModel(
+                name=f"TestDevice{i}",
+                type="dlna",
+                hostname=f"192.168.1.{100 + i}",
+                action_url=f"http://192.168.1.{100 + i}/action",
+                friendly_name=f"Test Device {i}",
+                status="connected",
+                is_playing=False,
+            )
             session.add(db_device)
             devices.append(db_device)
-        
-        # Create videos
+
         videos = []
         for i in range(10):
-            video = VideoFactory.build()
-            db_video = Video(**video.__dict__)
+            db_video = VideoModel(
+                name=f"Test Video {i}",
+                path=f"/tmp/test_video_{i}.mp4",
+                file_name=f"test_video_{i}.mp4",
+                file_size=1024 * (i + 1),
+                duration=60.0 + i,
+                format="mp4",
+                resolution="1920x1080",
+            )
             session.add(db_video)
             videos.append(db_video)
-        
+
         session.commit()
-        
+
         return {
             "devices": devices,
-            "videos": videos
+            "videos": videos,
         }
 
 
@@ -230,7 +241,7 @@ class NetworkTestHelper:
         """Simulate a device disconnection."""
         device.status = "disconnected"
         device.is_playing = False
-        device.current_video_id = None
+        device.current_video = None
 
 
 class FileTestHelper:

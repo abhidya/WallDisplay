@@ -72,15 +72,19 @@ def test_dlna_discovery_reuses_one_http_session_per_cycle(monkeypatch):
     ]
 
     backend = DLNADiscoveryBackend()
-    monkeypatch.setattr(backend, "_candidate_discovery_hosts", lambda: ["0.0.0.0"])
-    monkeypatch.setattr(backend, "_parse_device_description", fake_parse_device_description)
-    monkeypatch.setattr("web.backend.discovery.backends.dlna.aiohttp.ClientSession", _FakeAiohttpSession)
-    monkeypatch.setattr(
-        "web.backend.discovery.backends.dlna.socket.socket",
-        lambda *_args, **_kwargs: _FakeDiscoverySocket(responses),
-    )
+    loop = asyncio.new_event_loop()
+    try:
+        monkeypatch.setattr(backend, "_candidate_discovery_hosts", lambda: ["0.0.0.0"])
+        monkeypatch.setattr(backend, "_parse_device_description", fake_parse_device_description)
+        monkeypatch.setattr("web.backend.discovery.backends.dlna.aiohttp.ClientSession", _FakeAiohttpSession)
+        monkeypatch.setattr(
+            "web.backend.discovery.backends.dlna.socket.socket",
+            lambda *_args, **_kwargs: _FakeDiscoverySocket(responses),
+        )
 
-    asyncio.run(backend.discover_devices())
+        loop.run_until_complete(backend.discover_devices())
+    finally:
+        loop.close()
 
     assert len(_FakeAiohttpSession.instances) == 1
     assert len(used_sessions) == 2

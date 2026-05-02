@@ -18,7 +18,7 @@ try:
 except ImportError:
     QUARTZ_AVAILABLE = False
 
-from core.renderer_service.sender.airplay import AirPlaySender
+from web.backend.core.renderer_service.sender.airplay import AirPlaySender
 
 logger = logging.getLogger(__name__)
 

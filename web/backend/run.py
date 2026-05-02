@@ -7,7 +7,10 @@ import sys
 import os
 
 # Add current directory to Python path for imports
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+backend_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.abspath(os.path.join(backend_dir, "..", ".."))
+sys.path.insert(0, backend_dir)
+sys.path.insert(0, project_root)
 
 
 def _resolve_backend_log_file() -> str:
@@ -28,7 +31,7 @@ if __name__ == "__main__":
     
     # Use centralized logging configuration
     try:
-        from logging_config import setup_logging
+        from web.backend.logging_config import setup_logging
         log_level = "DEBUG" if args.debug else "INFO"
         setup_logging(log_level=log_level, log_file=_resolve_backend_log_file())
     except ImportError:
@@ -41,7 +44,7 @@ if __name__ == "__main__":
     
     # Run the server
     uvicorn.run(
-        "main:app",
+        "web.backend.main:app",
         host=args.host,
         port=args.port,
         reload=args.reload,

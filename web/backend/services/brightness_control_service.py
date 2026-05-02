@@ -8,8 +8,8 @@ from urllib.parse import urlparse
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 
-from services.app_runtime import get_app_runtime
-from services.overlay_cast_service import get_overlay_cast_service
+from web.backend.services.app_runtime import get_app_runtime
+from web.backend.services.overlay_cast_service import get_overlay_cast_service
 from utils.create_black_video import create_black_video
 
 logger = logging.getLogger(__name__)

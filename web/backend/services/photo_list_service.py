@@ -2,8 +2,8 @@ from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
-from models.photo_list import PhotoList
-from schemas.photo_list import PhotoListCreate, PhotoListResponse, PhotoListUpdate
+from web.backend.models.photo_list import PhotoList
+from web.backend.schemas.photo_list import PhotoListCreate, PhotoListResponse, PhotoListUpdate
 
 
 class PhotoListService:

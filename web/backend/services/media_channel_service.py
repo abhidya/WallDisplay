@@ -2,9 +2,9 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from models.media_channel import MediaChannel
-from models.media_list import MediaList
-from schemas.media_channel import MediaChannelCreate, MediaChannelResponse, MediaChannelUpdate
+from web.backend.models.media_channel import MediaChannel
+from web.backend.models.media_list import MediaList
+from web.backend.schemas.media_channel import MediaChannelCreate, MediaChannelResponse, MediaChannelUpdate
 
 
 class MediaChannelService:

@@ -47,10 +47,10 @@ if [ "$NANODLNA_INSTALL_PLAYWRIGHT" = "1" ] && "$NANODLNA_PYTHON_BIN" -c "import
 fi
 
 echo "Checking for import errors..."
-PYTHONPATH="$NANODLNA_BACKEND_DIR" "$NANODLNA_PYTHON_BIN" -c "import sys; sys.path.insert(0, '.'); import main" 2>/tmp/import_check.log
+PYTHONPATH="$NANODLNA_ROOT_DIR:$NANODLNA_BACKEND_DIR" "$NANODLNA_PYTHON_BIN" -c "import web.backend.main" 2>/tmp/import_check.log
 
 echo "Starting backend server..."
-PYTHONPATH="$NANODLNA_BACKEND_DIR" "$NANODLNA_PYTHON_BIN" run.py --host "$NANODLNA_HOST" --port "$NANODLNA_BACKEND_PORT" >> "$NANODLNA_LOG_DIR/backend.stdout.log" 2>> "$NANODLNA_LOG_DIR/backend.stderr.log" &
+PYTHONPATH="$NANODLNA_ROOT_DIR:$NANODLNA_BACKEND_DIR" "$NANODLNA_PYTHON_BIN" run.py --host "$NANODLNA_HOST" --port "$NANODLNA_BACKEND_PORT" >> "$NANODLNA_LOG_DIR/backend.stdout.log" 2>> "$NANODLNA_LOG_DIR/backend.stderr.log" &
 BACKEND_PID=$!
 
 echo "Waiting for backend to start..."

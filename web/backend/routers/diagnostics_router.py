@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Query
 
-from services.service_diagnostics_service import get_service_diagnostics_service
+from web.backend.services.service_diagnostics_service import get_service_diagnostics_service
 
 
 router = APIRouter(prefix="/api/diagnostics", tags=["diagnostics"])

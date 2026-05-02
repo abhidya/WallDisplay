@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String, DateTime, Boolean
 from sqlalchemy.sql import func
 
-from database.database import Base
+from web.backend.database.database import Base
 
 
 class MediaDirectory(Base):

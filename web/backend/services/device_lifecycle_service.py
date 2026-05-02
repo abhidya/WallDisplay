@@ -1,9 +1,9 @@
 import logging
 from typing import Any, Dict, Optional
 
-from core.device import Device
-from core.dlna_device import DLNADevice
-from core.transcreen_device import TranscreenDevice
+from web.backend.core.device import Device
+from web.backend.core.dlna_device import DLNADevice
+from web.backend.core.transcreen_device import TranscreenDevice
 
 logger = logging.getLogger(__name__)
 

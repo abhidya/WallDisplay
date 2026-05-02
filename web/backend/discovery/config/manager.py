@@ -15,8 +15,8 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler, FileModifiedEvent
 
 from sqlalchemy.orm import Session
-from database.database import get_db
-from models.device import DeviceModel
+from web.backend.database.database import get_db
+from web.backend.models.device import DeviceModel
 
 logger = logging.getLogger(__name__)
 

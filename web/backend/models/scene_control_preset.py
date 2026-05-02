@@ -1,7 +1,7 @@
 from sqlalchemy import Column, DateTime, Integer, JSON, String
 from sqlalchemy.sql import func
 
-from database.database import Base
+from web.backend.database.database import Base
 
 
 class SceneControlPreset(Base):

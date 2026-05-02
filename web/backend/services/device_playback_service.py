@@ -4,7 +4,7 @@ import re
 import traceback
 from typing import Callable
 
-from models.device import DeviceModel
+from web.backend.models.device import DeviceModel
 
 logger = logging.getLogger(__name__)
 

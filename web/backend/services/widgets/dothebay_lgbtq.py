@@ -5,9 +5,13 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
 import requests
-from bs4 import BeautifulSoup
 
-from services.widgets.dothebay_cache import loadDoTheBayCache, saveDoTheBayCache
+try:
+    from bs4 import BeautifulSoup
+except ImportError:  # optional dependency
+    BeautifulSoup = None
+
+from web.backend.services.widgets.dothebay_cache import loadDoTheBayCache, saveDoTheBayCache
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +47,9 @@ def _clean_text(node) -> str:
 
 
 def scrapeDoTheBayLgbtq() -> List[Dict[str, Any]]:
+    if BeautifulSoup is None:
+        raise RuntimeError("beautifulsoup4 is required for DoTheBay widget scraping")
+
     response = requests.get(
         DOTHEBAY_LGBTQ_URL,
         timeout=20,

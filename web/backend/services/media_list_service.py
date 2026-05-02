@@ -2,8 +2,8 @@ from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
-from models.media_list import MediaList
-from schemas.media_list import MediaListCreate, MediaListResponse, MediaListUpdate
+from web.backend.models.media_list import MediaList
+from web.backend.schemas.media_list import MediaListCreate, MediaListResponse, MediaListUpdate
 
 
 class MediaListService:

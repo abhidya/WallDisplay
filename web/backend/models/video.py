@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
-from database.database import Base
+from web.backend.database.database import Base
 
 class VideoModel(Base):
     """

@@ -79,7 +79,6 @@ def test_load_configs_from_file(config_service_fixture):
     assert configs["TestDevice1"]["hostname"] == "192.168.1.100"
     assert configs["TestDevice2"]["hostname"] == "192.168.1.101"
 
-# @pytest.mark.skip(reason="Temporarily skipping due to test hanging - original reason, might be fixed by RLock")
 def test_avoid_duplicate_loading(config_service_fixture):
     """Test that the same configuration file is not loaded twice"""
     service, config_file_path, _, _ = config_service_fixture

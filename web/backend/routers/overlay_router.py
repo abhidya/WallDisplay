@@ -10,8 +10,8 @@ from datetime import datetime
 import asyncio
 from pydantic import BaseModel
 
-from database.database import get_db
-from schemas.overlay import (
+from web.backend.database.database import get_db
+from web.backend.schemas.overlay import (
     ApiConfigs,
     OverlayConfigCreate,
     OverlayConfigUpdate,
@@ -23,14 +23,14 @@ from schemas.overlay import (
     OverlayCastSessionResponse,
     OverlayExportRequest,
 )
-from services.overlay_service import OverlayService
-from services.overlay_cast_service import get_overlay_cast_service
-from services.overlay_event_bus import overlay_events, notify_overlay_config_update
-from services.projector_redirect_runtime import (
+from web.backend.services.overlay_service import OverlayService
+from web.backend.services.overlay_cast_service import get_overlay_cast_service
+from web.backend.services.overlay_event_bus import overlay_events, notify_overlay_config_update
+from web.backend.services.projector_redirect_runtime import (
     get_recent_projector_requests,
     record_projector_client_heartbeat,
 )
-from models.overlay import OverlayConfig
+from web.backend.models.overlay import OverlayConfig
 
 router = APIRouter(prefix="/api/overlay", tags=["overlay"])
 

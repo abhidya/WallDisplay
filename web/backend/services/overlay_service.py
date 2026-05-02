@@ -13,16 +13,16 @@ from typing import Any, Dict, List, Optional
 import json
 from datetime import datetime
 
-from models.overlay import OverlayConfig
-from models.mapping_scene import MappingScene
-from models.scene_rank import SceneRank
-from models.media_channel import MediaChannel
-from models.media_directory import MediaDirectory
-from models.media_list import MediaList
-from models.photo import PhotoModel
-from models.photo_list import PhotoList
-from models.video import VideoModel
-from schemas.overlay import (
+from web.backend.models.overlay import OverlayConfig
+from web.backend.models.mapping_scene import MappingScene
+from web.backend.models.scene_rank import SceneRank
+from web.backend.models.media_channel import MediaChannel
+from web.backend.models.media_directory import MediaDirectory
+from web.backend.models.media_list import MediaList
+from web.backend.models.photo import PhotoModel
+from web.backend.models.photo_list import PhotoList
+from web.backend.models.video import VideoModel
+from web.backend.schemas.overlay import (
     ApiConfigs,
     OverlayConfigCreate,
     OverlayConfigUpdate,
@@ -30,8 +30,8 @@ from schemas.overlay import (
     OverlayStreamResponse,
     OverlayWindowInitResponse,
 )
-from core.streaming_service import get_streaming_service
-from services.overlay_playback_sync_service import get_overlay_playback_sync_service
+from web.backend.core.streaming_service import get_streaming_service
+from web.backend.services.overlay_playback_sync_service import get_overlay_playback_sync_service
 
 _LIVE_WIDGET_CACHE: Dict[str, Dict[str, Any]] = {}
 _LIVE_WIDGET_CACHE_LOCK = threading.RLock()

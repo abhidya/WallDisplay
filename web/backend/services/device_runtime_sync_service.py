@@ -1,7 +1,7 @@
 import logging
 from typing import Any, Dict, Optional
 
-from models.device import DeviceModel
+from web.backend.models.device import DeviceModel
 
 logger = logging.getLogger(__name__)
 

@@ -4,6 +4,7 @@ Tests for the main application entry point (app.py).
 import pytest
 from unittest.mock import patch, MagicMock
 import runpy
+from pathlib import Path
 
 # Import the app instance to ensure it's available for uvicorn.run
 from web.backend.main import app as fastapi_app # This import is fine for context but not for direct comparison in this test
@@ -32,6 +33,7 @@ def test_app_py_main_block():
         # It then imports `from main import app`.
         # The `app` instance passed to uvicorn.run will be the one from web.backend.main.
         
-        runpy.run_path('app.py', run_name='__main__')
+        app_path = Path(__file__).resolve().parents[1] / 'app.py'
+        runpy.run_path(str(app_path), run_name='__main__')
 
     mock_uvicorn_run.assert_called_once_with(ANY, host="0.0.0.0", port=8000)

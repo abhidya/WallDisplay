@@ -3,7 +3,7 @@ Configuration schemas for validation and type safety.
 """
 
 from typing import Dict, List, Optional, Any, Union
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 from datetime import datetime, time
 from enum import Enum
 
@@ -48,7 +48,8 @@ class ScheduleConfig(BaseModel):
     days_of_week: List[int] = Field(default_factory=lambda: list(range(7)))  # 0=Monday, 6=Sunday
     timezone: str = "UTC"
     
-    @validator('days_of_week')
+    @field_validator('days_of_week')
+    @classmethod
     def validate_days(cls, v):
         if not all(0 <= day <= 6 for day in v):
             raise ValueError('Days must be between 0 (Monday) and 6 (Sunday)')
