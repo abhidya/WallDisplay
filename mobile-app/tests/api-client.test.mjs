@@ -262,6 +262,8 @@ test('NanoDlnaApiClient preserves structured-lighting and depth route contracts 
     jsonResponse([{ session_id: 'sess-1' }]),
     jsonResponse({ session: { session_id: 'sess-1' } }),
     jsonResponse([{ capture_id: 'cap-1' }]),
+    jsonResponse({ steps: [{ index: 0 }] }),
+    jsonResponse({ capture_id: 'cap-2' }),
     jsonResponse({ session_id: 'sess-2' }),
     jsonResponse({ ok: true }),
     jsonResponse({ ok: true }),
@@ -274,6 +276,9 @@ test('NanoDlnaApiClient preserves structured-lighting and depth route contracts 
   const client = new NanoDlnaApiClient('http://controller.local:8000');
   const formData = new FormData();
   formData.append('file', new Blob(['depth']), 'depth.png');
+  const captureFormData = new FormData();
+  captureFormData.append('step_index', '0');
+  captureFormData.append('file', new Blob(['capture']), 'capture.jpg');
 
   assert.deepEqual(await client.getStructuredLightingStatus(), { worker: { status: 'idle' } });
   assert.deepEqual(await client.listStructuredLightingSessions(), [{ session_id: 'sess-1' }]);
@@ -281,6 +286,12 @@ test('NanoDlnaApiClient preserves structured-lighting and depth route contracts 
     session: { session_id: 'sess-1' },
   });
   assert.deepEqual(await client.listStructuredLightingCaptures('sess-1'), [{ capture_id: 'cap-1' }]);
+  assert.deepEqual(await client.getStructuredLightingCapturePlan('sess-1'), {
+    steps: [{ index: 0 }],
+  });
+  assert.deepEqual(await client.uploadStructuredLightingCapture('sess-1', captureFormData), {
+    capture_id: 'cap-2',
+  });
   assert.deepEqual(await client.createStructuredLightingSession({ name: 'Calibration' }), {
     session_id: 'sess-2',
   });
@@ -325,6 +336,16 @@ test('NanoDlnaApiClient preserves structured-lighting and depth route contracts 
         input: 'http://controller.local:8000/api/structured-lighting/sessions/sess-1/captures',
         method: 'GET',
         bodyKind: null,
+      },
+      {
+        input: 'http://controller.local:8000/api/structured-lighting/sessions/sess-1/capture-plan',
+        method: 'GET',
+        bodyKind: null,
+      },
+      {
+        input: 'http://controller.local:8000/api/structured-lighting/sessions/sess-1/captures',
+        method: 'POST',
+        bodyKind: 'form-data',
       },
       {
         input: 'http://controller.local:8000/api/structured-lighting/sessions',

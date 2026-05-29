@@ -5,7 +5,6 @@ import {
   Button,
   Card,
   CardContent,
-  CardActions,
   CircularProgress,
   Divider,
   Grid,
@@ -28,6 +27,24 @@ import {
   Movie as MovieIcon
 } from '@mui/icons-material';
 import { deviceApi, videoApi } from '../services/api';
+
+export function isPlayableDeviceStatus(device) {
+  const status = String(device?.status || '').toLowerCase();
+  if (status === 'connected') return true;
+  if (['disconnected', 'failed', 'error'].includes(status)) return false;
+
+  const derivedStatus = String(device?.derived_status || '').toLowerCase();
+  const availability = String(device?.availability || '').toLowerCase();
+  const derivedSignals = [derivedStatus, availability].filter(Boolean);
+  if (derivedSignals.some((signal) => ['online', 'ready', 'available', 'idle', 'playing', 'degraded'].includes(signal))) {
+    return true;
+  }
+  if (derivedSignals.some((signal) => ['offline', 'disconnected', 'unavailable', 'failed', 'error'].includes(signal))) {
+    return false;
+  }
+
+  return ['online', 'ready', 'available', 'idle', 'playing', 'degraded'].includes(status);
+}
 
 function PlayVideoOnDevice() {
   const { id } = useParams();
@@ -60,10 +77,8 @@ function PlayVideoOnDevice() {
       ]);
       
       setVideo(videoResponse.data);
-      // Only show connected devices
-      const connectedDevices = devicesResponse.data.devices.filter(
-        device => device.status === 'connected'
-      );
+      // Show devices that are playable across legacy and discovery-v2 status vocabularies.
+      const connectedDevices = (devicesResponse.data.devices || []).filter(isPlayableDeviceStatus);
       setDevices(connectedDevices);
       
       // If there's only one connected device, select it by default
@@ -221,7 +236,7 @@ function PlayVideoOnDevice() {
           
           {devices.length === 0 ? (
             <Alert severity="warning" sx={{ mb: 2 }}>
-              No connected devices available. Please make sure your devices are connected.
+              No playable devices available. Please make sure your devices are online or connected.
             </Alert>
           ) : (
             <Grid container spacing={2} sx={{ mb: 3 }}>

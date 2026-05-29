@@ -1,97 +1,106 @@
-/**
- * Simplified Dashboard tests that work with current implementation
- */
-
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 import Dashboard from '../pages/Dashboard';
+import { deviceApi, videoApi } from '../services/api';
 
-// Mock axios globally
-jest.mock('axios', () => ({
-  create: jest.fn(() => ({
-    get: jest.fn(() => Promise.resolve({ data: {} })),
-    post: jest.fn(() => Promise.resolve({ data: {} })),
-    interceptors: {
-      request: { use: jest.fn() },
-      response: { use: jest.fn() }
-    }
-  }))
+jest.mock('../services/api', () => ({
+  deviceApi: {
+    getDevices: jest.fn(),
+    pauseVideo: jest.fn(),
+    stopVideo: jest.fn(),
+  },
+  videoApi: {
+    getVideos: jest.fn(),
+  },
 }));
 
-// Mock navigation
 const mockNavigate = jest.fn();
 jest.mock('react-router-dom', () => ({
   ...jest.requireActual('react-router-dom'),
   useNavigate: () => mockNavigate,
 }));
 
-describe('Dashboard Component - Simple Tests', () => {
+const renderDashboard = () => render(
+  <BrowserRouter>
+    <Dashboard />
+  </BrowserRouter>
+);
+
+const devices = [
+  {
+    id: 1,
+    friendly_name: 'Projector A',
+    status: 'connected',
+    type: 'dlna',
+    is_playing: true,
+  },
+  {
+    id: 2,
+    friendly_name: 'Projector B',
+    status: 'idle',
+    type: 'airplay',
+    is_playing: false,
+  },
+];
+
+const videos = [
+  {
+    id: 7,
+    name: 'Reef Loop',
+    duration: 125,
+  },
+];
+
+describe('Dashboard user workflow', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    deviceApi.getDevices.mockResolvedValue({ data: { devices } });
+    videoApi.getVideos.mockResolvedValue({ data: { videos } });
+    deviceApi.pauseVideo.mockResolvedValue({ data: { ok: true } });
+    deviceApi.stopVideo.mockResolvedValue({ data: { ok: true } });
   });
 
-  test('renders without crashing', async () => {
-    render(
-      <BrowserRouter>
-        <Dashboard />
-      </BrowserRouter>
-    );
+  test('loads dashboard summaries from the shared API service', async () => {
+    renderDashboard();
 
-    // Component should render
-    expect(document.querySelector('div')).toBeInTheDocument();
+    expect(await screen.findByText('Projector A')).toBeInTheDocument();
+    expect(screen.getByText('Projector B')).toBeInTheDocument();
+    expect(screen.getByText('Reef Loop')).toBeInTheDocument();
+    expect(deviceApi.getDevices).toHaveBeenCalledTimes(1);
+    expect(videoApi.getVideos).toHaveBeenCalledTimes(1);
   });
 
+  test('quick action buttons route to primary workflows', async () => {
+    renderDashboard();
+    await screen.findByText('Projector A');
 
-  test('handles navigation buttons', async () => {
-    const axios = require('axios');
-    const mockAxiosInstance = {
-      get: jest.fn()
-        .mockResolvedValueOnce({ data: { devices: [] } }) // for getDevices
-        .mockResolvedValueOnce({ data: { videos: [] } }), // for getVideos
-      interceptors: {
-        request: { use: jest.fn() },
-        response: { use: jest.fn() }
-      }
-    };
-    axios.create.mockReturnValue(mockAxiosInstance);
+    fireEvent.click(screen.getByRole('button', { name: /view all devices/i }));
+    expect(mockNavigate).toHaveBeenCalledWith('/devices');
 
-    render(
-      <BrowserRouter>
-        <Dashboard />
-      </BrowserRouter>
-    );
-
-    // Wait for loading to complete
-    await waitFor(() => {
-      expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
-    });
-
-    // Check if quick action buttons are rendered
-    const buttons = screen.getAllByRole('button');
-    expect(buttons.length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole('button', { name: /^add$/i }));
+    expect(mockNavigate).toHaveBeenCalledWith('/videos/add');
   });
 
-  test('handles API errors gracefully', async () => {
-    const axios = require('axios');
-    const mockAxiosInstance = {
-      get: jest.fn().mockRejectedValue(new Error('Network error')),
-      interceptors: {
-        request: { use: jest.fn() },
-        response: { use: jest.fn() }
-      }
-    };
-    axios.create.mockReturnValue(mockAxiosInstance);
+  test('pauses a playing device and refreshes the dashboard state', async () => {
+    renderDashboard();
+    await screen.findByText('Projector A');
 
-    render(
-      <BrowserRouter>
-        <Dashboard />
-      </BrowserRouter>
-    );
+    fireEvent.click(screen.getByRole('button', { name: /pause projector a/i }));
 
-    // Wait for error state
-    await waitFor(() => {
-      expect(screen.getByText('Retry')).toBeInTheDocument();
-    });
+    await waitFor(() => expect(deviceApi.pauseVideo).toHaveBeenCalledWith(1));
+    await waitFor(() => expect(deviceApi.getDevices).toHaveBeenCalledTimes(2));
+  });
+
+  test('shows a retry state when the dashboard cannot load', async () => {
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    deviceApi.getDevices.mockRejectedValueOnce(new Error('Network error'));
+
+    renderDashboard();
+
+    expect(await screen.findByText('Retry')).toBeInTheDocument();
+    expect(screen.getByText(/failed to load data/i)).toBeInTheDocument();
+
+    errorSpy.mockRestore();
   });
 });

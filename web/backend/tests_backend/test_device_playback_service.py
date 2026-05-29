@@ -110,6 +110,45 @@ def test_stop_video_cleans_runtime_state_and_marks_manual_stop():
     assert status_updates == [("Device C", "connected", False)]
 
 
+def test_stop_video_unregisters_streaming_session_ids_from_registry_objects():
+    device = SimpleNamespace(
+        id=5,
+        name="Device E",
+        streaming_url="http://127.0.0.1:9005/video.mp4",
+        streaming_port=9005,
+        current_video="/tmp/e.mp4",
+        user_control_mode=None,
+        user_control_reason=None,
+    )
+    stopped_servers = []
+    unregistered_sessions = []
+    registry = SimpleNamespace(
+        get_sessions_for_device=lambda device_name: [
+            SimpleNamespace(session_id="session-1"),
+            "session-2",
+        ],
+        unregister_session=lambda session_id: unregistered_sessions.append(session_id),
+    )
+
+    service = DevicePlaybackService(
+        db=_FakeDB(device),
+        runtime=SimpleNamespace(
+            streaming_service=SimpleNamespace(stop_all_servers=lambda: stopped_servers.append(True)),
+            streaming_registry=registry,
+            cleanup_device_state=lambda _device_name: None,
+        ),
+        runtime_sync_service=SimpleNamespace(get_core_device=lambda _device_name: SimpleNamespace(stop=lambda: True)),
+        get_device_instance=lambda _device_id: None,
+        update_device_status=lambda *_args, **_kwargs: True,
+    )
+
+    result = service.stop_video(device.id)
+
+    assert result is True
+    assert stopped_servers == [True]
+    assert unregistered_sessions == ["session-1", "session-2"]
+
+
 def test_update_playback_progress_updates_db_runtime_and_core_device():
     device = SimpleNamespace(
         id=4,
@@ -148,3 +187,34 @@ def test_update_playback_progress_updates_db_runtime_and_core_device():
     assert core_device.current_position == "00:01:02"
     assert core_device.duration_formatted == "00:10:00"
     assert core_device.playback_progress == 10
+
+
+def test_update_playback_progress_sanitizes_invalid_status_payloads():
+    device = SimpleNamespace(
+        id=6,
+        name="Device F",
+        playback_position="old-position",
+        playback_duration="old-duration",
+        playback_progress=99,
+    )
+    runtime_updates = []
+
+    service = DevicePlaybackService(
+        db=_FakeDB(device),
+        runtime=SimpleNamespace(
+            update_runtime_playback_progress=lambda device_name, position, duration, progress: runtime_updates.append(
+                (device_name, position, duration, progress)
+            )
+        ),
+        runtime_sync_service=SimpleNamespace(get_core_device=lambda _device_name: None),
+        get_device_instance=lambda _device_id: None,
+        update_device_status=lambda *_args, **_kwargs: True,
+    )
+
+    result = service.update_playback_progress(device.id, None, 123, 101)
+
+    assert result is True
+    assert device.playback_position == "00:00:00"
+    assert device.playback_duration == "00:00:00"
+    assert device.playback_progress == 0
+    assert runtime_updates == [("Device F", "00:00:00", "00:00:00", 0)]

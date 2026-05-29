@@ -16,43 +16,38 @@ sys.path.insert(0, str(backend_root))
 os.environ["PYTEST_CURRENT_TEST"] = "true"
 
 @pytest.fixture(scope="session", autouse=True)
-def clear_global_sqlalchemy_metadata_for_tests_directory(request):
+def ensure_sqlalchemy_models_registered_for_tests():
     """
-    Fixture to clear SQLAlchemy global metadata before tests in the 'tests/'
-    directory run. This helps prevent "Table already defined" errors when
-    models are imported multiple times across different test files that
-    share the same global Base.metadata.
+    Keep the shared SQLAlchemy metadata populated for the whole pytest run.
+
+    Older tests tried to clear Base.metadata between suites to avoid duplicate
+    table registration. That is unsafe with already-imported declarative model
+    classes: clearing metadata detaches the table definitions from those
+    classes, and later imports return cached modules without re-registering
+    them. The backend fixture then sees an empty metadata collection.
     """
     try:
-        # Import and clear metadata at the start of the test session
-        from sqlalchemy.orm import clear_mappers
-        from web.backend.database.database import Base, metadata_obj
-        
-        print("INFO: tests/conftest.py: Clearing SQLAlchemy metadata and mappers.")
-        
-        # Clear existing metadata and mappers
-        Base.metadata.clear()
-        clear_mappers()
-        
-        # Re-import models to ensure they're registered with the cleared metadata
-        # This is done inside init_db() which we'll call after clearing
-        from web.backend.database.database import init_db
-        init_db()
-        
-        print("INFO: tests/conftest.py: Metadata cleared and models re-registered.")
-        
-        yield
-        
-        # Cleanup after all tests
-        Base.metadata.clear()
-        clear_mappers()
-        
+        from web.backend.database.database import Base
+        from web.backend.models.device import DeviceModel  # noqa: F401
+        from web.backend.models.video import VideoModel  # noqa: F401
+        from web.backend.models.overlay import OverlayConfig  # noqa: F401
+        from web.backend.models.projection import ProjectionConfig  # noqa: F401
+        from web.backend.models.mapping_scene import MappingScene  # noqa: F401
+        from web.backend.models.scene_rank import SceneRank  # noqa: F401
+        from web.backend.models.scene_control_preset import SceneControlPreset  # noqa: F401
+        from web.backend.models.media_directory import MediaDirectory  # noqa: F401
+        from web.backend.models.media_list import MediaList  # noqa: F401
+        from web.backend.models.media_channel import MediaChannel  # noqa: F401
+        from web.backend.models.photo import PhotoModel  # noqa: F401
+        from web.backend.models.photo_list import PhotoList  # noqa: F401
+
+        if not {"devices", "videos"}.issubset(Base.metadata.tables):
+            raise RuntimeError(
+                f"SQLAlchemy test metadata missing required tables: {list(Base.metadata.tables)}"
+            )
     except ImportError as e:
-        print(f"Warning: Could not import required modules in tests/conftest.py: {e}")
-        yield
-    except Exception as e:
-        print(f"Warning: Error in metadata handling in tests/conftest.py: {e}")
-        yield
+        print(f"Warning: Could not import required SQLAlchemy models in tests/conftest.py: {e}")
+    yield
 
 @pytest.fixture(scope="function")
 def temp_test_dir():

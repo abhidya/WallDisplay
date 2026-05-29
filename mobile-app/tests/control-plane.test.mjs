@@ -200,6 +200,8 @@ test('local control plane keeps structured-lighting and depth workflows explicit
   assert.equal((await client.getStructuredLightingStatus()).status, 'deferred');
   assert.deepEqual(await client.listStructuredLightingSessions(), []);
   assert.deepEqual(await client.listStructuredLightingCaptures('sess-1'), []);
+  assert.equal((await client.getStructuredLightingCapturePlan('sess-1')).status, 'deferred');
+  assert.equal((await client.uploadStructuredLightingCapture('sess-1', new FormData())).status, 'deferred');
   assert.equal((await client.startStructuredLightingSession('sess-1')).status, 'deferred');
 
   assert.equal((await client.uploadDepthMap(new FormData())).status, 'deferred');

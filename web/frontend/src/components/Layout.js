@@ -14,7 +14,6 @@ import {
   ListItemText,
   Toolbar,
   Typography,
-  Button,
   Tooltip,
 } from '@mui/material';
 import {
@@ -58,6 +57,15 @@ const menuItems = [
   { text: 'Settings', icon: <SettingsIcon />, path: '/settings' },
 ];
 
+
+function getActiveMenuItem(pathname, items = menuItems) {
+  const exact = items.find((item) => item.path === pathname);
+  if (exact) return exact;
+  return items
+    .filter((item) => item.path !== '/' && pathname.startsWith(`${item.path}/`))
+    .sort((a, b) => b.path.length - a.path.length)[0];
+}
+
 function getUiPrefs() {
   try {
     const raw = localStorage.getItem(UI_PREFS_KEY);
@@ -83,6 +91,7 @@ function Layout({ children }) {
   const navigate = useNavigate();
   const location = useLocation();
   const visibleMenuItems = menuItems.filter((item) => showExperimentalTabs || !item.experimental);
+  const activeMenuItem = getActiveMenuItem(location.pathname);
 
   // Save collapsed state to localStorage when it changes
   useEffect(() => {
@@ -132,7 +141,7 @@ function Layout({ children }) {
           <ListItem key={item.text} disablePadding>
             <Tooltip title={drawerCollapsed ? item.text : ''} placement="right">
               <ListItemButton
-                selected={location.pathname === item.path}
+                selected={activeMenuItem?.path === item.path}
                 onClick={() => handleNavigation(item.path)}
                 sx={{
                   justifyContent: drawerCollapsed ? 'center' : 'flex-start',
@@ -179,9 +188,8 @@ function Layout({ children }) {
             <MenuIcon />
           </IconButton>
           <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
-            {menuItems.find((item) => item.path === location.pathname)?.text || 'Not Found'}
+            {activeMenuItem?.text || 'Not Found'}
           </Typography>
-          <Button color="inherit">Help</Button>
         </Toolbar>
       </AppBar>
       <Box

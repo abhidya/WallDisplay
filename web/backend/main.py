@@ -382,6 +382,10 @@ def _get_startup_config_files(root_dir: str, backend_dir: str) -> List[str]:
             unique_paths.append(path_value)
     return unique_paths
 
+def _is_pytest_run() -> bool:
+    return "PYTEST_CURRENT_TEST" in os.environ
+
+
 # Mount static files for the frontend
 async def startup_event():
     global device_manager, streaming_service, streaming_registry, renderer_service, migration_adapter, video_preprocessing_service, mask_preprocessing_service
@@ -430,17 +434,20 @@ async def startup_event():
     except Exception as e:
         logger.error(f"Error initializing database: {e}")
 
-    try:
-        video_preprocessing_service = get_video_preprocessing_service()
-        video_preprocessing_service.start()
-    except Exception as e:
-        logger.error(f"Failed to start video preprocessing worker: {e}")
+    if _is_pytest_run():
+        logger.info("Skipping preprocessing workers during pytest run.")
+    else:
+        try:
+            video_preprocessing_service = get_video_preprocessing_service()
+            video_preprocessing_service.start()
+        except Exception as e:
+            logger.error(f"Failed to start video preprocessing worker: {e}")
 
-    try:
-        mask_preprocessing_service = get_mask_preprocessing_service()
-        mask_preprocessing_service.start()
-    except Exception as e:
-        logger.error(f"Failed to start mask preprocessing worker: {e}")
+        try:
+            mask_preprocessing_service = get_mask_preprocessing_service()
+            mask_preprocessing_service.start()
+        except Exception as e:
+            logger.error(f"Failed to start mask preprocessing worker: {e}")
     
     # Create and set device service
     try:
@@ -454,66 +461,69 @@ async def startup_event():
     except Exception as e:
         logger.error(f"Error creating device service: {e}")
     
-    # Load devices from configuration files
-    try:
-        # First, check for configuration files in the project root
-        root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        backend_dir = os.path.dirname(__file__)
-        config_files = _get_startup_config_files(root_dir, backend_dir)
-        
-        # Log all potential config files for debugging
-        logger.info(f"Checking for config files: {config_files}")
-        
-        loaded = False
-        for config_file in config_files:
-            if os.path.exists(config_file):
-                logger.info(f"Loading devices from {config_file}")
-                try:
-                    # Load devices from the config file using the existing device_service
-                    devices = device_service.load_devices_from_config(config_file)
-                    logger.info(f"Loaded {len(devices)} devices from {config_file}")
-                    
-                    loaded = True
-                except Exception as e:
-                    logger.error(f"Error loading devices from {config_file}: {e}")
-        
-        if not loaded:
-            logger.warning("No configuration files found or loaded. Using sample data.")
-        
-        # Initialize all devices from database into runtime memory
-        # This ensures devices are immediately available even before discovery
-        logger.info("Initializing devices from database into runtime inventory")
+    if _is_pytest_run():
+        logger.info("Skipping config hydration, background discovery, and renderer streaming startup during pytest run.")
+    else:
+        # Load devices from configuration files
         try:
-            db_devices = device_service.get_devices()
-            logger.info(f"Found {len(db_devices)} devices in database")
-            app_runtime.hydrate_database_devices(db_devices)
-                    
-        except Exception as e:
-            logger.error(f"Error initializing devices from database: {e}")
-            logger.error(f"Exception details: {traceback.format_exc()}")
-        
-        # Start runtime background services after initial device hydration.
-        app_runtime.start_background_services()
-        migration_adapter = app_runtime.migration_adapter
-        
-        # Log the number of devices in the runtime inventory
-        logger.info(f"Runtime has {app_runtime.get_device_count()} devices")
-
-        # Log all devices in the runtime inventory
-        for device_name, device in app_runtime.get_device_items():
-            logger.info(f"Device in runtime: {device_name}, type: {device.type}, hostname: {device.hostname}, action_url: {device.action_url}")
-
-        # Start the renderer service's streaming server
-        if renderer_service:
+            # First, check for configuration files in the project root
+            root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            backend_dir = os.path.dirname(__file__)
+            config_files = _get_startup_config_files(root_dir, backend_dir)
+            
+            # Log all potential config files for debugging
+            logger.info(f"Checking for config files: {config_files}")
+            
+            loaded = False
+            for config_file in config_files:
+                if os.path.exists(config_file):
+                    logger.info(f"Loading devices from {config_file}")
+                    try:
+                        # Load devices from the config file using the existing device_service
+                        devices = device_service.load_devices_from_config(config_file)
+                        logger.info(f"Loaded {len(devices)} devices from {config_file}")
+                        
+                        loaded = True
+                    except Exception as e:
+                        logger.error(f"Error loading devices from {config_file}: {e}")
+            
+            if not loaded:
+                logger.warning("No configuration files found or loaded. Using sample data.")
+            
+            # Initialize all devices from database into runtime memory
+            # This ensures devices are immediately available even before discovery
+            logger.info("Initializing devices from database into runtime inventory")
             try:
-                renderer_service.start_streaming_server()
-                logger.info("RendererService streaming server started.")
+                db_devices = device_service.get_devices()
+                logger.info(f"Found {len(db_devices)} devices in database")
+                app_runtime.hydrate_database_devices(db_devices)
+                        
             except Exception as e:
-                logger.error(f"Failed to start RendererService streaming server: {e}")
-        
-    except Exception as e:
-        logger.error(f"Error loading devices from config: {e}")
-        logger.error(f"Exception details: {traceback.format_exc()}")
+                logger.error(f"Error initializing devices from database: {e}")
+                logger.error(f"Exception details: {traceback.format_exc()}")
+            
+            # Start runtime background services after initial device hydration.
+            app_runtime.start_background_services()
+            migration_adapter = app_runtime.migration_adapter
+            
+            # Log the number of devices in the runtime inventory
+            logger.info(f"Runtime has {app_runtime.get_device_count()} devices")
+
+            # Log all devices in the runtime inventory
+            for device_name, device in app_runtime.get_device_items():
+                logger.info(f"Device in runtime: {device_name}, type: {device.type}, hostname: {device.hostname}, action_url: {device.action_url}")
+
+            # Start the renderer service's streaming server
+            if renderer_service:
+                try:
+                    renderer_service.start_streaming_server()
+                    logger.info("RendererService streaming server started.")
+                except Exception as e:
+                    logger.error(f"Failed to start RendererService streaming server: {e}")
+            
+        except Exception as e:
+            logger.error(f"Error loading devices from config: {e}")
+            logger.error(f"Exception details: {traceback.format_exc()}")
 
 async def shutdown_event():
     global migration_adapter, video_preprocessing_service, mask_preprocessing_service

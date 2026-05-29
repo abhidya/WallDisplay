@@ -275,8 +275,10 @@ class TestMainWithMocks:
         # Check that the database was initialized
         mock_init_db.assert_called_once()
         
-        # Check that runtime background services were started
-        mock_runtime.start_background_services.assert_called_once()
+        # Pytest startup keeps external/background workers disabled so TestClient
+        # startup remains deterministic and does not bind ports or query tables
+        # before the test fixture database is ready.
+        mock_runtime.start_background_services.assert_not_called()
     
     @patch("web.backend.main.device_manager")
     @patch("web.backend.main.streaming_registry")

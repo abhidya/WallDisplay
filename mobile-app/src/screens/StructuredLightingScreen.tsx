@@ -2,6 +2,8 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { ActionButton } from '../components/ActionButton';
 import { Panel } from '../components/Panel';
+import { StructuredLightingCamera } from '../components/StructuredLightingCamera';
+import { useStructuredLightingCaptureController } from '../features/lighting/useStructuredLightingCaptureController';
 import { useStructuredLightingController } from '../features/lighting/useStructuredLightingController';
 import type { AppMode } from '../control-plane/localState';
 import { colors } from '../theme';
@@ -57,6 +59,13 @@ export function StructuredLightingScreen({
     status,
     updateForm,
   } = useStructuredLightingController({ apiBaseUrl, appMode });
+  const captureController = useStructuredLightingCaptureController({
+    apiBaseUrl,
+    appMode,
+    captures,
+    selectedSessionId,
+    onRefreshSession: refresh,
+  });
   const worker = asRecord(status?.worker);
   const runtimeSession = asRecord(runtime?.session);
   const currentStep = asRecord(runtime?.current_step);
@@ -248,6 +257,56 @@ export function StructuredLightingScreen({
         )}
         <Text style={styles.sectionTitle}>Capture count</Text>
         <Text style={styles.detailText}>{String(captures.length)} capture records loaded.</Text>
+        <View style={styles.actionsRow}>
+          <ActionButton
+            label={captureController.loading ? 'Loading plan...' : 'Load capture plan'}
+            onPress={() => void captureController.loadCapturePlan()}
+            disabled={!selectedSessionId || captureController.loading}
+            variant="secondary"
+          />
+          <ActionButton
+            label={captureController.working ? 'Working...' : 'Decode'}
+            onPress={() => void captureController.decodeSession()}
+            disabled={!selectedSessionId || captureController.working}
+            variant="secondary"
+          />
+          <ActionButton
+            label={captureController.working ? 'Working...' : 'Publish mapping'}
+            onPress={() => void captureController.publishMappingScene()}
+            disabled={!selectedSessionId || captureController.working}
+            variant="secondary"
+          />
+        </View>
+        {captureController.error ? (
+          <Text style={styles.errorText}>{captureController.error}</Text>
+        ) : null}
+        {captureController.captureState ? (
+          <>
+            <Text style={styles.sectionTitle}>Capture plan</Text>
+            {captureController.captureState.steps.length === 0 ? (
+              <Text style={styles.emptyText}>Capture plan has no steps.</Text>
+            ) : null}
+            {captureController.captureState.steps.map((step) => (
+              <View key={step.index} style={styles.captureStepRow}>
+                <Text style={styles.detailText}>
+                  Step {step.index}: {step.label} • {step.status}
+                </Text>
+                {step.error ? <Text style={styles.errorText}>{step.error}</Text> : null}
+              </View>
+            ))}
+            <StructuredLightingCamera
+              disabled={captureController.working}
+              onUploadStep={(stepIndex, uri) =>
+                void captureController.uploadStepFile(stepIndex, { uri })
+              }
+              selectedSessionId={selectedSessionId}
+              selectedStepIndex={captureController.currentStepIndex}
+              steps={captureController.captureState.steps}
+            />
+          </>
+        ) : (
+          <Text style={styles.emptyText}>Load the capture plan to upload mobile captures.</Text>
+        )}
       </Panel>
 
       <Panel
@@ -372,5 +431,13 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 14,
     fontWeight: '700',
+  },
+  captureStepRow: {
+    gap: 4,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    padding: 10,
+    backgroundColor: colors.elevatedPanel,
   },
 });

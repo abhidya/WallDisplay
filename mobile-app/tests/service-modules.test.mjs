@@ -91,6 +91,8 @@ test('service modules route representative requests through absolute mobile-safe
     jsonResponse({ success: true }),
     blobResponse('binary-export'),
     jsonResponse({ status: 'decoded' }),
+    jsonResponse({ steps: [{ index: 0 }] }),
+    jsonResponse({ uploaded: true }),
     jsonResponse({ uploaded: true }),
     jsonResponse({ scanned: true }),
     jsonResponse({ uploaded: true }),
@@ -111,6 +113,8 @@ test('service modules route representative requests through absolute mobile-safe
   await services.discoveryV2Api.updateDeviceConfig('Office TV', { enabled: true });
   await services.overlayApi.exportMp4({ name: 'demo' });
   await services.structuredLightingApi.decodeSession('sess-1', { mode: 'fast' });
+  await services.structuredLightingApi.getCapturePlan('sess-1');
+  await services.structuredLightingApi.uploadCapture('sess-1', formData);
   await services.videoApi.uploadVideo(formData);
   await services.photoApi.scanDirectory('/photos', 'background', 'source-1');
   await services.mappingsApi.uploadMasks('scene-1', formData);
@@ -145,6 +149,8 @@ test('service modules route representative requests through absolute mobile-safe
       { input: 'http://controller.local:8000/api/v2/discovery/config/devices/Office%20TV', method: 'PUT' },
       { input: 'http://controller.local:8000/api/overlay/export', method: 'POST' },
       { input: 'http://controller.local:8000/api/structured-lighting/sessions/sess-1/decode', method: 'POST' },
+      { input: 'http://controller.local:8000/api/structured-lighting/sessions/sess-1/capture-plan', method: 'GET' },
+      { input: 'http://controller.local:8000/api/structured-lighting/sessions/sess-1/captures', method: 'POST' },
       { input: 'http://controller.local:8000/api/videos/upload', method: 'POST' },
       { input: 'http://controller.local:8000/api/photos/scan-directory?directory=%2Fphotos&category=background&source_directory_id=source-1', method: 'POST' },
       { input: 'http://controller.local:8000/api/mappings/scenes/scene-1/masks/upload', method: 'POST' },

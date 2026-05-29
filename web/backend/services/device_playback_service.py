@@ -236,7 +236,8 @@ class DevicePlaybackService:
                 streaming_registry = getattr(self.runtime, "streaming_registry", None)
                 if streaming_registry:
                     sessions = streaming_registry.get_sessions_for_device(db_device.name)
-                    for session_id in sessions:
+                    for session in sessions:
+                        session_id = getattr(session, "session_id", session)
                         logger.info(f"Unregistering streaming session {session_id} for device {db_device.name}")
                         streaming_registry.unregister_session(session_id)
 

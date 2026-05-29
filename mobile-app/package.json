@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "expo": "~54.0.33",
+    "expo-camera": "~17.0.10",
+    "expo-file-system": "~19.0.22",
     "expo-sqlite": "~16.0.10",
     "expo-status-bar": "~3.0.9",
     "react": "19.1.0",

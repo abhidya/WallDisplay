@@ -165,6 +165,7 @@ export interface ControlPlaneClient {
   deleteStructuredLightingSession(sessionId: string): Promise<JsonRecord>;
   getStructuredLightingRuntime(sessionId: string): Promise<JsonRecord>;
   listStructuredLightingCaptures(sessionId: string): Promise<JsonRecord[]>;
+  getStructuredLightingCapturePlan(sessionId: string): Promise<JsonRecord>;
   startStructuredLightingSession(sessionId: string): Promise<JsonRecord>;
   uploadDepthMap(formData: FormData): Promise<JsonRecord>;
   getDepthPreviewUrl(depthId: number | string): string;
@@ -350,6 +351,9 @@ class RemoteControlPlaneAdapter implements ControlPlaneClient {
   }
   listStructuredLightingCaptures(sessionId: string) {
     return this.client.listStructuredLightingCaptures(sessionId);
+  }
+  getStructuredLightingCapturePlan(sessionId: string) {
+    return this.client.getStructuredLightingCapturePlan(sessionId);
   }
   startStructuredLightingSession(sessionId: string) {
     return this.client.startStructuredLightingSession(sessionId);
@@ -1718,6 +1722,10 @@ class LocalControlPlaneClient implements ControlPlaneClient {
 
   async listStructuredLightingCaptures(_sessionId: string): Promise<JsonRecord[]> {
     return [];
+  }
+
+  async getStructuredLightingCapturePlan(_sessionId: string): Promise<JsonRecord> {
+    return makeDeferredResult('Structured lighting capture plan remains remote-only in local mode.');
   }
 
   async startStructuredLightingSession(sessionId: string): Promise<JsonRecord> {

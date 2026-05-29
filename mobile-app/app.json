@@ -20,7 +20,8 @@
           "_googlecast._tcp",
           "_airplay._tcp",
           "_raop._tcp"
-        ]
+        ],
+        "NSCameraUsageDescription": "nano-dlna uses the camera to capture structured-lighting calibration patterns for backend decoding."
       }
     },
     "android": {
@@ -33,14 +34,21 @@
       "permissions": [
         "android.permission.ACCESS_WIFI_STATE",
         "android.permission.ACCESS_NETWORK_STATE",
-        "android.permission.CHANGE_WIFI_MULTICAST_STATE"
+        "android.permission.CHANGE_WIFI_MULTICAST_STATE",
+        "android.permission.CAMERA"
       ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow nano-dlna to capture structured-lighting calibration patterns."
+        }
+      ]
     ]
   }
 }

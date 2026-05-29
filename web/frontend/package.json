@@ -22,6 +22,7 @@
     "start": "DANGEROUSLY_DISABLE_HOST_CHECK=true react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
+    "test:ci": "CI=true react-scripts test --watchAll=false --watchman=false",
     "eject": "react-scripts eject"
   },
   "eslintConfig": {

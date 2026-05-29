@@ -945,6 +945,10 @@ export class NanoDlnaApiClient {
     return this.buildApiUrl(`/structured-lighting/sessions/${sessionId}/export`);
   }
 
+  async getStructuredLightingCapturePlan(sessionId: string): Promise<JsonRecord> {
+    return this.requestJson<JsonRecord>(`/structured-lighting/sessions/${sessionId}/capture-plan`);
+  }
+
   async uploadStructuredLightingCapture(sessionId: string, formData: FormData): Promise<JsonRecord> {
     return requestUpload<JsonRecord>(this.apiHttp, `/structured-lighting/sessions/${sessionId}/captures`, formData);
   }
