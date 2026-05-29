@@ -91,6 +91,28 @@ export function createStructuredLightingRemoteClient(
   };
 }
 
+export function createStructuredLightingClient(
+  appMode: AppMode,
+  apiBaseUrl: string,
+): StructuredLightingRemoteClient {
+  if (appMode === 'local') {
+    const seamClient = createControlPlaneClient('local', apiBaseUrl);
+    return {
+      createSession: (payload: JsonRecord) => seamClient.createStructuredLightingSession(payload),
+      deleteSession: (sessionId: string) => seamClient.deleteStructuredLightingSession(sessionId),
+      getCapabilities: () => seamClient.getStructuredLightingCapabilities(),
+      getRuntime: (sessionId: string) => seamClient.getStructuredLightingRuntime(sessionId),
+      getStatus: () => seamClient.getStructuredLightingStatus(),
+      listCaptures: (sessionId: string) => seamClient.listStructuredLightingCaptures(sessionId),
+      listProjectors: async () => seamClient.listDevices() as Promise<JsonRecord[]>,
+      listSessions: () => seamClient.listStructuredLightingSessions(),
+      startSession: (sessionId: string) => seamClient.startStructuredLightingSession(sessionId),
+    };
+  }
+
+  return createStructuredLightingRemoteClient(apiBaseUrl);
+}
+
 const defaultForm = {
   name: 'Wall Calibration',
   projector_device_id: '',
@@ -106,8 +128,8 @@ export function useStructuredLightingController(
   options: UseStructuredLightingControllerOptions,
 ): StructuredLightingController {
   const client = useMemo(
-    () => createStructuredLightingRemoteClient(options.apiBaseUrl),
-    [options.apiBaseUrl],
+    () => createStructuredLightingClient(options.appMode, options.apiBaseUrl),
+    [options.apiBaseUrl, options.appMode],
   );
   const [capabilities, setCapabilities] = useState<JsonRecord | null>(null);
   const [status, setStatus] = useState<JsonRecord | null>(null);
@@ -123,16 +145,6 @@ export function useStructuredLightingController(
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    if (options.appMode !== 'remote') {
-      setCapabilities(null);
-      setStatus(null);
-      setSessions([]);
-      setProjectors([]);
-      setRuntime(null);
-      setCaptures([]);
-      return;
-    }
-
     setLoading(true);
     setError(null);
     try {
@@ -173,7 +185,7 @@ export function useStructuredLightingController(
   }, [client, options.appMode]);
 
   const refreshSessionDetails = useCallback(async () => {
-    if (options.appMode !== 'remote' || !selectedSessionId) {
+    if (!selectedSessionId) {
       setRuntime(null);
       setCaptures([]);
       return;
@@ -202,11 +214,6 @@ export function useStructuredLightingController(
 
   const runAction = useCallback(
     async (handler: () => Promise<unknown>, successMessage: string) => {
-      if (options.appMode !== 'remote') {
-        setError('Structured lighting is remote-only in this mobile slice.');
-        return;
-      }
-
       setActionLoading(true);
       setError(null);
       setActionMessage(null);

@@ -1309,38 +1309,66 @@ class LocalControlPlaneClient implements ControlPlaneClient {
     };
   }
 
-  async getLogs(_params?: QueryRecord): Promise<JsonRecord> {
+  async getLogs(params?: QueryRecord): Promise<JsonRecord> {
+    const state = await loadLocalControlPlaneState();
+    const limit = Number(params?.limit ?? 100);
+    const sources = Array.isArray(params?.sources) ? params.sources.map(String) : [];
+    const search = typeof params?.search === 'string' ? params.search.toLowerCase() : '';
+    const logs = state.actionHistory
+      .filter((entry) => {
+        const sourceMatch = sources.length === 0 || sources.includes('local-control-plane');
+        const text = `${entry.title} ${entry.detail} ${entry.status}`.toLowerCase();
+        const searchMatch = !search || text.includes(search);
+        return sourceMatch && searchMatch;
+      })
+      .slice(0, Number.isFinite(limit) && limit > 0 ? limit : 100)
+      .map((entry) => ({
+        timestamp: entry.created_at,
+        level: entry.status === 'deferred' ? 'INFO' : 'INFO',
+        source: 'local-control-plane',
+        message: entry.title,
+        detail: entry.detail,
+        mode: entry.mode,
+        status: entry.status,
+      }));
+
     return {
-      logs: [],
-      total: 0,
+      logs,
+      total: logs.length,
     };
   }
 
   async getLogSources(): Promise<JsonRecord> {
     return {
-      sources: [],
+      sources: ['local-control-plane'],
     };
   }
 
   async getLogLevels(): Promise<JsonRecord> {
     return {
-      levels: [],
+      levels: ['INFO'],
     };
   }
 
   async getLogStats(): Promise<JsonRecord> {
+    const state = await loadLocalControlPlaneState();
     return {
-      total_logs: 0,
-      recent_logs_1h: 0,
+      total_logs: state.actionHistory.length,
+      recent_logs_1h: state.actionHistory.length,
       active_websockets: 0,
     };
   }
 
   async tailLogSource(source: string, lines = 100): Promise<JsonRecord> {
+    const payload = await this.getLogs({
+      sources: [source],
+      limit: lines,
+    });
     return {
       source,
       lines,
-      entries: [],
+      logs: payload.logs,
+      entries: payload.logs,
     };
   }
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { createControlPlaneClient } from '../../control-plane/client.ts';
 import type { AppMode } from '../../control-plane/localState.ts';
 import {
   createHttpClient,
@@ -96,6 +97,34 @@ export function createOverlayRemoteClient(
   };
 }
 
+export function createOverlayClient(
+  appMode: AppMode,
+  apiBaseUrl: string,
+  fetchImpl: typeof fetch = globalThis.fetch,
+): OverlayRemoteClient {
+  if (appMode === 'local') {
+    const seamClient = createControlPlaneClient('local', apiBaseUrl);
+    return {
+      rootBaseUrl: seamClient.rootBaseUrl,
+      createConfig: (payload: JsonRecord) => seamClient.createOverlayConfig(payload),
+      deleteConfig: (configId: number | string) => seamClient.deleteOverlayConfig(configId),
+      exportMp4: (payload: JsonRecord) => seamClient.exportOverlayMp4(payload),
+      getBrightness: () => seamClient.getOverlayBrightness(),
+      listCastDevices: async () => seamClient.listDevices() as Promise<JsonRecord[]>,
+      listCastSessions: () => seamClient.listOverlayCastSessions() as Promise<JsonRecord[]>,
+      listConfigs: () => seamClient.listOverlayConfigs() as Promise<JsonRecord[]>,
+      listMappings: () => seamClient.listMappingScenes() as Promise<JsonRecord[]>,
+      listVideos: () => seamClient.listVideos() as Promise<JsonRecord[]>,
+      startCast: (payload: JsonRecord) => seamClient.startOverlayCast(payload),
+      stopCastSession: (sessionId: string) => seamClient.stopOverlayCastSession(sessionId),
+      triggerOverlaySync: (options?: { triggeredBy?: string; videoName?: string }) =>
+        seamClient.triggerOverlaySync(options),
+    };
+  }
+
+  return createOverlayRemoteClient(apiBaseUrl, fetchImpl);
+}
+
 export interface OverlayProjectionController {
   actionLoading: boolean;
   actionMessage: string | null;
@@ -136,7 +165,10 @@ interface UseOverlayProjectionControllerOptions {
 export function useOverlayProjectionController(
   options: UseOverlayProjectionControllerOptions,
 ): OverlayProjectionController {
-  const client = useMemo(() => createOverlayRemoteClient(options.apiBaseUrl), [options.apiBaseUrl]);
+  const client = useMemo(
+    () => createOverlayClient(options.appMode, options.apiBaseUrl),
+    [options.apiBaseUrl, options.appMode],
+  );
   const [videos, setVideos] = useState<JsonRecord[]>([]);
   const [mappings, setMappings] = useState<JsonRecord[]>([]);
   const [configs, setConfigs] = useState<JsonRecord[]>([]);
@@ -155,15 +187,6 @@ export function useOverlayProjectionController(
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    if (options.appMode !== 'remote') {
-      setVideos([]);
-      setMappings([]);
-      setConfigs([]);
-      setCastDevices([]);
-      setCastSessions([]);
-      return;
-    }
-
     setLoading(true);
     setError(null);
     try {

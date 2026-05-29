@@ -228,6 +228,8 @@ dashboard_run.log
 dashboard_run.log*
 nanodlna_output.log
 logs/
+!mobile-app/src/features/logs/
+!mobile-app/src/features/logs/*.ts
 web/backend/dashboard_run.log*
 
 # Database files

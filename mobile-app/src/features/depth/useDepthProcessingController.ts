@@ -102,10 +102,37 @@ export function createDepthRemoteClient(apiBaseUrl: string): DepthRemoteClient {
   };
 }
 
+export function createDepthClient(appMode: AppMode, apiBaseUrl: string): DepthRemoteClient {
+  if (appMode === 'local') {
+    const seamClient = createControlPlaneClient('local', apiBaseUrl);
+    return {
+      createProjection: (payload: JsonRecord) => seamClient.createDepthProjection(payload),
+      deleteDepthMap: (depthId: string) => seamClient.deleteDepthMap(depthId),
+      exportMasks: async (depthId: string, segmentIds: number[]) => {
+        const response = await seamClient.exportDepthMasks(depthId, segmentIds);
+        return new Blob([JSON.stringify(response, null, 2)], {
+          type: 'application/json',
+        });
+      },
+      previewDepthMap: (depthId: string) => seamClient.getDepthPreviewUrl(depthId),
+      previewSegmentation: (depthId: string, alpha = 0.5) =>
+        seamClient.getDepthSegmentationPreviewUrl(depthId, alpha),
+      segmentDepthMap: (depthId: string, payload: JsonRecord) =>
+        seamClient.segmentDepthMap(depthId, payload),
+      uploadDepthMap: (formData: FormData) => seamClient.uploadDepthMap(formData),
+    };
+  }
+
+  return createDepthRemoteClient(apiBaseUrl);
+}
+
 export function useDepthProcessingController(
   options: UseDepthProcessingControllerOptions,
 ): DepthProcessingController {
-  const client = useMemo(() => createDepthRemoteClient(options.apiBaseUrl), [options.apiBaseUrl]);
+  const client = useMemo(
+    () => createDepthClient(options.appMode, options.apiBaseUrl),
+    [options.apiBaseUrl, options.appMode],
+  );
   const [currentDepthId, setCurrentDepthId] = useState<string | null>(null);
   const [segmentationMethod, setSegmentationMethod] = useState('kmeans');
   const [numClusters, setNumClusters] = useState('5');
@@ -128,8 +155,19 @@ export function useDepthProcessingController(
       : null;
 
   const uploadDepthMap = useCallback(async () => {
-    if (options.appMode !== 'remote') {
-      setError('Depth processing is remote-only in this mobile slice.');
+    if (options.appMode === 'local') {
+      setLoading(true);
+      setError(null);
+      setActionMessage(null);
+      try {
+        const response = await client.uploadDepthMap(new FormData());
+        const record = asRecord(response);
+        setActionMessage(String(record?.message ?? 'Depth processing is deferred in local mode.'));
+      } catch (uploadError) {
+        setError(uploadError instanceof Error ? uploadError.message : 'Depth upload failed.');
+      } finally {
+        setLoading(false);
+      }
       return;
     }
 

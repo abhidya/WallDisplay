@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Box,
@@ -63,11 +63,7 @@ function PlayVideoOnDevice() {
     severity: 'success'
   });
 
-  useEffect(() => {
-    fetchData();
-  }, [id]);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       // Fetch video and devices in parallel
@@ -92,7 +88,11 @@ function PlayVideoOnDevice() {
       setError('Failed to load data. Please try again later.');
       setLoading(false);
     }
-  };
+  }, [id]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
   const handlePlayVideo = async () => {
     if (!selectedDevice) {

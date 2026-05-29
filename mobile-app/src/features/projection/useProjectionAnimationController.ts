@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { createControlPlaneClient } from '../../control-plane/client.ts';
 import type { AppMode } from '../../control-plane/localState.ts';
 import { createHttpClient, normalizeApiBaseUrl } from '../../services/httpClient.ts';
 import type { JsonRecord } from '../../types/api.ts';
@@ -46,6 +47,27 @@ export function createProjectionRemoteClient(
   };
 }
 
+export function createProjectionClient(
+  appMode: AppMode,
+  apiBaseUrl: string,
+  fetchImpl: typeof fetch = globalThis.fetch,
+): ProjectionRemoteClient {
+  if (appMode === 'local') {
+    const seamClient = createControlPlaneClient('local', apiBaseUrl);
+    return {
+      createAnimationList: (payload: JsonRecord) => seamClient.createProjectionAnimationList(payload),
+      deleteAnimationList: (animationListId: number | string) =>
+        seamClient.deleteProjectionAnimationList(animationListId),
+      listAnimationLists: () => seamClient.listProjectionAnimationLists(),
+      listAnimations: () => seamClient.listProjectionAnimations(),
+      updateAnimationList: (animationListId: number | string, payload: JsonRecord) =>
+        seamClient.updateProjectionAnimationList(animationListId, payload),
+    };
+  }
+
+  return createProjectionRemoteClient(apiBaseUrl, fetchImpl);
+}
+
 export interface ProjectionAnimationController {
   actionLoading: boolean;
   actionMessage: string | null;
@@ -88,8 +110,8 @@ export function useProjectionAnimationController(
   options: UseProjectionAnimationControllerOptions,
 ): ProjectionAnimationController {
   const client = useMemo(
-    () => createProjectionRemoteClient(options.apiBaseUrl),
-    [options.apiBaseUrl],
+    () => createProjectionClient(options.appMode, options.apiBaseUrl),
+    [options.apiBaseUrl, options.appMode],
   );
   const [animations, setAnimations] = useState<JsonRecord[]>([]);
   const [animationLists, setAnimationLists] = useState<JsonRecord[]>([]);
@@ -100,12 +122,6 @@ export function useProjectionAnimationController(
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    if (options.appMode !== 'remote') {
-      setAnimations([]);
-      setAnimationLists([]);
-      return;
-    }
-
     setLoading(true);
     setError(null);
     try {
@@ -135,15 +151,11 @@ export function useProjectionAnimationController(
   }, []);
 
   const saveAnimationList = useCallback(async () => {
-    if (options.appMode !== 'remote') {
-      setError('Projection animation management is remote-only in this slice.');
-      return;
-    }
     if (!listDraft.name.trim()) {
       setError('Animation list name is required.');
       return;
     }
-    if (!listDraft.animation_ids.length) {
+    if (options.appMode === 'remote' && !listDraft.animation_ids.length) {
       setError('Select at least one animation.');
       return;
     }

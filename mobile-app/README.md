@@ -27,6 +27,10 @@ This is the separate cross-platform rewrite shell for `nano-dlna`, built with Ex
 | Operations | Streaming analytics, active sessions, renderer/projector/scene selection, overlay sync, mapping inventory, scene ranks/presets, projection launch/status | `/api/streaming/analytics`, `/api/streaming/sessions`, `/api/renderer/list`, `/api/renderer/projectors`, `/api/renderer/scenes`, `/api/renderer/start`, `/api/renderer/start_projector`, `/api/renderer/pause/{projector}`, `/api/renderer/resume/{projector}`, `/api/renderer/stop`, `/api/overlay/configs`, `/api/overlay/status`, `/api/overlay/sync`, `/api/mappings/scenes`, `/api/mappings/ranks`, `/api/mappings/scene-control-presets`, `/api/projection/configs`, `/api/projection/configs/{id}/launch`, `/api/projection/sessions/{id}` |
 | Settings | Base URL normalization, connection testing, backend health confirmation, and discovery visibility | `/health`, `/api/v2/discovery/status` |
 
+## Local-mode UX journey map
+
+The tracked journey map for local-first UX, deferred advanced actions, and remote fallback behavior lives in [`USER_JOURNEYS.md`](./USER_JOURNEYS.md). Use it as the product/design source when adding local-mode screens or changing action semantics.
+
 ## Code-quality notes
 
 - The mobile shell keeps controller logic in `src/features/**` and presentation in `src/screens/**` to avoid coupling backend requests directly into screen components.

@@ -166,8 +166,10 @@ test('local control plane keeps backend admin settings explicit as remote-only',
 test('local control plane exposes lifted overlay and deferred advanced feature methods safely', async () => {
   const client = await freshLocalClient();
 
-  assert.deepEqual(await client.getLogs(), { logs: [], total: 0 });
-  assert.deepEqual(await client.getLogSources(), { sources: [] });
+  const logsPayload = await client.getLogs();
+  assert.equal(logsPayload.total, 1);
+  assert.match(logsPayload.logs[0].message, /Local mode ready/);
+  assert.deepEqual(await client.getLogSources(), { sources: ['local-control-plane'] });
 
   const createdOverlay = await client.createOverlayConfig({ name: 'Local overlay config' });
   assert.equal(createdOverlay.name, 'Local overlay config');
