@@ -1,6 +1,6 @@
-# nano-dlna
+# WallDisplay
 
-`nano-dlna` is a local media control and projection workspace. A FastAPI backend discovers and controls DLNA TVs, AirPlay receivers, and overlay targets on the LAN. A React dashboard and an Expo mobile app provide operator surfaces. The original `nanodlna` CLI also remains available.
+`WallDisplay` is a local media control and projection workspace built around the original `nanodlna` CLI. A FastAPI backend discovers and controls DLNA TVs, AirPlay receivers, and overlay targets on the LAN. A React dashboard and an Expo mobile app provide operator surfaces.
 
 ## What Is In This Repo
 
