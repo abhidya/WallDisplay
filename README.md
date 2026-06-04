@@ -161,16 +161,18 @@ The `ControlPlaneClient` interface (`mobile-app/src/control-plane/client.ts`) ab
 ### Hardware-free verification
 
 ```bash
+python3 scripts/offline_demo_smoke.py
 python3 -m compileall nanodlna web/backend
 npm --prefix mobile-app install
 npm --prefix mobile-app run typecheck
 ```
 
-The compile check catches Python syntax/import-shape regressions without
-touching DLNA, AirPlay, cameras, Chrome, or FFmpeg devices. The Expo mobile
-typecheck validates the local/offline control-plane shell. Full dashboard,
-overlay, structured-lighting, and casting demos require the intended LAN devices
-and native tools to be present.
+The offline smoke summarizes the checked-in dashboard/backend/static demo
+surface. The compile check catches Python syntax/import-shape regressions
+without touching DLNA, AirPlay, cameras, Chrome, or FFmpeg devices. The Expo
+mobile typecheck validates the local/offline control-plane shell. Full
+dashboard, overlay, structured-lighting, and casting demos require the intended
+LAN devices and native tools to be present.
 
 ### 1. Prepare environment
 
