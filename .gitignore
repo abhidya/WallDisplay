@@ -192,6 +192,7 @@ celerybeat-schedule
 .env.production.local
 .env.*.local
 .venv
+.conda-walldisplay/
 env/
 venv/
 ENV/

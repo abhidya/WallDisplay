@@ -46,6 +46,19 @@
         
         // Set background color from parameter if provided
         document.body.style.backgroundColor = bgColor;
+
+        const projectorId = urlParams.get('projector_id');
+        const sendHeartbeat = () => {
+            if (!projectorId) {
+                return;
+            }
+            fetch(`/api/renderer/heartbeat/${encodeURIComponent(projectorId)}`, {
+                method: 'POST',
+                keepalive: true
+            }).catch(() => {});
+        };
+        sendHeartbeat();
+        setInterval(sendHeartbeat, 5000);
         
         // Add keyboard listener to show/hide info message
         document.addEventListener('keydown', function(event) {

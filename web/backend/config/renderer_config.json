@@ -1,10 +1,19 @@
 {
+  "server_base_url": "http://localhost:8000",
   "senders": {
     "direct": {
       "enabled": true,
       "default_display": 0,
       "browser_path": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
       "kiosk_mode": true
+    },
+    "hdmi": {
+      "enabled": true,
+      "default_display": 1,
+      "browser_path": "",
+      "kiosk_mode": true,
+      "heartbeat_timeout_seconds": 15,
+      "isolated_profile": true
     },
     "dlna": {
       "enabled": true,
@@ -80,6 +89,18 @@
     "proj-local": {
       "sender": "direct",
       "target_name": "0"
+    },
+    "proj-hdmi-local": {
+      "name": "HDMI Projector",
+      "sender": "hdmi",
+      "target_name": "\\\\.\\DISPLAY5",
+      "content_mode": "identify",
+      "content_modes": ["identify", "structured_light", "overlay", "blank", "scene"],
+      "content_options": {
+        "pattern_set": "gray_code",
+        "frame_duration_ms": 300,
+        "safe_black_between_frames": true
+      }
     },
     "proj-as": {
       "sender": "airplay",

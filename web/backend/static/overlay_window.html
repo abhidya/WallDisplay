@@ -1135,6 +1135,18 @@
         let lastRenderedDateString = '';
         let initialUrlParams = new URLSearchParams(window.location.search);
         let currentConfigId = initialUrlParams.get('config_id');
+        const projectorHeartbeatId = initialUrlParams.get('projector_id');
+        const sendProjectorHeartbeat = () => {
+            if (!projectorHeartbeatId) {
+                return;
+            }
+            fetch(`/api/renderer/heartbeat/${encodeURIComponent(projectorHeartbeatId)}`, {
+                method: 'POST',
+                keepalive: true
+            }).catch(() => {});
+        };
+        sendProjectorHeartbeat();
+        setInterval(sendProjectorHeartbeat, 5000);
         const widgetsHiddenByUrl = initialUrlParams.get('widgets') === 'hidden';
         const captureMode = initialUrlParams.get('capture') === 'dlna';
         const projectionMode = captureMode

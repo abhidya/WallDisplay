@@ -239,7 +239,29 @@ cd web
 ./stop_direct.sh
 ```
 
-### 5. Mobile app
+### 5. HDMI projector on Windows
+
+The HDMI projector adapter must run in the logged-in user's desktop session so it can enumerate monitors and launch the projector browser window on the selected display. Docker containers and scheduled/background Windows services may run without access to the interactive desktop, so use a user-session startup task or run the dashboard directly for HDMI projection.
+
+Set `NANODLNA_SERVER_BASE_URL` when the backend is not on `http://localhost:8000`; HDMI identify, structured-light, overlay, blank, and heartbeat URLs use that base URL.
+
+Windows helper scripts are available under `scripts/`:
+
+```powershell
+# Create/update the current-user logon task.
+powershell -ExecutionPolicy Bypass -File scripts\register-walldisplay-task.ps1
+
+# Start/stop manually.
+schtasks /Run /TN WallDisplay
+powershell -ExecutionPolicy Bypass -File scripts\stop-walldisplay.ps1
+
+# Run once from Administrator PowerShell to allow LAN access.
+powershell -ExecutionPolicy Bypass -File scripts\add-walldisplay-firewall-admin.ps1
+```
+
+The Windows launcher defaults to port `8088` to avoid common local development conflicts. Override it with `NANODLNA_BACKEND_PORT` if needed. It prefers `NANODLNA_PYTHON_BIN`, then `.conda-walldisplay\python.exe`, then `.venv\Scripts\python.exe`, then `python`.
+
+### 6. Mobile app
 
 ```bash
 cd mobile-app

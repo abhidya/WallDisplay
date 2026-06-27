@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Structured Light</title>
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+      cursor: none;
+    }
+    canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+      background: #000;
+    }
+    .hud {
+      position: fixed;
+      left: 24px;
+      bottom: 24px;
+      color: rgba(255, 255, 255, 0.68);
+      font: 14px/1.4 Arial, Helvetica, sans-serif;
+      letter-spacing: 0.04em;
+      background: rgba(0, 0, 0, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      padding: 10px 12px;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="pattern"></canvas>
+  <div class="hud" id="hud"></div>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const projectorId = params.get('projector_id') || 'projector';
+    const patternSet = params.get('pattern_set') || params.get('pattern') || 'gray_code';
+    const frameDurationMs = Math.max(50, Number(params.get('frame_duration_ms') || params.get('interval_ms') || 300));
+    const loop = readBool('loop', true);
+    const safeBlack = readBool('safe_black_between_frames', true);
+    const invert = readBool('invert', false);
+    const gamma = Math.max(0.1, Number(params.get('gamma') || 1));
+
+    const canvas = document.getElementById('pattern');
+    const ctx = canvas.getContext('2d', { alpha: false });
+    const hud = document.getElementById('hud');
+    const frameObservers = new Set();
+    let sequence = [];
+    let frameIndex = 0;
+    let showingBlackSpacer = false;
+    let activeFrame = null;
+
+    window.wallDisplayStructuredLight = {
+      getCurrentFrame: () => activeFrame,
+      addFrameObserver: (observer) => {
+        if (typeof observer === 'function') {
+          frameObservers.add(observer);
+        }
+        return () => frameObservers.delete(observer);
+      }
+    };
+
+    function readBool(name, defaultValue) {
+      const value = params.get(name);
+      if (value === null) return defaultValue;
+      return value.toLowerCase() === 'true' || value === '1';
+    }
+
+    function resize() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      draw();
+    }
+    window.addEventListener('resize', resize);
+
+    function tone(value) {
+      const normalized = Math.pow(value / 255, gamma);
+      const corrected = Math.round(normalized * 255);
+      return invert ? 255 - corrected : corrected;
+    }
+
+    function fill(value) {
+      const c = tone(value);
+      ctx.fillStyle = `rgb(${c},${c},${c})`;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+
+    function drawWhite() {
+      fill(255);
+    }
+
+    function drawBlack() {
+      fill(0);
+    }
+
+    function drawCheckerboard() {
+      const size = Math.max(24, Math.round(Math.min(canvas.width, canvas.height) / 16));
+      for (let y = 0; y < canvas.height; y += size) {
+        for (let x = 0; x < canvas.width; x += size) {
+          const value = ((x / size + y / size) % 2 === 0) ? 255 : 0;
+          const c = tone(value);
+          ctx.fillStyle = `rgb(${c},${c},${c})`;
+          ctx.fillRect(x, y, size, size);
+        }
+      }
+    }
+
+    function drawGrayCode(axis, bit) {
+      const length = axis === 'x' ? canvas.width : canvas.height;
+      const bands = Math.pow(2, bit + 2);
+      const bandSize = length / bands;
+      for (let i = 0; i < bands; i += 1) {
+        const gray = i ^ (i >> 1);
+        const on = ((gray >> bit) & 1) === 1;
+        const c = tone(on ? 255 : 0);
+        ctx.fillStyle = `rgb(${c},${c},${c})`;
+        if (axis === 'x') {
+          ctx.fillRect(i * bandSize, 0, Math.ceil(bandSize), canvas.height);
+        } else {
+          ctx.fillRect(0, i * bandSize, canvas.width, Math.ceil(bandSize));
+        }
+      }
+    }
+
+    function drawCrosshair() {
+      fill(0);
+      ctx.strokeStyle = `rgb(${tone(255)},${tone(255)},${tone(255)})`;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(canvas.width / 2, 0);
+      ctx.lineTo(canvas.width / 2, canvas.height);
+      ctx.moveTo(0, canvas.height / 2);
+      ctx.lineTo(canvas.width, canvas.height / 2);
+      ctx.stroke();
+      ctx.strokeRect(8, 8, canvas.width - 16, canvas.height - 16);
+    }
+
+    function drawGrid() {
+      fill(0);
+      ctx.strokeStyle = `rgb(${tone(255)},${tone(255)},${tone(255)})`;
+      ctx.lineWidth = 2;
+      const step = Math.max(40, Math.round(Math.min(canvas.width, canvas.height) / 12));
+      for (let x = 0; x <= canvas.width; x += step) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+      }
+      for (let y = 0; y <= canvas.height; y += step) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+      }
+      ctx.strokeRect(8, 8, canvas.width - 16, canvas.height - 16);
+    }
+
+    function baseFrames() {
+      return [
+        { name: 'sync_white', set: 'sync', draw: drawWhite },
+        { name: 'sync_black', set: 'sync', draw: drawBlack },
+        { name: 'identify_crosshair', set: 'sync', draw: drawCrosshair }
+      ];
+    }
+
+    function grayCodeFrames() {
+      const frames = [];
+      const bitsX = Math.max(4, Math.ceil(Math.log2(Math.max(2, canvas.width))));
+      const bitsY = Math.max(4, Math.ceil(Math.log2(Math.max(2, canvas.height))));
+      for (let bit = 0; bit < Math.min(bitsX, 10); bit += 1) {
+        frames.push({ name: `vertical_gray_${bit}`, set: 'gray_code', draw: () => drawGrayCode('x', bit) });
+        frames.push({ name: `vertical_gray_${bit}_inverse`, set: 'gray_code', draw: () => { drawGrayCode('x', bit); invertCanvas(); } });
+      }
+      for (let bit = 0; bit < Math.min(bitsY, 10); bit += 1) {
+        frames.push({ name: `horizontal_gray_${bit}`, set: 'gray_code', draw: () => drawGrayCode('y', bit) });
+        frames.push({ name: `horizontal_gray_${bit}_inverse`, set: 'gray_code', draw: () => { drawGrayCode('y', bit); invertCanvas(); } });
+      }
+      return frames;
+    }
+
+    function invertCanvas() {
+      const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      for (let i = 0; i < image.data.length; i += 4) {
+        image.data[i] = 255 - image.data[i];
+        image.data[i + 1] = 255 - image.data[i + 1];
+        image.data[i + 2] = 255 - image.data[i + 2];
+      }
+      ctx.putImageData(image, 0, 0);
+    }
+
+    function buildSequence() {
+      const calibration = [
+        { name: 'reference_white', set: 'calibration', draw: drawWhite },
+        { name: 'reference_black', set: 'calibration', draw: drawBlack },
+        { name: 'checkerboard', set: 'calibration', draw: drawCheckerboard },
+        { name: 'crosshair', set: 'calibration', draw: drawCrosshair },
+        { name: 'grid', set: 'calibration', draw: drawGrid }
+      ];
+      const grids = [
+        { name: 'grid', set: 'grid', draw: drawGrid },
+        { name: 'crosshair', set: 'grid', draw: drawCrosshair },
+        { name: 'reference_white', set: 'grid', draw: drawWhite },
+        { name: 'reference_black', set: 'grid', draw: drawBlack }
+      ];
+      const checkerboards = [
+        { name: 'checkerboard', set: 'checkerboard', draw: drawCheckerboard },
+        { name: 'checkerboard_inverse', set: 'checkerboard', draw: () => { drawCheckerboard(); invertCanvas(); } }
+      ];
+
+      if (patternSet === 'calibration') return baseFrames().concat(calibration);
+      if (patternSet === 'grid') return baseFrames().concat(grids);
+      if (patternSet === 'checkerboard') return baseFrames().concat(checkerboards);
+      return baseFrames().concat(grayCodeFrames());
+    }
+
+    function notifyFrame(frame) {
+      activeFrame = {
+        projector_id: projectorId,
+        pattern_set: patternSet,
+        frame_index: frameIndex,
+        frame_name: frame.name,
+        frame_set: frame.set,
+        timestamp: Date.now()
+      };
+      window.dispatchEvent(new CustomEvent('structured-light-frame', { detail: activeFrame }));
+      frameObservers.forEach((observer) => {
+        try {
+          observer(activeFrame);
+        } catch (error) {
+          // Observers are optional hooks for future camera feedback.
+        }
+      });
+    }
+
+    function draw() {
+      if (!sequence.length) {
+        sequence = buildSequence();
+      }
+      if (showingBlackSpacer) {
+        drawBlack();
+        hud.textContent = `${projectorId} / spacer black`;
+        return;
+      }
+      const frame = sequence[frameIndex % sequence.length];
+      frame.draw();
+      hud.textContent = `${projectorId} / ${patternSet} / ${frame.name} / ${frameIndex + 1}/${sequence.length}`;
+      notifyFrame(frame);
+    }
+
+    function nextFrame() {
+      if (safeBlack && !showingBlackSpacer) {
+        showingBlackSpacer = true;
+      } else {
+        showingBlackSpacer = false;
+        frameIndex += 1;
+        if (!loop && frameIndex >= sequence.length) {
+          frameIndex = sequence.length - 1;
+          draw();
+          return;
+        }
+      }
+      draw();
+      setTimeout(nextFrame, showingBlackSpacer ? Math.min(120, frameDurationMs / 2) : frameDurationMs);
+    }
+
+    async function heartbeat() {
+      try {
+        await fetch(`/api/renderer/heartbeat/${encodeURIComponent(projectorId)}`, { method: 'POST', keepalive: true });
+      } catch (error) {
+        // Pattern output must keep running if the API is temporarily unavailable.
+      }
+    }
+
+    resize();
+    heartbeat();
+    setInterval(heartbeat, 5000);
+    setTimeout(nextFrame, frameDurationMs);
+  </script>
+</body>
+</html>

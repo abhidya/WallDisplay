@@ -37,6 +37,22 @@ class ProjectorStartRequest(BaseModel):
     projector_id: Optional[str] = None
 
 
+class ProjectorModeRequest(BaseModel):
+    """Request model for starting HDMI projector content modes."""
+    mode: str
+    options: Optional[Dict[str, Any]] = None
+
+
+class ProjectorPowerStateRequest(BaseModel):
+    """Request model for user-observed HDMI projector power state."""
+    power_state: str
+
+
+class ProjectorTargetRequest(BaseModel):
+    """Request model for selecting a local HDMI display target."""
+    target_name: str
+
+
 class RendererResponse(BaseModel):
     """Response model for renderer operations."""
     success: bool
@@ -204,16 +220,7 @@ async def list_projectors():
         Response model with success status, message, and data
     """
     try:
-        projectors_dict = renderer_service.config.get('projectors', {})
-        
-        # Transform the dictionary into a list of projector objects with id field
-        projectors_list = []
-        for proj_id, proj_data in projectors_dict.items():
-            # Create a copy of the projector data
-            projector = dict(proj_data)
-            # Add the id field
-            projector['id'] = proj_id
-            projectors_list.append(projector)
+        projectors_list = renderer_service.list_projectors()
         
         return RendererResponse(
             success=True,
@@ -238,19 +245,7 @@ async def list_scenes():
         Response model with success status, message, and data
     """
     try:
-        scenes_dict = renderer_service.config.get('scenes', {})
-        
-        # Transform the dictionary into a list of scene objects with id field
-        scenes_list = []
-        for scene_id, scene_data in scenes_dict.items():
-            # Create a copy of the scene data
-            scene = dict(scene_data)
-            # Add the id and name fields
-            scene['id'] = scene_id
-            # If name is not provided, use the ID as the name
-            if 'name' not in scene:
-                scene['name'] = scene_id
-            scenes_list.append(scene)
+        scenes_list = renderer_service.list_scenes()
         
         return RendererResponse(
             success=True,
@@ -299,27 +294,18 @@ async def start_projector(
                 detail=f"Projector not found: {projector_id}"
             )
         
-        # Get the scene ID from the projector configuration
-        scene_id = projector_config.get('scene')
-        if not scene_id:
-            raise HTTPException(
-                status_code=400,
-                detail=f"No default scene configured for projector {projector_id}"
-            )
-        
-        # Start the renderer
-        success = renderer_service.start_renderer(scene_id, projector_id)
+        success = renderer_service.start_projector(projector_id)
         
         if success:
             return RendererResponse(
                 success=True,
-                message=f"Started projector {projector_id} with scene {scene_id}",
+                message=f"Started projector {projector_id}",
                 data=renderer_service.get_renderer_status(projector_id)
             )
         else:
             raise HTTPException(
                 status_code=500,
-                detail=f"Failed to start projector {projector_id} with scene {scene_id}"
+                detail=f"Failed to start projector {projector_id}"
             )
             
     except HTTPException:
@@ -330,6 +316,143 @@ async def start_projector(
             status_code=500,
             detail=f"Error starting projector: {str(e)}"
         )
+
+
+@router.get("/hdmi/displays", response_model=RendererResponse)
+async def list_hdmi_displays():
+    """
+    List local display targets available for HDMI projector output.
+
+    Returns:
+        Response model with local display metadata
+    """
+    try:
+        displays = renderer_service.list_hdmi_displays()
+        return RendererResponse(
+            success=True,
+            message=f"Listed {len(displays)} HDMI display targets",
+            data={"displays": displays}
+        )
+    except Exception as e:
+        logger.error(f"Error listing HDMI displays: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error listing HDMI displays: {str(e)}"
+        )
+
+
+@router.post("/projectors/{projector_id}/target", response_model=RendererResponse)
+async def set_projector_target(projector_id: str, request: ProjectorTargetRequest):
+    """
+    Persist the selected display target for an HDMI projector.
+    """
+    try:
+        success = renderer_service.set_projector_target(projector_id, request.target_name)
+        if not success:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to set HDMI target {request.target_name} for projector {projector_id}"
+            )
+        return RendererResponse(
+            success=True,
+            message=f"Set HDMI target for projector {projector_id}",
+            data={"projector": renderer_service.get_projector_config(projector_id)}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error setting HDMI projector target: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error setting HDMI projector target: {str(e)}"
+        )
+
+
+@router.post("/projectors/{projector_id}/mode", response_model=RendererResponse)
+async def start_projector_mode(projector_id: str, request: ProjectorModeRequest):
+    """
+    Start an HDMI projector content mode such as identify, structured light,
+    overlay, blank, or scene.
+    """
+    try:
+        success = renderer_service.start_projector_mode(
+            projector_id,
+            request.mode,
+            request.options or {},
+        )
+        if not success:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to start {request.mode} on projector {projector_id}"
+            )
+        return RendererResponse(
+            success=True,
+            message=f"Started {request.mode} on projector {projector_id}",
+            data=renderer_service.get_renderer_status(projector_id)
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error starting projector mode: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error starting projector mode: {str(e)}"
+        )
+
+
+@router.post("/projectors/{projector_id}/identify", response_model=RendererResponse)
+async def identify_projector(projector_id: str):
+    """
+    Show a full-screen identity pattern on an HDMI projector.
+    """
+    try:
+        success = renderer_service.identify_projector(projector_id)
+        if not success:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to identify projector {projector_id}"
+            )
+        return RendererResponse(
+            success=True,
+            message=f"Identifying projector {projector_id}",
+            data=renderer_service.get_renderer_status(projector_id)
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error identifying projector: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error identifying projector: {str(e)}"
+        )
+
+
+@router.post("/projectors/{projector_id}/power-state", response_model=RendererResponse)
+async def set_projector_power_state(projector_id: str, request: ProjectorPowerStateRequest):
+    """
+    Record the manually observed HDMI projector power state.
+    """
+    success = renderer_service.set_projector_power_state(projector_id, request.power_state)
+    if not success:
+        raise HTTPException(status_code=400, detail=f"Invalid power state: {request.power_state}")
+    return RendererResponse(
+        success=True,
+        message=f"Projector {projector_id} power state set to {request.power_state}",
+        data=renderer_service.get_renderer_status(projector_id)
+    )
+
+
+@router.post("/heartbeat/{projector_id}", response_model=RendererResponse)
+async def projector_heartbeat(projector_id: str):
+    """
+    Receive heartbeat pings from browser-based projector pages.
+    """
+    renderer_service.record_projector_heartbeat(projector_id)
+    return RendererResponse(
+        success=True,
+        message=f"Heartbeat recorded for projector {projector_id}",
+        data=renderer_service.get_renderer_status(projector_id)
+    )
 
 
 @router.get("/airplay/discover", response_model=RendererResponse)

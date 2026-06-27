@@ -292,6 +292,16 @@ const rendererApi = {
     api.get('/renderer/scenes'),
   startProjector: (projectorId) => 
     api.post('/renderer/start_projector', null, { params: { projector_id: projectorId } }),
+  listHdmiDisplays: () =>
+    api.get('/renderer/hdmi/displays'),
+  setProjectorTarget: (projectorId, targetName) =>
+    api.post(`/renderer/projectors/${projectorId}/target`, { target_name: targetName }),
+  startProjectorMode: (projectorId, mode, options = {}) =>
+    api.post(`/renderer/projectors/${projectorId}/mode`, { mode, options }),
+  identifyProjector: (projectorId) =>
+    api.post(`/renderer/projectors/${projectorId}/identify`),
+  setProjectorPowerState: (projectorId, powerState) =>
+    api.post(`/renderer/projectors/${projectorId}/power-state`, { power_state: powerState }),
   // AirPlay discovery endpoints
   discoverAirPlayDevices: () => 
     api.get('/renderer/airplay/discover'),
