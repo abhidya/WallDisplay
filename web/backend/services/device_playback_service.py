@@ -214,7 +214,10 @@ class DevicePlaybackService:
 
             core_device = self.runtime_sync_service.get_core_device(db_device.name)
             if not core_device:
-                logger.error(f"Device {db_device.name} not found in device manager")
+                logger.info("Device %s not found in runtime, registering from database before stop", db_device.name)
+                core_device = self.runtime_sync_service.get_or_register_core_device(db_device)
+            if not core_device:
+                logger.error(f"Device {db_device.name} could not be registered in device manager")
                 return False
 
             logger.info(f"Stopping playback on device {db_device.name}")

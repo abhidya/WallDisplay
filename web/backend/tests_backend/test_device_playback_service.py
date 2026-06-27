@@ -110,6 +110,47 @@ def test_stop_video_cleans_runtime_state_and_marks_manual_stop():
     assert status_updates == [("Device C", "connected", False)]
 
 
+def test_stop_video_registers_core_device_when_missing_after_restart():
+    device = SimpleNamespace(
+        id=7,
+        name="proj-hdmi-local",
+        streaming_url=None,
+        streaming_port=None,
+        current_video="http://127.0.0.1:8088/backend-static/hdmi_video_player.html",
+        user_control_mode=None,
+        user_control_reason=None,
+    )
+    stop_calls = []
+    core_device = SimpleNamespace(stop=lambda: stop_calls.append(device.name) or True)
+    status_updates = []
+
+    service = DevicePlaybackService(
+        db=_FakeDB(device),
+        runtime=SimpleNamespace(
+            streaming_service=None,
+            streaming_registry=None,
+            cleanup_device_state=lambda _device_name: None,
+        ),
+        runtime_sync_service=SimpleNamespace(
+            get_core_device=lambda _device_name: None,
+            get_or_register_core_device=lambda db_device: core_device if db_device is device else None,
+        ),
+        get_device_instance=lambda _device_id: None,
+        update_device_status=lambda device_name, status, is_playing=False: status_updates.append(
+            (device_name, status, is_playing)
+        ),
+    )
+
+    result = service.stop_video(device.id)
+
+    assert result is True
+    assert stop_calls == ["proj-hdmi-local"]
+    assert device.current_video is None
+    assert device.user_control_mode == "manual"
+    assert device.user_control_reason == "user_stopped"
+    assert status_updates == [("proj-hdmi-local", "connected", False)]
+
+
 def test_stop_video_unregisters_streaming_session_ids_from_registry_objects():
     device = SimpleNamespace(
         id=5,
