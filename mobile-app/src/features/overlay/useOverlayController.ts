@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ControlPlaneClient } from '../../control-plane/client.ts';
+import type { OverlayProjectionModule } from '../../control-plane/modules.ts';
 import type { JsonRecord, OverlayConfigSummary, OverlayCastSessionSummary, OverlayStatusResponse } from '../../types/api.ts';
 
 export interface OverlayController {
@@ -14,7 +14,7 @@ export interface OverlayController {
   runAction: <T>(actionKey: string, handler: () => Promise<T>) => Promise<T | undefined>;
 }
 
-export function useOverlayController(client: ControlPlaneClient): OverlayController {
+export function useOverlayController(client: OverlayProjectionModule): OverlayController {
   const [configs, setConfigs] = useState<OverlayConfigSummary[]>([]);
   const [castSessions, setCastSessions] = useState<OverlayCastSessionSummary[]>([]);
   const [status, setStatus] = useState<OverlayStatusResponse | null>(null);

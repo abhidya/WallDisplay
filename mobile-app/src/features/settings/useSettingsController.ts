@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import type { ControlPlaneClient } from '../../control-plane/client.ts';
+import type { SettingsModule } from '../../control-plane/modules.ts';
 import type { AppMode } from '../../control-plane/localState.ts';
 import { normalizeApiBaseUrl } from '../../services/api.ts';
 import type { DiscoverySystemStatus, HealthResponse, JsonRecord } from '../../types/api';
@@ -67,7 +67,7 @@ const defaultGlobalApiConfigs: JsonRecord = {
 };
 
 export function useSettingsController(
-  client: ControlPlaneClient,
+  client: SettingsModule,
   options: UseSettingsControllerOptions,
 ): SettingsController {
   const [draftValue, setDraftValue] = useState(options.apiBaseUrl);

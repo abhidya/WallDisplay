@@ -54,8 +54,8 @@ class DLNADevice(Device):
         self.playback_progress = 0
         
         # Get device manager reference
-        from services.app_runtime import get_app_runtime
-        self.runtime = get_app_runtime()
+        from services.app_runtime import get_device_runtime
+        self.runtime = get_device_runtime()
         
         # Try to infer missing fields
         if not self.action_url and self.hostname:

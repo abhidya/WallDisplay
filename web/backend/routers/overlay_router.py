@@ -24,7 +24,7 @@ from web.backend.schemas.overlay import (
     OverlayExportRequest,
 )
 from web.backend.services.overlay_service import OverlayService
-from web.backend.services.overlay_cast_service import get_overlay_cast_service
+from web.backend.services.overlay_cast_service import get_overlay_cast_pipeline
 from web.backend.services.overlay_event_bus import overlay_events, notify_overlay_config_update
 from web.backend.services.projector_redirect_runtime import (
     get_recent_projector_requests,
@@ -343,7 +343,7 @@ async def start_overlay_cast(
 ):
     """Launch a headless overlay capture session and relay MPEG-TS over DLNA."""
     try:
-        service = get_overlay_cast_service()
+        service = get_overlay_cast_pipeline()
         overlay_base_url = cast_request.overlay_base_url or str(request.base_url).rstrip("/")
         session = await service.start_cast(
             device_id=cast_request.device_id,
@@ -371,7 +371,7 @@ async def export_overlay_mp4(
     request: Request,
 ):
     try:
-        service = get_overlay_cast_service()
+        service = get_overlay_cast_pipeline()
         overlay_base_url = export_request.overlay_base_url or str(request.base_url).rstrip("/")
         export_result = await service.export_mp4(
             config_id=export_request.config_id,
@@ -402,13 +402,13 @@ async def export_overlay_mp4(
 
 @router.get("/cast/sessions", response_model=List[OverlayCastSessionResponse])
 async def list_overlay_cast_sessions():
-    service = get_overlay_cast_service()
+    service = get_overlay_cast_pipeline()
     return [OverlayCastSessionResponse(**session) for session in service.list_sessions()]
 
 
 @router.delete("/cast/sessions/{session_id}")
 async def stop_overlay_cast(session_id: str):
-    service = get_overlay_cast_service()
+    service = get_overlay_cast_pipeline()
     stopped = await service.stop_cast(session_id)
     if not stopped:
         raise HTTPException(status_code=404, detail="Overlay cast session not found")
@@ -635,9 +635,9 @@ async def trigger_sync(
     synced_devices = []
     failed_devices = []
     try:
-        from services.app_runtime import get_app_runtime
+        from services.app_runtime import get_device_runtime
 
-        for device in get_app_runtime().get_devices():
+        for device in get_device_runtime().get_devices():
             if device.is_playing:
                 try:
                     if device.seek("00:00:00"):

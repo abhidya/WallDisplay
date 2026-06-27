@@ -25,6 +25,7 @@ import aiohttp
 from discovery.base import CastingSession
 from discovery.discovery_manager import DiscoveryManager
 from discovery.network import get_local_ipv4_addresses
+from web.backend.services.overlay_cast_pipeline import OverlayCastPipelineModule
 
 logger = logging.getLogger(__name__)
 RELAY_IDLE_TIMEOUT_SECONDS = 15
@@ -247,6 +248,7 @@ class OverlayCastService:
         self.device_sessions: Dict[str, str] = {}
         self.session_history: list[dict] = []
         self._session_lock = threading.RLock()
+        self.pipeline = OverlayCastPipelineModule(self)
 
     async def export_mp4(
         self,
@@ -1185,3 +1187,7 @@ class OverlayCastService:
 
 def get_overlay_cast_service() -> OverlayCastService:
     return OverlayCastService.get_instance()
+
+
+def get_overlay_cast_pipeline() -> OverlayCastPipelineModule:
+    return get_overlay_cast_service().pipeline

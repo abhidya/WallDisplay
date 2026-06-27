@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { type ControlPlaneClient } from '../../control-plane/client';
+import type { OperationsModule } from '../../control-plane/modules';
 import type {
   ActionHistoryEntry,
   DeferredFeatureSummary,
@@ -78,7 +78,7 @@ function ensureCurrentSelection(
   return candidates[0] ?? null;
 }
 
-export function useOperationsController(client: ControlPlaneClient): OperationsController {
+export function useOperationsController(client: OperationsModule): OperationsController {
   const mode = client.mode;
   const [capabilities, setCapabilities] = useState<LocalCapabilitySummary[]>([]);
   const [actionHistory, setActionHistory] = useState<ActionHistoryEntry[]>([]);

@@ -15,7 +15,7 @@ from web.backend.schemas.device import (
     DeviceActionResponse,
 )
 from web.backend.services.device_service import DeviceService
-from web.backend.services.app_runtime import get_app_runtime
+from web.backend.services.app_runtime import get_app_runtime, get_device_runtime
 from web.backend.routers.video_router import get_video_service
 
 # Set up logger
@@ -53,7 +53,7 @@ def discover_devices(
 @router.post("/discovery/pause", response_model=DeviceActionResponse)
 def pause_discovery():
     """Pause the discovery loop"""
-    get_app_runtime().pause_discovery()
+    get_device_runtime().pause_discovery()
     return {
         "success": True,
         "message": "Discovery loop paused",
@@ -62,7 +62,7 @@ def pause_discovery():
 @router.post("/discovery/resume", response_model=DeviceActionResponse)
 def resume_discovery():
     """Resume the discovery loop"""
-    get_app_runtime().resume_discovery()
+    get_device_runtime().resume_discovery()
     return {
         "success": True,
         "message": "Discovery loop resumed",
@@ -73,7 +73,7 @@ def set_discovery_interval(
     seconds: int = Query(..., ge=1, le=300, description="Discovery loop interval in seconds"),
 ):
     """Set the discovery loop interval"""
-    get_app_runtime().set_discovery_interval(seconds)
+    get_device_runtime().set_discovery_interval(seconds)
     return {
         "success": True,
         "message": f"Discovery interval set to {seconds}s",
@@ -82,7 +82,7 @@ def set_discovery_interval(
 @router.get("/discovery/status")
 def get_discovery_status():
     """Get discovery loop status"""
-    return get_app_runtime().get_discovery_status()
+    return get_device_runtime().get_discovery_status()
 
 @router.get("/", response_model=DeviceList)
 def get_devices(

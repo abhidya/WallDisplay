@@ -273,8 +273,15 @@ class StreamingService:
         if self.runtime is not None:
             return self.runtime.get_device(device_name)
         try:
-            from services.app_runtime import get_app_runtime
+            from services.app_runtime import get_app_runtime, get_device_runtime
 
+            try:
+                device_runtime = get_device_runtime()
+            except Exception:
+                device_runtime = None
+            if device_runtime is not None:
+                self.runtime = device_runtime
+                return device_runtime.get_device(device_name)
             runtime = get_app_runtime()
             if runtime is not None:
                 self.runtime = runtime

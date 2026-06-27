@@ -19,13 +19,13 @@ from ..dlna_device import DLNADevice
 
 def _resolve_runtime_device(device_name: str):
     from web.backend.database.database import get_db
-    from web.backend.services.app_runtime import get_app_runtime
+    from web.backend.services.app_runtime import get_app_runtime, get_device_runtime
 
-    runtime = get_app_runtime()
-    device = runtime.get_device(device_name)
+    device = get_device_runtime().get_device(device_name)
     if device:
         return device
 
+    runtime = get_app_runtime()
     db_generator = get_db()
     db = next(db_generator)
     try:

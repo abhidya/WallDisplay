@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 import web.backend.routers.structured_lighting_router as structured_lighting_router
 
 
-class FakeStructuredLightingService:
+class FakeStructuredLightingSessionModule:
     def render_step_image(self, session_id, step_index):
         if session_id == "session-1" and step_index == 0:
             return b"png"
@@ -16,8 +16,8 @@ def make_client(monkeypatch):
     app.include_router(structured_lighting_router.router)
     monkeypatch.setattr(
         structured_lighting_router,
-        "get_structured_lighting_service",
-        lambda: FakeStructuredLightingService(),
+        "get_structured_lighting_session_module",
+        lambda: FakeStructuredLightingSessionModule(),
     )
     return TestClient(app)
 

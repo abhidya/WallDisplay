@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ControlPlaneClient } from '../../control-plane/client.ts';
+import type { ProjectionModule } from '../../control-plane/modules.ts';
 import type { JsonRecord, ProjectionConfigSummary } from '../../types/api.ts';
 
 export interface ProjectionController {
@@ -13,7 +13,7 @@ export interface ProjectionController {
   runAction: <T>(actionKey: string, handler: () => Promise<T>) => Promise<T | undefined>;
 }
 
-export function useProjectionController(client: ControlPlaneClient): ProjectionController {
+export function useProjectionController(client: ProjectionModule): ProjectionController {
   const [configs, setConfigs] = useState<ProjectionConfigSummary[]>([]);
   const [animations, setAnimations] = useState<JsonRecord | null>(null);
   const [animationLists, setAnimationLists] = useState<JsonRecord[]>([]);

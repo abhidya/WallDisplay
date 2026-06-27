@@ -64,6 +64,11 @@ Keep runtime marker contracts stable and non-destructive when overlays are appli
 - Run lint, typecheck, tests, and static analysis after changes.
 - Final reports must include changed files, simplifications made, and remaining risks.
 
+## Windows shell routing
+- On Windows, prefer `rtk proxy cmd.exe /c "<command>"` for git, npm, pytest, Python, and path-sensitive commands.
+- Use PowerShell only for PowerShell-specific scripts or commands.
+- If a relative path fails oddly under `rtk`/PowerShell, retry once with `cmd.exe` and an explicit `cd /d <repo>`.
+
 <lore_commit_protocol>
 ## Lore Commit Protocol
 

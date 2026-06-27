@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { type ControlPlaneClient } from '../../control-plane/client';
+import type { MediaLibraryModule } from '../../control-plane/modules';
 import type {
   JsonRecord,
   MediaChannelSummary,
@@ -61,7 +61,7 @@ interface UseMediaControllerOptions {
 }
 
 export function useMediaController(
-  client: ControlPlaneClient,
+  client: MediaLibraryModule,
   options: UseMediaControllerOptions,
 ): MediaController {
   const [actionLoadingKey, setActionLoadingKey] = useState<string | null>(null);

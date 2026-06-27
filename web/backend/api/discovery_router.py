@@ -13,7 +13,7 @@ from web.backend.database.database import get_db
 from discovery.discovery_manager import DiscoveryManager
 from discovery.config import ConfigurationManager
 from discovery.base import CastingMethod, DeviceCapability
-from web.backend.services.app_runtime import get_app_runtime
+from web.backend.services.app_runtime import get_device_runtime
 from discovery.config.schema import (
     DeviceConfig, 
     GlobalConfig, 
@@ -35,7 +35,7 @@ config_manager = ConfigurationManager.get_instance()
 
 def _get_discovery_manager() -> DiscoveryManager:
     try:
-        return get_app_runtime().discovery_manager
+        return get_device_runtime().discovery_manager
     except Exception:
         return DiscoveryManager.get_instance()
 

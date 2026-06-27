@@ -17,6 +17,7 @@ from PIL import Image, ImageDraw
 from web.backend.core.streaming_service import get_streaming_service
 from discovery.base import CastingMethod, Device, DeviceCapability
 from web.backend.services.app_runtime import get_app_runtime
+from web.backend.services.structured_lighting_session import StructuredLightingSessionModule
 
 
 WORKER_TIMEOUT_SECONDS = 15
@@ -63,6 +64,7 @@ class StructuredLightingService:
             "structured_lighting",
         )
         os.makedirs(self._upload_root, exist_ok=True)
+        self.session_workflow = StructuredLightingSessionModule(self)
         self._load_sessions_from_disk()
 
     def list_sessions(self) -> List[Dict]:
@@ -1589,9 +1591,9 @@ class StructuredLightingService:
         import cv2
         import numpy as np
 
-        # clean = cv2.medianBlur(img_white_bgr, blur_ksize)
-        # smooth = cv2.bilateralFilter(clean, bilateral_params[0], bilateral_params[1], bilateral_params[2])
-        gray = cv2.cvtColor(img_white_bgr, cv2.COLOR_BGR2GRAY)
+        clean = cv2.medianBlur(img_white_bgr, blur_ksize)
+        smooth = cv2.bilateralFilter(clean, bilateral_params[0], bilateral_params[1], bilateral_params[2])
+        gray = cv2.cvtColor(smooth, cv2.COLOR_BGR2GRAY)
         edge_mode = (edge_mode or "morph_gradient").lower()
 
         if edge_mode == "canny":
@@ -2870,3 +2872,7 @@ _service = StructuredLightingService()
 
 def get_structured_lighting_service() -> StructuredLightingService:
     return _service
+
+
+def get_structured_lighting_session_module() -> StructuredLightingSessionModule:
+    return _service.session_workflow

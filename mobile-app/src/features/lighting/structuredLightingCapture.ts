@@ -155,11 +155,11 @@ export function buildStructuredLightingCaptureFormData(
   const formData = new FormData();
   formData.append('step_index', String(stepIndex));
   if (file.blob) {
-    formData.append('file', file.blob, file.name ?? `structured-lighting-step-${stepIndex}.jpg`);
+    formData.append('capture', file.blob, file.name ?? `structured-lighting-step-${stepIndex}.jpg`);
     return formData;
   }
 
-  formData.append('file', {
+  formData.append('capture', {
     uri: file.uri,
     name: getCaptureFileName(stepIndex, file.uri, file.name),
     type: file.type ?? 'image/jpeg',

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { type ControlPlaneClient } from '../../control-plane/client';
+import type { DeviceControlModule } from '../../control-plane/modules';
 import type {
   DiscoveryBackendSummary,
   DiscoveryCapabilities,
@@ -65,7 +65,7 @@ function describeDevice(device: DeviceSummary): string {
 }
 
 export function useDevicesController(
-  client: ControlPlaneClient,
+  client: DeviceControlModule,
   options?: UseDevicesControllerOptions,
 ): DevicesController {
   const sharedSelectedDeviceId = options?.sharedSelectedDeviceId;

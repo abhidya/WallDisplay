@@ -1,4 +1,3 @@
-import json
 import logging
 import os
 import socket
@@ -6,7 +5,6 @@ import asyncio
 import time
 import threading
 import requests
-from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Optional
 
@@ -15,6 +13,7 @@ from web.backend.core.device_manager import DeviceManager, get_device_manager
 from web.backend.core.streaming_registry import StreamingSessionRegistry
 from web.backend.discovery.discovery_manager import DiscoveryManager
 from web.backend.services.device_inventory_service import DeviceInventoryService
+from web.backend.services.device_runtime import DeviceRuntimeModule
 from web.backend.services.device_lifecycle_service import DeviceLifecycleService
 from web.backend.services.playback_intent_service import PlaybackIntentService
 from web.backend.services.runtime_playback_service import RuntimePlaybackService
@@ -22,6 +21,17 @@ from web.backend.services.runtime_registry_service import RuntimeRegistryService
 from web.backend.services.unified_discovery_lifecycle_service import UnifiedDiscoveryLifecycleService
 
 logger = logging.getLogger(__name__)
+
+
+def _device_runtime(runtime) -> DeviceRuntimeModule:
+    device_runtime = getattr(runtime, "device_runtime", None)
+    if device_runtime is None:
+        device_runtime = DeviceRuntimeModule(runtime)
+        try:
+            runtime.device_runtime = device_runtime
+        except Exception:
+            pass
+    return device_runtime
 
 
 def _start_discovery_migration(runtime: "AppRuntime"):
@@ -69,15 +79,19 @@ class AppRuntime:
     migration_adapter: Optional[object] = None
     legacy_streaming_issue_handler: Optional[object] = None
     airplay_projection_automation_service: Optional[object] = None
+    device_runtime: Optional[DeviceRuntimeModule] = None
+
+    def __post_init__(self):
+        if self.device_runtime is None:
+            self.device_runtime = DeviceRuntimeModule(self)
 
     @property
     def discovery_authority(self) -> str:
-        authority = os.environ.get("NANODLNA_DISCOVERY_AUTHORITY", "legacy").strip().lower()
-        return authority if authority in {"legacy", "unified"} else "legacy"
+        return _device_runtime(self).discovery_authority
 
     @property
     def uses_unified_discovery_authority(self) -> bool:
-        return self.discovery_authority == "unified"
+        return _device_runtime(self).uses_unified_discovery_authority
 
     @property
     def device_state_lock(self):
@@ -105,20 +119,10 @@ class AppRuntime:
         return self.device_lock_timeout_seconds
 
     def _get_discovery_controller(self):
-        discovery_coordinator = getattr(self, "discovery_coordinator", None)
-        if discovery_coordinator is not None:
-            return discovery_coordinator
-        device_manager = getattr(self, "device_manager", None)
-        return getattr(device_manager, "discovery_coordinator", device_manager)
+        return _device_runtime(self)._get_discovery_controller()
 
     def _get_active_discovery_controller(self):
-        if (
-            AppRuntime.uses_unified_discovery_authority.fget(self)
-            if hasattr(type(self), "uses_unified_discovery_authority")
-            else getattr(self, "uses_unified_discovery_authority", False)
-        ):
-            return self.unified_discovery_lifecycle_service
-        return AppRuntime._get_discovery_controller(self)
+        return _device_runtime(self)._get_active_discovery_controller()
 
     def start_background_services(self) -> None:
         logger.info("Starting device discovery")
@@ -169,54 +173,22 @@ class AppRuntime:
         self.unified_discovery_lifecycle_service.stop()
 
     def start_discovery(self) -> None:
-        AppRuntime._get_active_discovery_controller(self).start()
+        _device_runtime(self).start_discovery()
 
     def stop_discovery(self) -> None:
-        AppRuntime._get_active_discovery_controller(self).stop()
+        _device_runtime(self).stop_discovery()
 
     def pause_discovery(self) -> None:
-        AppRuntime._get_active_discovery_controller(self).pause()
+        _device_runtime(self).pause_discovery()
 
     def resume_discovery(self) -> None:
-        AppRuntime._get_active_discovery_controller(self).resume()
+        _device_runtime(self).resume_discovery()
 
     def set_discovery_interval(self, seconds: int) -> int:
-        if seconds < 1:
-            raise ValueError("Discovery interval must be at least 1 second")
-
-        if (
-            AppRuntime.uses_unified_discovery_authority.fget(self)
-            if hasattr(type(self), "uses_unified_discovery_authority")
-            else getattr(self, "uses_unified_discovery_authority", False)
-        ):
-            discovery_manager = getattr(self, "discovery_manager", None)
-            backends = getattr(discovery_manager, "backends", {}) if discovery_manager is not None else {}
-            for backend in backends.values():
-                if hasattr(backend, "discovery_interval"):
-                    backend.discovery_interval = seconds
-        else:
-            discovery_controller = AppRuntime._get_discovery_controller(self)
-            manager = getattr(discovery_controller, "manager", getattr(self, "device_manager", None))
-            if manager is None:
-                raise RuntimeError("Legacy discovery manager is unavailable")
-            manager.discovery_interval = seconds
-
-        return seconds
+        return _device_runtime(self).set_discovery_interval(seconds)
 
     def get_discovery_status(self) -> dict:
-        status = AppRuntime._get_active_discovery_controller(self).get_status()
-        authority = (
-            AppRuntime.discovery_authority.fget(self)
-            if hasattr(type(self), "discovery_authority")
-            else os.environ.get("NANODLNA_DISCOVERY_AUTHORITY", "legacy").strip().lower()
-        )
-        status["authority"] = authority if authority in {"legacy", "unified"} else "legacy"
-        status["unified_running"] = getattr(
-            getattr(self, "unified_discovery_lifecycle_service", None),
-            "is_running",
-            getattr(getattr(self, "discovery_manager", None), "is_running", False),
-        )
-        return status
+        return _device_runtime(self).get_discovery_status()
 
     def build_device_service(self, db):
         from services.device_service import DeviceService
@@ -318,37 +290,25 @@ class AppRuntime:
                 pass
 
     def get_devices(self):
-        if getattr(self, "device_lifecycle_service", None) is not None:
-            return self.device_lifecycle_service.get_devices()
-        if hasattr(self, "device_inventory_service"):
-            return self.device_inventory_service.list_devices()
-        return []
+        return _device_runtime(self).get_devices()
 
     def get_device_items(self):
-        return list(self.device_inventory_service.items())
+        return _device_runtime(self).get_device_items()
 
     def get_device_count(self) -> int:
-        return len(self.device_inventory_service.devices)
+        return _device_runtime(self).get_device_count()
 
     def get_playing_device_count(self) -> int:
-        return sum(1 for device in self.device_inventory_service.values() if getattr(device, "is_playing", False))
+        return _device_runtime(self).get_playing_device_count()
 
     def get_device(self, device_name: str):
-        if getattr(self, "device_lifecycle_service", None) is not None:
-            return self.device_lifecycle_service.get_device(device_name)
-        if hasattr(self, "device_inventory_service"):
-            return self.device_inventory_service.get(device_name)
-        return None
+        return _device_runtime(self).get_device(device_name)
 
     def register_device(self, device_info: dict):
-        if getattr(self, "device_lifecycle_service", None) is not None:
-            return self.device_lifecycle_service.register_device(device_info)
-        return None
+        return _device_runtime(self).register_device(device_info)
 
     def unregister_device(self, device_name: str) -> bool:
-        if getattr(self, "device_lifecycle_service", None) is not None:
-            return self.device_lifecycle_service.unregister_device(device_name)
-        return False
+        return _device_runtime(self).unregister_device(device_name)
 
     def update_device_status(
         self,
@@ -359,14 +319,13 @@ class AppRuntime:
         current_video=None,
         error=None,
     ) -> None:
-        with self.device_state_lock:
-            self.runtime_registry_service.update_status(
-                device_name=device_name,
-                status=status,
-                is_playing=is_playing,
-                current_video=current_video,
-                error=error,
-            )
+        _device_runtime(self).update_device_status(
+            device_name=device_name,
+            status=status,
+            is_playing=is_playing,
+            current_video=current_video,
+            error=error,
+        )
 
     def auto_play_video(self, device, video_path: str, loop: bool = True, config=None) -> bool:
         playback_service = getattr(self, "runtime_playback_service", None)
@@ -381,31 +340,16 @@ class AppRuntime:
         )
 
     def start_playback_health_check(self, device_name: str, video_path: str) -> None:
-        playback_monitoring = getattr(self, "playback_monitoring_service", None)
-        if playback_monitoring is not None:
-            playback_monitoring.start_health_check(device_name, video_path)
+        _device_runtime(self).start_playback_health_check(device_name, video_path)
 
     def stop_playback_health_check(self, device_name: str) -> None:
-        playback_monitoring = getattr(self, "playback_monitoring_service", None)
-        if playback_monitoring is not None:
-            playback_monitoring.stop_health_check(device_name)
+        _device_runtime(self).stop_playback_health_check(device_name)
 
     def track_playback_result(self, device_name: str, video_path: str, success: bool) -> None:
-        playback_monitoring = getattr(self, "playback_monitoring_service", None)
-        if playback_monitoring is not None:
-            playback_monitoring.track_playback_result(device_name, video_path, success)
+        _device_runtime(self).track_playback_result(device_name, video_path, success)
 
     def get_device_playback_stats(self, device_name: str) -> dict:
-        playback_monitoring = getattr(self, "playback_monitoring_service", None)
-        if playback_monitoring is not None:
-            return playback_monitoring.get_device_playback_stats(device_name)
-        return {
-            "attempts": 0,
-            "successes": 0,
-            "success_rate": 0,
-            "last_attempt": None,
-            "videos": {},
-        }
+        return _device_runtime(self).get_device_playback_stats(device_name)
 
     def handle_streaming_issue(self, session) -> None:
         device_name = getattr(session, "device_name", None)
@@ -515,22 +459,13 @@ class AppRuntime:
             )
 
     def cleanup_device_state(self, device_name: str) -> None:
-        if getattr(self, "device_lifecycle_service", None) is not None:
-            self.device_lifecycle_service.cleanup_device_state(device_name)
-            return
+        _device_runtime(self).cleanup_device_state(device_name)
 
     def get_assigned_video(self, device_name: str):
-        return self.playback_intent_service.get_assigned_video(device_name)
+        return _device_runtime(self).get_assigned_video(device_name)
 
     def discover_dlna_devices(self, timeout: float):
-        uses_unified = (
-            AppRuntime.uses_unified_discovery_authority.fget(self)
-            if hasattr(type(self), "uses_unified_discovery_authority")
-            else getattr(self, "uses_unified_discovery_authority", False)
-        )
-        if uses_unified:
-            return AppRuntime._discover_dlna_devices_via_unified(self, timeout)
-        return AppRuntime._get_discovery_controller(self).discover_dlna_devices(timeout=timeout)
+        return _device_runtime(self).discover_dlna_devices(timeout)
 
     def _discover_dlna_devices_via_unified(self, timeout: float):
         async def _run():
@@ -564,25 +499,7 @@ class AppRuntime:
             loop.close()
 
     def save_devices_to_config(self, config_file: str) -> bool:
-        try:
-            abs_path = os.path.abspath(config_file)
-            device_lock = getattr(self, "device_state_lock", None)
-            lock_context = device_lock if device_lock is not None else nullcontext()
-
-            with lock_context:
-                devices_config = [
-                    getattr(device, "device_info", {}).copy()
-                    for device in self.device_inventory_service.values()
-                ]
-
-            with open(abs_path, "w") as file_handle:
-                json.dump(devices_config, file_handle, indent=4)
-
-            logger.info("Saved %s devices to %s", len(devices_config), abs_path)
-            return True
-        except Exception as exc:
-            logger.error(f"Error saving devices to {config_file}: {exc}")
-            return False
+        return _device_runtime(self).save_devices_to_config(config_file)
 
     def get_serve_ip(self) -> str:
         env_ip = os.environ.get("STREAMING_SERVE_IP")
@@ -632,13 +549,7 @@ class AppRuntime:
         duration: str,
         progress: int,
     ) -> None:
-        with self.device_state_lock:
-            self.runtime_registry_service.update_playback_progress(
-                device_name,
-                position,
-                duration,
-                progress,
-            )
+        _device_runtime(self).update_runtime_playback_progress(device_name, position, duration, progress)
 
     def update_device_playback_progress(
         self,
@@ -647,23 +558,7 @@ class AppRuntime:
         duration: str,
         progress: int,
     ) -> None:
-        self.update_runtime_playback_progress(
-            device_name,
-            position,
-            duration,
-            progress,
-        )
-
-        device = self.get_device(device_name)
-        if (
-            device
-            and hasattr(device, "current_position")
-            and hasattr(device, "duration_formatted")
-            and hasattr(device, "playback_progress")
-        ):
-            device.current_position = position
-            device.duration_formatted = duration
-            device.playback_progress = progress
+        _device_runtime(self).update_device_playback_progress(device_name, position, duration, progress)
 
     def hydrate_database_devices(self, db_devices: list[dict]) -> None:
         for device_dict in db_devices:
@@ -754,3 +649,7 @@ def get_app_runtime() -> AppRuntime:
         _rebind_streaming_health_handler(_app_runtime_instance)
 
     return _app_runtime_instance
+
+
+def get_device_runtime() -> DeviceRuntimeModule:
+    return get_app_runtime().device_runtime

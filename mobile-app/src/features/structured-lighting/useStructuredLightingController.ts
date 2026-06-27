@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ControlPlaneClient } from '../../control-plane/client.ts';
+import type { StructuredLightingModule } from '../../control-plane/modules.ts';
 import type { JsonRecord } from '../../types/api.ts';
 
 export interface StructuredLightingController {
@@ -13,7 +13,7 @@ export interface StructuredLightingController {
   runAction: <T>(actionKey: string, handler: () => Promise<T>) => Promise<T | undefined>;
 }
 
-export function useStructuredLightingController(client: ControlPlaneClient): StructuredLightingController {
+export function useStructuredLightingController(client: StructuredLightingModule): StructuredLightingController {
   const [capabilities, setCapabilities] = useState<JsonRecord | null>(null);
   const [status, setStatus] = useState<JsonRecord | null>(null);
   const [sessions, setSessions] = useState<JsonRecord[]>([]);

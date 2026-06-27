@@ -109,7 +109,7 @@ def test_orchestrator_starts_overlay_cast(monkeypatch):
     )
 
     monkeypatch.setattr(
-        "web.backend.services.playback_orchestrator.get_overlay_cast_service",
+        "web.backend.services.playback_orchestrator.get_overlay_cast_pipeline",
         lambda: cast_service,
     )
 

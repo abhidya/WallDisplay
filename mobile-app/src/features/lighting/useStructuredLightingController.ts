@@ -21,6 +21,11 @@ function asArray(value: unknown): JsonRecord[] {
     : [];
 }
 
+function asCaptures(value: unknown): JsonRecord[] {
+  const record = asRecord(value);
+  return asArray(record?.captures ?? value);
+}
+
 export interface StructuredLightingController {
   actionLoading: boolean;
   actionMessage: string | null;
@@ -197,7 +202,7 @@ export function useStructuredLightingController(
         client.listCaptures(selectedSessionId),
       ]);
       setRuntime(asRecord(runtimePayload));
-      setCaptures(asArray(capturesPayload));
+      setCaptures(asCaptures(capturesPayload));
     } catch {
       setRuntime(null);
       setCaptures([]);

@@ -4,10 +4,18 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel, Field
 
-from web.backend.services.structured_lighting_service import get_structured_lighting_service
+from web.backend.services.structured_lighting_service import (
+    get_structured_lighting_service,
+)
+from web.backend.services.structured_lighting_session import StructuredLightingSessionModule
 
 
 router = APIRouter(prefix="/api/structured-lighting", tags=["structured-lighting"])
+
+
+def get_structured_lighting_session_module() -> StructuredLightingSessionModule:
+    service = get_structured_lighting_service()
+    return getattr(service, "session_workflow", None) or StructuredLightingSessionModule(service)
 
 
 class StructuredLightingSessionCreate(BaseModel):
@@ -113,29 +121,25 @@ def get_capabilities() -> Dict:
 
 @router.get("/status")
 def get_status() -> Dict:
-    service = get_structured_lighting_service()
-    return service.get_status()
+    return get_structured_lighting_session_module().get_status()
 
 
 @router.get("/sessions")
 def list_sessions() -> List[Dict]:
-    service = get_structured_lighting_service()
-    return service.list_sessions()
+    return get_structured_lighting_session_module().list_sessions()
 
 
 @router.post("/sessions")
 def create_session(payload: StructuredLightingSessionCreate) -> Dict:
-    service = get_structured_lighting_service()
     try:
-        return service.create_session(**payload.model_dump())
+        return get_structured_lighting_session_module().create_session(**payload.model_dump())
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/sessions/{session_id}")
 def get_session(session_id: str) -> Dict:
-    service = get_structured_lighting_service()
-    session = service.get_session(session_id)
+    session = get_structured_lighting_session_module().get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Structured lighting session not found")
     return session
@@ -143,9 +147,8 @@ def get_session(session_id: str) -> Dict:
 
 @router.post("/sessions/{session_id}/start")
 def start_session(session_id: str) -> Dict:
-    service = get_structured_lighting_service()
     try:
-        session = service.start_session(session_id)
+        session = get_structured_lighting_session_module().start_session(session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not session:
@@ -155,8 +158,7 @@ def start_session(session_id: str) -> Dict:
 
 @router.delete("/sessions/{session_id}")
 def delete_session(session_id: str) -> Dict:
-    service = get_structured_lighting_service()
-    deleted = service.delete_session(session_id)
+    deleted = get_structured_lighting_session_module().delete_session(session_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Structured lighting session not found")
     return {"status": "deleted", "session_id": session_id}
@@ -164,8 +166,7 @@ def delete_session(session_id: str) -> Dict:
 
 @router.get("/sessions/{session_id}/capture-plan")
 def get_capture_plan(session_id: str) -> Dict:
-    service = get_structured_lighting_service()
-    plan = service.get_capture_plan(session_id)
+    plan = get_structured_lighting_session_module().get_capture_plan(session_id)
     if not plan:
         raise HTTPException(status_code=404, detail="Structured lighting session not found")
     return plan
@@ -173,8 +174,7 @@ def get_capture_plan(session_id: str) -> Dict:
 
 @router.get("/sessions/{session_id}/runtime")
 def get_runtime(session_id: str) -> Dict:
-    service = get_structured_lighting_service()
-    runtime = service.get_runtime(session_id)
+    runtime = get_structured_lighting_session_module().get_runtime(session_id)
     if not runtime:
         raise HTTPException(status_code=404, detail="Structured lighting session not found")
     return runtime
@@ -182,8 +182,7 @@ def get_runtime(session_id: str) -> Dict:
 
 @router.get("/sessions/{session_id}/captures")
 def list_captures(session_id: str) -> Dict:
-    service = get_structured_lighting_service()
-    captures = service.list_captures(session_id)
+    captures = get_structured_lighting_session_module().list_captures(session_id)
     if not captures:
         raise HTTPException(status_code=404, detail="Structured lighting session not found")
     return captures
@@ -191,8 +190,7 @@ def list_captures(session_id: str) -> Dict:
 
 @router.get("/sessions/{session_id}/captures/{step_index}/image")
 def get_capture_image(session_id: str, step_index: int) -> Response:
-    service = get_structured_lighting_service()
-    image_bytes = service.render_capture_image(session_id, step_index)
+    image_bytes = get_structured_lighting_session_module().render_capture_image(session_id, step_index)
     if image_bytes is None:
         raise HTTPException(status_code=404, detail="Structured lighting capture not found")
     return Response(content=image_bytes, media_type="image/png")
@@ -200,8 +198,7 @@ def get_capture_image(session_id: str, step_index: int) -> Response:
 
 @router.post("/sessions/{session_id}/decode")
 def decode_session(session_id: str, payload: StructuredLightingDecodeRequest) -> Dict:
-    service = get_structured_lighting_service()
-    session = service.decode_session(
+    session = get_structured_lighting_session_module().decode_session(
         session_id,
         sample_step=payload.sample_step,
         tuning_params=payload.tuning_params,
@@ -213,9 +210,8 @@ def decode_session(session_id: str, payload: StructuredLightingDecodeRequest) ->
 
 @router.post("/sessions/{session_id}/tuning-search")
 def run_tuning_search(session_id: str, payload: StructuredLightingParameterSearchRequest) -> Dict:
-    service = get_structured_lighting_service()
     try:
-        result = service.run_tuning_search(
+        result = get_structured_lighting_session_module().run_tuning_search(
             session_id,
             sample_step=payload.sample_step,
             tuning_params=payload.tuning_params,
@@ -230,9 +226,8 @@ def run_tuning_search(session_id: str, payload: StructuredLightingParameterSearc
 
 @router.post("/sessions/{session_id}/preview-tuning")
 def run_preview_tuning(session_id: str, payload: StructuredLightingParameterSearchRequest) -> Dict:
-    service = get_structured_lighting_service()
     try:
-        result = service.run_preview_tuning(
+        result = get_structured_lighting_session_module().run_preview_tuning(
             session_id,
             sample_step=payload.sample_step,
             tuning_params=payload.tuning_params,
@@ -247,8 +242,7 @@ def run_preview_tuning(session_id: str, payload: StructuredLightingParameterSear
 
 @router.get("/sessions/{session_id}/tuning-search")
 def get_tuning_search(session_id: str) -> Dict:
-    service = get_structured_lighting_service()
-    result = service.get_tuning_search(session_id)
+    result = get_structured_lighting_session_module().get_tuning_search(session_id)
     if not result:
         raise HTTPException(status_code=404, detail="Structured lighting session not found")
     return result
@@ -256,8 +250,7 @@ def get_tuning_search(session_id: str) -> Dict:
 
 @router.get("/sessions/{session_id}/preview-tuning")
 def get_preview_tuning(session_id: str) -> Dict:
-    service = get_structured_lighting_service()
-    result = service.get_preview_tuning(session_id)
+    result = get_structured_lighting_session_module().get_preview_tuning(session_id)
     if not result:
         raise HTTPException(status_code=404, detail="Structured lighting session not found")
     return result
@@ -265,8 +258,7 @@ def get_preview_tuning(session_id: str) -> Dict:
 
 @router.get("/sessions/{session_id}/tuning-search/{candidate_id}/previews/{preview_name}")
 def get_tuning_search_preview(session_id: str, candidate_id: str, preview_name: str) -> Response:
-    service = get_structured_lighting_service()
-    preview_bytes = service.render_tuning_search_preview(session_id, candidate_id, preview_name)
+    preview_bytes = get_structured_lighting_session_module().render_tuning_search_preview(session_id, candidate_id, preview_name)
     if preview_bytes is None:
         raise HTTPException(status_code=404, detail="Structured lighting tuning preview not found")
     return Response(content=preview_bytes, media_type="image/png")
@@ -274,8 +266,7 @@ def get_tuning_search_preview(session_id: str, candidate_id: str, preview_name: 
 
 @router.get("/sessions/{session_id}/preview-tuning/{candidate_id}/previews/{preview_name}")
 def get_preview_tuning_preview(session_id: str, candidate_id: str, preview_name: str) -> Response:
-    service = get_structured_lighting_service()
-    preview_bytes = service.render_preview_tuning_preview(session_id, candidate_id, preview_name)
+    preview_bytes = get_structured_lighting_session_module().render_preview_tuning_preview(session_id, candidate_id, preview_name)
     if preview_bytes is None:
         raise HTTPException(status_code=404, detail="Structured lighting preview-tuning preview not found")
     return Response(content=preview_bytes, media_type="image/png")
@@ -283,8 +274,7 @@ def get_preview_tuning_preview(session_id: str, candidate_id: str, preview_name:
 
 @router.get("/sessions/{session_id}/calibration")
 def get_calibration(session_id: str) -> Dict:
-    service = get_structured_lighting_service()
-    calibration = service.get_calibration(session_id)
+    calibration = get_structured_lighting_session_module().get_calibration(session_id)
     if not calibration:
         raise HTTPException(status_code=404, detail="Structured lighting session not found")
     return calibration
@@ -292,8 +282,7 @@ def get_calibration(session_id: str) -> Dict:
 
 @router.get("/sessions/{session_id}/artifacts/review")
 def get_artifact_review(session_id: str) -> Dict:
-    service = get_structured_lighting_service()
-    review = service.get_artifact_review(session_id)
+    review = get_structured_lighting_session_module().get_artifact_review(session_id)
     if not review:
         raise HTTPException(status_code=404, detail="Structured lighting session not found")
     return review
@@ -301,8 +290,7 @@ def get_artifact_review(session_id: str) -> Dict:
 
 @router.get("/sessions/{session_id}/artifacts/previews/{preview_id}")
 def get_artifact_preview(session_id: str, preview_id: str) -> Response:
-    service = get_structured_lighting_service()
-    preview_bytes = service.render_artifact_preview(session_id, preview_id)
+    preview_bytes = get_structured_lighting_session_module().render_artifact_preview(session_id, preview_id)
     if preview_bytes is None:
         raise HTTPException(status_code=404, detail="Structured lighting artifact preview not found")
     return Response(content=preview_bytes, media_type="image/png")
@@ -310,8 +298,7 @@ def get_artifact_preview(session_id: str, preview_id: str) -> Response:
 
 @router.post("/sessions/{session_id}/review")
 def update_review(session_id: str, payload: StructuredLightingReviewUpdate) -> Dict:
-    service = get_structured_lighting_service()
-    session = service.update_review(
+    session = get_structured_lighting_session_module().update_review(
         session_id,
         verdict=payload.verdict,
         notes=payload.notes,
@@ -324,9 +311,8 @@ def update_review(session_id: str, payload: StructuredLightingReviewUpdate) -> D
 
 @router.get("/sessions/{session_id}/export")
 def export_session(session_id: str):
-    service = get_structured_lighting_service()
     try:
-        export_info = service.export_session_bundle(session_id)
+        export_info = get_structured_lighting_session_module().export_session_bundle(session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not export_info:
@@ -340,9 +326,8 @@ def export_session(session_id: str):
 
 @router.post("/sessions/{session_id}/publish-mapping-scene")
 def publish_mapping_scene(session_id: str, payload: StructuredLightingPublishRequest) -> Dict:
-    service = get_structured_lighting_service()
     try:
-        result = service.publish_mapping_scene(session_id, scene_name=payload.scene_name)
+        result = get_structured_lighting_session_module().publish_mapping_scene(session_id, scene_name=payload.scene_name)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not result:
@@ -352,8 +337,7 @@ def publish_mapping_scene(session_id: str, payload: StructuredLightingPublishReq
 
 @router.get("/sessions/{session_id}/steps/{step_index}/image")
 def get_step_image(session_id: str, step_index: int) -> Response:
-    service = get_structured_lighting_service()
-    image_bytes = service.render_step_image(session_id, step_index)
+    image_bytes = get_structured_lighting_session_module().render_step_image(session_id, step_index)
     if image_bytes is None:
         raise HTTPException(status_code=404, detail="Structured lighting step not found")
     return Response(content=image_bytes, media_type="image/png")
@@ -361,8 +345,7 @@ def get_step_image(session_id: str, step_index: int) -> Response:
 
 @router.get("/sessions/{session_id}/steps/{step_index}/present", response_class=HTMLResponse)
 def present_step_image(session_id: str, step_index: int, projector_id: Optional[str] = None) -> str:
-    service = get_structured_lighting_service()
-    if service.render_step_image(session_id, step_index) is None:
+    if get_structured_lighting_session_module().render_step_image(session_id, step_index) is None:
         raise HTTPException(status_code=404, detail="Structured lighting step not found")
 
     image_url = f"/api/structured-lighting/sessions/{session_id}/steps/{step_index}/image"
@@ -447,9 +430,8 @@ def confirm_worker_ready(worker_id: str) -> Dict:
 
 @router.get("/worker/{worker_id}/next-step")
 def claim_next_step(worker_id: str) -> Dict:
-    service = get_structured_lighting_service()
     try:
-        step = service.claim_next_step(worker_id)
+        step = get_structured_lighting_session_module().claim_next_step(worker_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"step": step}
@@ -461,9 +443,8 @@ async def upload_capture(
     step_index: int = Form(...),
     capture: UploadFile = File(...),
 ) -> Dict:
-    service = get_structured_lighting_service()
     file_bytes = await capture.read()
-    session = service.record_capture(session_id, step_index, file_bytes, capture.filename or "capture.png")
+    session = get_structured_lighting_session_module().record_capture(session_id, step_index, file_bytes, capture.filename or "capture.png")
     if not session:
         raise HTTPException(status_code=404, detail="Structured lighting session not found")
     return session

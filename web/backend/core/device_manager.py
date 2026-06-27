@@ -195,9 +195,9 @@ class DeviceManager:
     def _handle_streaming_issue(self, session):
         """Handle streaming issues and attempt recovery"""
         try:
-            from web.backend.services.app_runtime import get_app_runtime
+            from web.backend.services.app_runtime import get_device_runtime
 
-            get_app_runtime().handle_streaming_issue(session)
+            get_device_runtime().owner.handle_streaming_issue(session)
         except Exception as e:
             device_name = getattr(session, "device_name", "<unknown>")
             logger.error(f"Error handling streaming issue for {device_name}: {e}")
@@ -205,9 +205,9 @@ class DeviceManager:
 
     def _playback_health_check_loop(self, device_name: str, video_path: str) -> None:
         try:
-            from web.backend.services.app_runtime import get_app_runtime
+            from web.backend.services.app_runtime import get_device_runtime
 
-            get_app_runtime().playback_monitoring_service.run_health_check_loop(device_name, video_path)
+            get_device_runtime().owner.playback_monitoring_service.run_health_check_loop(device_name, video_path)
         except Exception:
             self.playback_monitoring_service.run_health_check_loop(device_name, video_path)
     
@@ -346,9 +346,9 @@ class DeviceManager:
 
     def _resolve_discovery_device_id(self, device_name: str, hostname: Optional[str]) -> Optional[str]:
         try:
-            from web.backend.services.app_runtime import get_app_runtime
+            from web.backend.services.app_runtime import get_device_runtime
 
-            discovery_manager = get_app_runtime().discovery_manager
+            discovery_manager = get_device_runtime().discovery_manager
         except Exception:
             discovery_manager = DiscoveryManager.get_instance()
         candidates = discovery_manager.get_all_devices(online_only=True)
@@ -377,9 +377,9 @@ class DeviceManager:
     
     def _track_playback_result(self, device_name: str, video_path: str, success: bool) -> None:
         try:
-            from web.backend.services.app_runtime import get_app_runtime
+            from web.backend.services.app_runtime import get_device_runtime
 
-            get_app_runtime().track_playback_result(device_name, video_path, success)
+            get_device_runtime().track_playback_result(device_name, video_path, success)
         except Exception:
             self.playback_monitoring_service.track_playback_result(device_name, video_path, success)
     
@@ -408,9 +408,9 @@ class DeviceManager:
             video_path: Path to the video being played
         """
         try:
-            from web.backend.services.app_runtime import get_app_runtime
+            from web.backend.services.app_runtime import get_device_runtime
 
-            get_app_runtime().start_playback_health_check(device_name, video_path)
+            get_device_runtime().start_playback_health_check(device_name, video_path)
         except Exception:
             self.playback_monitoring_service.start_health_check(device_name, video_path)
     
@@ -422,9 +422,9 @@ class DeviceManager:
             device_name: Name of the device
         """
         try:
-            from web.backend.services.app_runtime import get_app_runtime
+            from web.backend.services.app_runtime import get_device_runtime
 
-            get_app_runtime().stop_playback_health_check(device_name)
+            get_device_runtime().stop_playback_health_check(device_name)
         except Exception:
             self.playback_monitoring_service.stop_health_check(device_name)
     
@@ -442,9 +442,9 @@ class DeviceManager:
             bool: True if successful, False otherwise
         """
         try:
-            from web.backend.services.app_runtime import get_app_runtime
+            from web.backend.services.app_runtime import get_device_runtime
 
-            runtime = get_app_runtime()
+            runtime = get_device_runtime().owner
             playback_service = getattr(runtime, "runtime_playback_service", None)
             if playback_service is not None:
                 return playback_service.auto_play_video(
@@ -473,9 +473,9 @@ class DeviceManager:
             Dict[str, Any]: Playback statistics
         """
         try:
-            from web.backend.services.app_runtime import get_app_runtime
+            from web.backend.services.app_runtime import get_device_runtime
 
-            return get_app_runtime().get_device_playback_stats(device_name)
+            return get_device_runtime().get_device_playback_stats(device_name)
         except Exception:
             return self.playback_monitoring_service.get_device_playback_stats(device_name)
     
@@ -567,9 +567,9 @@ class DeviceManager:
         
         # Update the database outside the status lock to avoid potential deadlocks.
         try:
-            from web.backend.services.app_runtime import get_app_runtime
+            from web.backend.services.app_runtime import get_device_runtime
 
-            persisted = get_app_runtime().persist_runtime_playback_progress(
+            persisted = get_device_runtime().owner.persist_runtime_playback_progress(
                 device_name=device_name,
                 position=position,
                 duration=duration,
@@ -665,18 +665,18 @@ class DeviceManager:
             video_name: Name of the video to sync
         """
         try:
-            from web.backend.services.app_runtime import get_app_runtime
+            from web.backend.services.app_runtime import get_device_runtime
 
-            get_app_runtime().trigger_overlay_sync(video_name)
+            get_device_runtime().owner.trigger_overlay_sync(video_name)
         except Exception as e:
             logger.error(f"Failed to sync overlays: {e}")
             # Don't fail the operation if sync fails
     
     def _process_airplay_casting(self, device_name: str, config: Dict[str, Any]):
         try:
-            from web.backend.services.app_runtime import get_app_runtime
+            from web.backend.services.app_runtime import get_device_runtime
 
-            get_app_runtime().process_airplay_casting(device_name, config)
+            get_device_runtime().owner.process_airplay_casting(device_name, config)
         except Exception as exc:
             logger.error("Error delegating airplay casting for %s: %s", device_name, exc)
             self.update_device_status(device_name=device_name, status="error", error=str(exc))

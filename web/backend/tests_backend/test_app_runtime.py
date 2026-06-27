@@ -367,6 +367,23 @@ def test_app_runtime_fallback_properties_work_without_manager():
     assert controller is None
 
 
+def test_device_runtime_get_device_does_not_recurse_to_owner_facade():
+    from web.backend.services.device_runtime import DeviceRuntimeModule
+
+    class Owner:
+        device_lifecycle_service = None
+        device_inventory_service = None
+
+        def get_device(self, device_name):
+            return self.device_runtime.get_device(device_name)
+
+    owner = Owner()
+    module = DeviceRuntimeModule(owner)
+    owner.device_runtime = module
+
+    assert module.get_device("Device A") is None
+
+
 def test_device_service_normalizes_legacy_manager_to_app_runtime(monkeypatch):
     import importlib
 

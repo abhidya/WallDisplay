@@ -6,7 +6,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from web.backend.services.overlay_cast_service import get_overlay_cast_service
+from web.backend.services.overlay_cast_service import get_overlay_cast_pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -255,7 +255,7 @@ class PlaybackOrchestrator:
             )
             return False
 
-        cast_service = get_overlay_cast_service()
+        cast_service = get_overlay_cast_pipeline()
         existing_session = cast_service.get_session_for_device(discovery_device_id)
         if (
             existing_session

@@ -47,7 +47,7 @@ test('capture state marks local capture then advances after upload', () => {
   assert.equal(uploaded.currentStepIndex, 1);
 });
 
-test('buildStructuredLightingCaptureFormData sends step index and file payload', async () => {
+test('buildStructuredLightingCaptureFormData sends step index and capture payload', async () => {
   const formData = buildStructuredLightingCaptureFormData(3, {
     uri: 'file:///capture-3.jpg',
     blob: new Blob(['capture']),
@@ -56,7 +56,7 @@ test('buildStructuredLightingCaptureFormData sends step index and file payload',
   });
 
   assert.equal(formData.get('step_index'), '3');
-  assert.equal(await formData.get('file').text(), 'capture');
+  assert.equal(await formData.get('capture').text(), 'capture');
 });
 
 
