@@ -61,6 +61,24 @@ class FakeRendererService:
         }
         return True
 
+    def start_projector_url(self, projector_id, content_url, content_mode="url", options=None):
+        self.status = {
+            "projector_id": projector_id,
+            "sender_type": "hdmi",
+            "target_name": self.projector_target,
+            "content_mode": content_mode,
+            "options": options or {},
+            "status": "projecting",
+            "sender_status": {
+                "type": "hdmi",
+                "connection_state": "attached",
+                "projection_state": "projecting",
+                "power_state": self.projector_power_states.get(projector_id, "unknown"),
+                "content_url": content_url,
+            },
+        }
+        return True
+
     def identify_projector(self, projector_id):
         return self.start_projector_mode(projector_id, "identify", {})
 
@@ -128,3 +146,27 @@ def test_hdmi_mode_identify_power_and_heartbeat_routes(monkeypatch):
     heartbeat_response = client.post("/api/renderer/heartbeat/proj-hdmi")
     assert heartbeat_response.status_code == 200
     assert fake_service.heartbeat_count == 1
+
+
+def test_hdmi_url_route_uses_renderer_service(monkeypatch):
+    fake_service = FakeRendererService()
+    client = make_client(monkeypatch, fake_service)
+
+    response = client.post(
+        "/api/renderer/projectors/proj-hdmi/url",
+        json={
+            "content_url": "http://controller/backend-static/hdmi_video_player.html",
+            "content_mode": "video",
+            "options": {"source": "generated-hdmi-test"},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["data"]["content_mode"] == "video"
+    assert body["data"]["options"] == {"source": "generated-hdmi-test"}
+    assert (
+        body["data"]["sender_status"]["content_url"]
+        == "http://controller/backend-static/hdmi_video_player.html"
+    )

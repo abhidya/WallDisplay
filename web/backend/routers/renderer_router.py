@@ -53,6 +53,13 @@ class ProjectorTargetRequest(BaseModel):
     target_name: str
 
 
+class ProjectorUrlRequest(BaseModel):
+    """Request model for showing an already-served URL on an HDMI projector."""
+    content_url: str
+    content_mode: str = "url"
+    options: Optional[Dict[str, Any]] = None
+
+
 class RendererResponse(BaseModel):
     """Response model for renderer operations."""
     success: bool
@@ -396,6 +403,38 @@ async def start_projector_mode(projector_id: str, request: ProjectorModeRequest)
         raise HTTPException(
             status_code=500,
             detail=f"Error starting projector mode: {str(e)}"
+        )
+
+
+@router.post("/projectors/{projector_id}/url", response_model=RendererResponse)
+async def start_projector_url(projector_id: str, request: ProjectorUrlRequest):
+    """
+    Show an already-served URL on an HDMI projector.
+    """
+    try:
+        success = renderer_service.start_projector_url(
+            projector_id,
+            request.content_url,
+            content_mode=request.content_mode,
+            options=request.options or {},
+        )
+        if not success:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to show URL on projector {projector_id}"
+            )
+        return RendererResponse(
+            success=True,
+            message=f"Showing URL on projector {projector_id}",
+            data=renderer_service.get_renderer_status(projector_id)
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error showing URL on projector: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error showing URL on projector: {str(e)}"
         )
 
 
