@@ -29,6 +29,10 @@
       background: rgba(0, 0, 0, 0.6);
       border: 1px solid rgba(255, 255, 255, 0.18);
       padding: 10px 12px;
+      display: none;
+    }
+    .hud.visible {
+      display: block;
     }
   </style>
 </head>
@@ -40,7 +44,8 @@
     const projectorId = params.get('projector_id') || 'projector';
     const patternSet = params.get('pattern_set') || params.get('pattern') || 'gray_code';
     const frameDurationMs = Math.max(50, Number(params.get('frame_duration_ms') || params.get('interval_ms') || 300));
-    const loop = readBool('loop', true);
+    const loop = readBool('loop', false);
+    const showHud = readBool('show_hud', false) || readBool('debug', false);
     const safeBlack = readBool('safe_black_between_frames', true);
     const invert = readBool('invert', false);
     const gamma = Math.max(0.1, Number(params.get('gamma') || 1));
@@ -53,6 +58,11 @@
     let frameIndex = 0;
     let showingBlackSpacer = false;
     let activeFrame = null;
+    let completed = false;
+
+    if (showHud) {
+      hud.classList.add('visible');
+    }
 
     window.wallDisplayStructuredLight = {
       getCurrentFrame: () => activeFrame,
@@ -242,25 +252,57 @@
       }
       if (showingBlackSpacer) {
         drawBlack();
-        hud.textContent = `${projectorId} / spacer black`;
+        if (showHud) {
+          hud.textContent = `${projectorId} / spacer black`;
+        }
         return;
       }
-      const frame = sequence[frameIndex % sequence.length];
+      if (completed) {
+        drawBlack();
+        return;
+      }
+      const frame = sequence[frameIndex];
       frame.draw();
-      hud.textContent = `${projectorId} / ${patternSet} / ${frame.name} / ${frameIndex + 1}/${sequence.length}`;
+      if (showHud) {
+        hud.textContent = `${projectorId} / ${patternSet} / ${frame.name} / ${frameIndex + 1}/${sequence.length}`;
+      }
       notifyFrame(frame);
     }
 
+    function completeSequence() {
+      completed = true;
+      showingBlackSpacer = false;
+      activeFrame = {
+        projector_id: projectorId,
+        pattern_set: patternSet,
+        frame_index: sequence.length,
+        frame_name: 'complete_black',
+        frame_set: 'complete',
+        timestamp: Date.now()
+      };
+      drawBlack();
+      if (showHud) {
+        hud.textContent = `${projectorId} / complete`;
+      }
+      window.dispatchEvent(new CustomEvent('structured-light-frame', { detail: activeFrame }));
+    }
+
     function nextFrame() {
+      if (completed) {
+        drawBlack();
+        return;
+      }
       if (safeBlack && !showingBlackSpacer) {
         showingBlackSpacer = true;
       } else {
         showingBlackSpacer = false;
         frameIndex += 1;
-        if (!loop && frameIndex >= sequence.length) {
-          frameIndex = sequence.length - 1;
-          draw();
-          return;
+        if (frameIndex >= sequence.length) {
+          if (!loop) {
+            completeSequence();
+            return;
+          }
+          frameIndex = 0;
         }
       }
       draw();

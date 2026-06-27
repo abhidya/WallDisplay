@@ -352,7 +352,9 @@ function Renderer() {
       return {
         pattern_set: hdmiPatternSet,
         frame_duration_ms: Number(hdmiFrameDuration) || 300,
-        safe_black_between_frames: true
+        safe_black_between_frames: true,
+        loop: false,
+        show_hud: false
       };
     }
     if (mode === 'overlay') {

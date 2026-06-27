@@ -101,6 +101,8 @@ describe('Renderer HDMI panel', () => {
         expect.objectContaining({
           pattern_set: 'gray_code',
           safe_black_between_frames: true,
+          loop: false,
+          show_hud: false,
         })
       )
     );

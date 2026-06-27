@@ -83,7 +83,13 @@ def test_renderer_service_starts_structured_light_on_hdmi(monkeypatch, tmp_path)
     assert service.start_projector_mode(
         "proj-hdmi",
         "structured_light",
-        {"pattern_set": "grid", "safe_black_between_frames": True, "frame_duration_ms": 250},
+        {
+            "pattern_set": "grid",
+            "safe_black_between_frames": True,
+            "frame_duration_ms": 250,
+            "loop": False,
+            "show_hud": False,
+        },
     ) is True
 
     status = service.get_renderer_status("proj-hdmi")
@@ -95,6 +101,8 @@ def test_renderer_service_starts_structured_light_on_hdmi(monkeypatch, tmp_path)
     assert "pattern_set=grid" in status["sender_status"]["content_url"]
     assert "safe_black_between_frames=true" in status["sender_status"]["content_url"]
     assert "frame_duration_ms=250" in status["sender_status"]["content_url"]
+    assert "loop=false" in status["sender_status"]["content_url"]
+    assert "show_hud=false" in status["sender_status"]["content_url"]
 
     assert service.record_projector_heartbeat("proj-hdmi") is True
     assert service.set_projector_power_state("proj-hdmi", "manual_off") is True
