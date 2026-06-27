@@ -13,7 +13,7 @@ from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 
@@ -591,8 +591,32 @@ if os.path.exists(frontend_dir):
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 if not os.path.exists(static_dir):
     os.makedirs(static_dir)
-    
-app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+frontend_static_dir = os.path.join(frontend_dir, "static")
+
+
+def _safe_static_file(base_dir: str, requested_path: str) -> Optional[str]:
+    if not base_dir or not os.path.exists(base_dir):
+        return None
+    base_path = os.path.abspath(base_dir)
+    candidate_path = os.path.abspath(os.path.join(base_path, requested_path))
+    if os.path.commonpath([base_path, candidate_path]) != base_path:
+        return None
+    if not os.path.isfile(candidate_path):
+        return None
+    return candidate_path
+
+
+@app.get("/static/{requested_path:path}", include_in_schema=False)
+@app.head("/static/{requested_path:path}", include_in_schema=False)
+async def serve_static_asset(requested_path: str):
+    for base_dir in (frontend_static_dir, static_dir):
+        candidate_path = _safe_static_file(base_dir, requested_path)
+        if candidate_path:
+            return FileResponse(candidate_path)
+    raise HTTPException(status_code=404, detail="Static asset not found")
+
+
 app.mount("/backend-static", StaticFiles(directory=static_dir), name="backend-static")
 
 if __name__ == "__main__":
