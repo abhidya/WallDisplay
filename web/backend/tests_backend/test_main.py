@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 import os
 from unittest.mock import patch, MagicMock
 
+from web.backend import main as main_module
 from web.backend.main import app
 
 
@@ -237,6 +238,37 @@ class TestMain:
         
         assert devices_path_found, "No devices API endpoint found in OpenAPI schema"
         assert videos_path_found, "No videos API endpoint found in OpenAPI schema"
+
+    def test_frontend_deep_links_fall_back_to_index(self, tmp_path, monkeypatch):
+        """Test direct React Router URLs serve the frontend app shell."""
+        build_dir = tmp_path / "build"
+        asset_dir = build_dir / "static" / "js"
+        asset_dir.mkdir(parents=True)
+        (build_dir / "index.html").write_text(
+            '<!doctype html><html><body><div id="root"></div></body></html>',
+            encoding="utf-8",
+        )
+        (asset_dir / "main.js").write_text("window.__walldisplay = true;", encoding="utf-8")
+
+        monkeypatch.setattr(main_module, "frontend_dir", str(build_dir))
+        monkeypatch.setattr(main_module, "frontend_static_dir", str(build_dir / "static"))
+        mock_db = MagicMock()
+        monkeypatch.setattr(main_module, "SessionLocal", MagicMock(return_value=mock_db))
+        monkeypatch.setattr(
+            main_module.OverlayService,
+            "get_projector_redirect_config",
+            lambda self: None,
+        )
+
+        client = TestClient(app)
+
+        deep_link_response = client.get("/app/structured-lighting")
+        assert deep_link_response.status_code == 200
+        assert '<div id="root"></div>' in deep_link_response.text
+
+        asset_response = client.get("/app/static/js/main.js")
+        assert asset_response.status_code == 200
+        assert asset_response.text == "window.__walldisplay = true;"
 
 
 class TestMainWithMocks:

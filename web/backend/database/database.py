@@ -5,8 +5,11 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Get database URL from environment variable or use default SQLite database
-DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./nanodlna.db")
+# Get database URL from environment variable or use the backend SQLite database.
+# Keep this absolute so Windows autostart/scheduled launches do not depend on cwd.
+_DEFAULT_SQLITE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "nanodlna.db")
+_DEFAULT_SQLITE_URL = "sqlite:///" + _DEFAULT_SQLITE_PATH.replace(os.sep, "/")
+DATABASE_URL = os.environ.get("DATABASE_URL", _DEFAULT_SQLITE_URL)
 
 # Create SQLAlchemy engine
 engine = create_engine(

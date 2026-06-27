@@ -511,7 +511,13 @@ async def startup_event():
 
             # Log all devices in the runtime inventory
             for device_name, device in app_runtime.get_device_items():
-                logger.info(f"Device in runtime: {device_name}, type: {device.type}, hostname: {device.hostname}, action_url: {device.action_url}")
+                logger.info(
+                    "Device in runtime: %s, type: %s, hostname: %s, action_url: %s",
+                    device_name,
+                    getattr(device, "type", "unknown"),
+                    getattr(device, "hostname", ""),
+                    getattr(device, "action_url", ""),
+                )
 
             # Start the renderer service's streaming server
             if renderer_service:
@@ -582,10 +588,9 @@ async def shutdown_event():
         except Exception as e:
             logger.error(f"Error stopping Renderer Service: {e}")
 
-# Serve the frontend if the directory exists
+# Serve the frontend if the directory exists. React Router deep links need
+# index.html, while concrete build assets should still be served directly.
 frontend_dir = os.path.join(os.path.dirname(__file__), "..", "frontend", "build")
-if os.path.exists(frontend_dir):
-    app.mount("/app", StaticFiles(directory=frontend_dir, html=True), name="frontend")
 
 # Serve static files
 static_dir = os.path.join(os.path.dirname(__file__), "static")
@@ -605,6 +610,26 @@ def _safe_static_file(base_dir: str, requested_path: str) -> Optional[str]:
     if not os.path.isfile(candidate_path):
         return None
     return candidate_path
+
+
+def _frontend_index_file() -> Optional[str]:
+    return _safe_static_file(frontend_dir, "index.html")
+
+
+@app.get("/app", include_in_schema=False)
+@app.head("/app", include_in_schema=False)
+@app.get("/app/{requested_path:path}", include_in_schema=False)
+@app.head("/app/{requested_path:path}", include_in_schema=False)
+async def serve_frontend_app(requested_path: str = ""):
+    candidate_path = _safe_static_file(frontend_dir, requested_path)
+    if candidate_path:
+        return FileResponse(candidate_path)
+
+    index_path = _frontend_index_file()
+    if index_path:
+        return FileResponse(index_path)
+
+    raise HTTPException(status_code=404, detail="Frontend build not found")
 
 
 @app.get("/static/{requested_path:path}", include_in_schema=False)
