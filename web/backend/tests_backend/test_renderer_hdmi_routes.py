@@ -109,10 +109,10 @@ def test_hdmi_mode_identify_power_and_heartbeat_routes(monkeypatch):
 
     mode_response = client.post(
         "/api/renderer/projectors/proj-hdmi/mode",
-        json={"mode": "structured_light", "options": {"pattern_set": "gray_code"}},
+        json={"mode": "blank", "options": {"background_color": "black"}},
     )
     assert mode_response.status_code == 200
-    assert mode_response.json()["data"]["content_mode"] == "structured_light"
+    assert mode_response.json()["data"]["content_mode"] == "blank"
 
     identify_response = client.post("/api/renderer/projectors/proj-hdmi/identify")
     assert identify_response.status_code == 200

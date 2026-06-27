@@ -38,7 +38,7 @@ def write_hdmi_config(tmp_path):
                 "sender": "hdmi",
                 "target_name": "0",
                 "content_mode": "identify",
-                "content_modes": ["identify", "structured_light", "overlay", "blank", "scene"],
+                "content_modes": ["identify", "overlay", "blank", "scene"],
             }
         },
     }
@@ -47,7 +47,7 @@ def write_hdmi_config(tmp_path):
     return config_path
 
 
-def test_renderer_service_starts_structured_light_on_hdmi(monkeypatch, tmp_path):
+def test_renderer_service_uses_hdmi_as_url_transport(monkeypatch, tmp_path):
     target_display = {
         "id": "hdmi_display_0",
         "index": 0,
@@ -80,29 +80,25 @@ def test_renderer_service_starts_structured_light_on_hdmi(monkeypatch, tmp_path)
     assert service.get_renderer_status("proj-hdmi")["content_mode"] == "identify"
     assert service.stop_renderer("proj-hdmi") is True
 
-    assert service.start_projector_mode(
+    assert service.start_projector_url(
         "proj-hdmi",
-        "structured_light",
-        {
-            "pattern_set": "grid",
-            "safe_black_between_frames": True,
-            "frame_duration_ms": 250,
-            "loop": False,
-            "show_hud": False,
+        "http://testserver/api/structured-lighting/sessions/session-1/steps/0/present?projector_id=proj-hdmi",
+        content_mode="structured_light_step",
+        options={
+            "session_id": "session-1",
+            "step_index": 0,
+            "step_label": "Reference White",
         },
     ) is True
 
     status = service.get_renderer_status("proj-hdmi")
-    assert status["content_mode"] == "structured_light"
+    assert status["content_mode"] == "structured_light_step"
     assert status["status"] == "projecting"
     assert status["sender_status"]["connection_state"] == "attached"
     assert status["sender_status"]["projection_state"] == "projecting"
-    assert "structured_light.html" in status["sender_status"]["content_url"]
-    assert "pattern_set=grid" in status["sender_status"]["content_url"]
-    assert "safe_black_between_frames=true" in status["sender_status"]["content_url"]
-    assert "frame_duration_ms=250" in status["sender_status"]["content_url"]
-    assert "loop=false" in status["sender_status"]["content_url"]
-    assert "show_hud=false" in status["sender_status"]["content_url"]
+    assert status["sender_status"]["content_url"].endswith(
+        "/api/structured-lighting/sessions/session-1/steps/0/present?projector_id=proj-hdmi"
+    )
 
     assert service.record_projector_heartbeat("proj-hdmi") is True
     assert service.set_projector_power_state("proj-hdmi", "manual_off") is True

@@ -74,9 +74,7 @@ function Renderer() {
   const [selectedHdmiProjector, setSelectedHdmiProjector] = useState('');
   const [selectedHdmiTarget, setSelectedHdmiTarget] = useState('');
   const [hdmiDisplays, setHdmiDisplays] = useState([]);
-  const [hdmiMode, setHdmiMode] = useState('structured_light');
-  const [hdmiPatternSet, setHdmiPatternSet] = useState('gray_code');
-  const [hdmiFrameDuration, setHdmiFrameDuration] = useState(300);
+  const [hdmiMode, setHdmiMode] = useState('blank');
   const [hdmiOverlayConfigId, setHdmiOverlayConfigId] = useState('1');
   const [openStatusDialog, setOpenStatusDialog] = useState(false);
   const [selectedRendererStatus, setSelectedRendererStatus] = useState(null);
@@ -348,15 +346,6 @@ function Renderer() {
 
   const hdmiModeOptions = (modeOverride = null) => {
     const mode = modeOverride || hdmiMode;
-    if (mode === 'structured_light') {
-      return {
-        pattern_set: hdmiPatternSet,
-        frame_duration_ms: Number(hdmiFrameDuration) || 300,
-        safe_black_between_frames: true,
-        loop: false,
-        show_hud: false
-      };
-    }
     if (mode === 'overlay') {
       return {
         config_id: hdmiOverlayConfigId ? Number(hdmiOverlayConfigId) : undefined,
@@ -742,39 +731,10 @@ function Renderer() {
                       label="Content Mode"
                       disabled={loading}
                     >
-                      <MenuItem value="structured_light">Structured Light</MenuItem>
                       <MenuItem value="overlay">Overlay</MenuItem>
                       <MenuItem value="blank">Blank</MenuItem>
                     </Select>
                   </FormControl>
-
-                  {hdmiMode === 'structured_light' && (
-                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-                      <FormControl fullWidth>
-                        <InputLabel>Pattern Set</InputLabel>
-                        <Select
-                          value={hdmiPatternSet}
-                          onChange={(event) => setHdmiPatternSet(event.target.value)}
-                          label="Pattern Set"
-                          disabled={loading}
-                        >
-                          <MenuItem value="gray_code">Gray Code</MenuItem>
-                          <MenuItem value="calibration">Calibration</MenuItem>
-                          <MenuItem value="grid">Grid</MenuItem>
-                          <MenuItem value="checkerboard">Checkerboard</MenuItem>
-                        </Select>
-                      </FormControl>
-                      <TextField
-                        label="Frame ms"
-                        type="number"
-                        value={hdmiFrameDuration}
-                        onChange={(event) => setHdmiFrameDuration(event.target.value)}
-                        inputProps={{ min: 50, step: 50 }}
-                        disabled={loading}
-                        sx={{ minWidth: { sm: 132 } }}
-                      />
-                    </Stack>
-                  )}
 
                   {hdmiMode === 'overlay' && (
                     <TextField

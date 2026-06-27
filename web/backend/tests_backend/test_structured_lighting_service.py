@@ -3,7 +3,7 @@ import os
 import zipfile
 from types import SimpleNamespace
 
-from web.backend.services.structured_lighting_service import StructuredLightingService
+from web.backend.services.structured_lighting_service import StructuredLightingService, _utcnow_iso
 from discovery.base import CastingMethod
 
 
@@ -28,6 +28,64 @@ def test_structured_lighting_session_persists_metadata(tmp_path):
     assert session["decode"]["status"] == "not_started"
     assert session["calibration"]["status"] == "not_started"
     assert session["review"]["status"] == "pending"
+
+
+def test_hdmi_step_presentation_uses_structured_lighting_step_url(monkeypatch, tmp_path):
+    service = StructuredLightingService()
+    service._upload_root = str(tmp_path)
+    service._sessions = {}
+
+    calls = []
+
+    class FakeRendererService:
+        def start_projector_url(self, projector_id, content_url, content_mode, options):
+            calls.append({
+                "projector_id": projector_id,
+                "content_url": content_url,
+                "content_mode": content_mode,
+                "options": options,
+            })
+            return True
+
+    monkeypatch.setattr(service, "_get_renderer_service", lambda: FakeRendererService(), raising=False)
+    monkeypatch.setenv("NANODLNA_SERVER_BASE_URL", "http://controller.local:8088")
+
+    session = service.create_session(
+        name="HDMI Wall Calibration",
+        projector_device_id="proj-hdmi-local",
+        camera_index=1,
+        projector_width=1280,
+        projector_height=720,
+        presentation_mode="hdmi_step",
+        hold_ms=1200,
+        notes="test run",
+    )
+    service._worker.update({
+        "worker_id": "worker-1",
+        "last_seen_at": _utcnow_iso(),
+        "connected": True,
+    })
+
+    service.start_session(session["session_id"])
+    claimed = service.claim_next_step("worker-1")
+
+    assert claimed["step"]["index"] == 0
+    assert claimed["presentation_mode"] == "hdmi_step"
+    assert calls == [
+        {
+            "projector_id": "proj-hdmi-local",
+            "content_url": (
+                f"http://controller.local:8088/api/structured-lighting/sessions/"
+                f"{session['session_id']}/steps/0/present?projector_id=proj-hdmi-local"
+            ),
+            "content_mode": "structured_light_step",
+            "options": {
+                "session_id": session["session_id"],
+                "step_index": 0,
+                "step_label": "Reference White",
+            },
+        }
+    ]
 
 
 def test_record_capture_uses_notebook_reference_filenames(tmp_path):

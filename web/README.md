@@ -34,7 +34,7 @@ Default URLs:
 
 For a projector connected as a second monitor, run the backend in the logged-in user's desktop session. Windows background services, scheduled tasks that run without an interactive user, and Docker containers may not be able to enumerate displays or launch the kiosk browser on the projector. Prefer a user-session startup task or direct `run_direct.sh`/`run_dashboard.sh` startup for HDMI projection.
 
-If the backend uses a non-default port, set `NANODLNA_SERVER_BASE_URL` so identify, structured-light, overlay, blank, and heartbeat pages point back to the correct API.
+If the backend uses a non-default port, set `NANODLNA_SERVER_BASE_URL` so identify, overlay, blank, heartbeat, and structured-lighting step presentation pages point back to the correct API. Structured-light calibration is launched from `/structured-lighting`, not from the renderer HDMI controls.
 
 On Windows, the root `scripts/` directory includes logon-task helpers for user-session startup:
 

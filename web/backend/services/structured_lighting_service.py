@@ -11,7 +11,7 @@ import asyncio
 from datetime import UTC, datetime
 from io import BytesIO
 from typing import Dict, List, Optional
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 from PIL import Image
 from web.backend.core.streaming_service import get_streaming_service
@@ -288,6 +288,8 @@ class StructuredLightingService:
                 step = plan["steps"][current_step_index]
                 if session["presentation_mode"] == "dlna_step":
                     self._present_step_via_dlna(session, step)
+                elif session["presentation_mode"] == "hdmi_step":
+                    self._present_step_via_hdmi(session, step)
                 session["status"] = "capturing"
                 session["updated_at"] = _utcnow_iso()
                 self._persist_session(session)
@@ -2143,6 +2145,37 @@ class StructuredLightingService:
         if not cast_session:
             raise RuntimeError("Failed to cast structured-lighting step to the selected DLNA projector.")
         self._active_step_cast_session_id = cast_session.id
+
+    def _present_step_via_hdmi(self, session: Dict, step: Dict) -> None:
+        projector_id = session.get("projector_device_id")
+        if not projector_id:
+            raise RuntimeError("HDMI presentation mode requires a selected HDMI projector.")
+
+        query = urlencode({"projector_id": projector_id})
+        content_url = (
+            f"{self._server_base_url().rstrip('/')}/api/structured-lighting/sessions/"
+            f"{session['session_id']}/steps/{step['index']}/present?{query}"
+        )
+        renderer_service = self._get_renderer_service()
+        if not renderer_service.start_projector_url(
+            projector_id,
+            content_url,
+            content_mode="structured_light_step",
+            options={
+                "session_id": session["session_id"],
+                "step_index": step["index"],
+                "step_label": step["label"],
+            },
+        ):
+            raise RuntimeError(f"Failed to present structured-lighting step {step['index']} on HDMI projector.")
+
+    def _get_renderer_service(self):
+        from web.backend.routers.renderer_router import get_renderer_service
+
+        return get_renderer_service()
+
+    def _server_base_url(self) -> str:
+        return os.environ.get("NANODLNA_SERVER_BASE_URL") or "http://localhost:8000"
 
     async def _cast_to_resolved_device(
         self,

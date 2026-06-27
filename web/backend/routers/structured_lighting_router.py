@@ -1,7 +1,7 @@
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel, Field
 
 from web.backend.services.structured_lighting_service import get_structured_lighting_service
@@ -71,6 +71,11 @@ def get_capabilities() -> Dict:
                 "id": "dlna_step",
                 "label": "DLNA Step",
                 "description": "Cast one pattern at a time, capture, then advance to the next pattern.",
+            },
+            {
+                "id": "hdmi_step",
+                "label": "HDMI Step",
+                "description": "Present each session-owned pattern on a configured local HDMI projector.",
             }
         ],
         "workflow": [
@@ -323,6 +328,59 @@ def get_step_image(session_id: str, step_index: int) -> Response:
     if image_bytes is None:
         raise HTTPException(status_code=404, detail="Structured lighting step not found")
     return Response(content=image_bytes, media_type="image/png")
+
+
+@router.get("/sessions/{session_id}/steps/{step_index}/present", response_class=HTMLResponse)
+def present_step_image(session_id: str, step_index: int, projector_id: Optional[str] = None) -> str:
+    service = get_structured_lighting_service()
+    if service.render_step_image(session_id, step_index) is None:
+        raise HTTPException(status_code=404, detail="Structured lighting step not found")
+
+    image_url = f"/api/structured-lighting/sessions/{session_id}/steps/{step_index}/image"
+    heartbeat_script = ""
+    if projector_id:
+        heartbeat_url = f"/api/renderer/heartbeat/{projector_id}"
+        heartbeat_script = f"""
+  <script>
+    async function heartbeat() {{
+      try {{
+        await fetch({heartbeat_url!r}, {{ method: 'POST', keepalive: true }});
+      }} catch (error) {{}}
+    }}
+    heartbeat();
+    setInterval(heartbeat, 5000);
+  </script>"""
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Structured Lighting Step</title>
+  <style>
+    html, body {{
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+      cursor: none;
+    }}
+    img {{
+      display: block;
+      width: 100vw;
+      height: 100vh;
+      object-fit: fill;
+      image-rendering: pixelated;
+      background: #000;
+    }}
+  </style>
+</head>
+<body>
+  <img alt="" src="{image_url}">
+{heartbeat_script}
+</body>
+</html>"""
 
 
 @router.post("/worker/heartbeat")

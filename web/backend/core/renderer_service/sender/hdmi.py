@@ -384,9 +384,10 @@ class HDMISender(Sender):
     def _content_supports_heartbeat(content_url: str) -> bool:
         heartbeat_pages = {
             "hdmi_identify.html",
-            "structured_light.html",
             "blank.html",
             "overlay_window.html",
+            "/api/structured-lighting/",
+            "/present",
         }
         return any(page in content_url for page in heartbeat_pages)
 

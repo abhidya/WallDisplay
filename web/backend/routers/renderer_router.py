@@ -371,8 +371,7 @@ async def set_projector_target(projector_id: str, request: ProjectorTargetReques
 @router.post("/projectors/{projector_id}/mode", response_model=RendererResponse)
 async def start_projector_mode(projector_id: str, request: ProjectorModeRequest):
     """
-    Start an HDMI projector content mode such as identify, structured light,
-    overlay, blank, or scene.
+    Start an HDMI projector content mode such as identify, overlay, blank, or scene.
     """
     try:
         success = renderer_service.start_projector_mode(

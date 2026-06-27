@@ -479,6 +479,51 @@ class RendererService:
             }
             return True
 
+    def start_projector_url(
+        self,
+        projector_id: str,
+        content_url: str,
+        content_mode: str = 'url',
+        options: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """Show an already-rendered URL on an HDMI projector."""
+        options = options or {}
+        with self.lock:
+            if projector_id in self.active_renderers:
+                self.stop_renderer(projector_id)
+
+            projector_config = self.get_projector_config(projector_id)
+            if not projector_config:
+                self.logger.error(f"Projector not found: {projector_id}")
+                return False
+            if projector_config.get('sender') != 'hdmi':
+                self.logger.error(f"URL presentation requires an HDMI projector: {projector_id}")
+                return False
+
+            target_name = projector_config.get('target_name')
+            if not target_name:
+                self.logger.error(f"No target name specified for HDMI projector {projector_id}")
+                return False
+
+            sender = self._create_sender('hdmi', projector_id)
+            if not sender.connect(target_name):
+                return False
+            if not sender.send_content(content_url):
+                sender.disconnect()
+                return False
+
+            self.active_renderers[projector_id] = {
+                'renderer': None,
+                'sender': sender,
+                'scene_id': None,
+                'projector_id': projector_id,
+                'sender_type': 'hdmi',
+                'target_name': target_name,
+                'content_mode': content_mode,
+                'options': options,
+            }
+            return True
+
     def identify_projector(self, projector_id: str) -> bool:
         """Launch a full-screen identity pattern on an HDMI projector."""
         return self.start_projector_mode(projector_id, 'identify', {})
@@ -586,7 +631,6 @@ class RendererService:
         options = dict(options or {})
         page_by_mode = {
             'identify': 'hdmi_identify.html',
-            'structured_light': 'structured_light.html',
             'overlay': 'overlay_window.html',
             'blank': 'blank.html',
         }

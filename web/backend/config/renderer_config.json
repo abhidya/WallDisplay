@@ -95,12 +95,7 @@
       "sender": "hdmi",
       "target_name": "\\\\.\\DISPLAY5",
       "content_mode": "identify",
-      "content_modes": ["identify", "structured_light", "overlay", "blank", "scene"],
-      "content_options": {
-        "pattern_set": "gray_code",
-        "frame_duration_ms": 300,
-        "safe_black_between_frames": true
-      }
+      "content_modes": ["identify", "overlay", "blank", "scene"]
     },
     "proj-as": {
       "sender": "airplay",

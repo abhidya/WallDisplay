@@ -75,7 +75,9 @@ def test_send_content_launches_browser_on_target_display_and_marks_stale(monkeyp
     monkeypatch.setattr(sender, "_get_browser_command", lambda: r"C:\Chrome\chrome.exe")
 
     assert sender.connect("1") is True
-    assert sender.send_content("http://localhost:8000/backend-static/structured_light.html?projector_id=proj") is True
+    assert sender.send_content(
+        "http://localhost:8000/api/structured-lighting/sessions/session-1/steps/0/present?projector_id=proj"
+    ) is True
 
     assert launched
     assert "--window-position=1920,0" in launched[0]

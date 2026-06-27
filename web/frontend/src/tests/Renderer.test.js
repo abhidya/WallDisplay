@@ -37,7 +37,7 @@ const hdmiProjector = {
   name: 'Local HDMI Projector',
   sender: 'hdmi',
   target_name: 'hdmi_display_0',
-  content_modes: ['identify', 'structured_light', 'overlay', 'blank', 'scene'],
+  content_modes: ['identify', 'overlay', 'blank', 'scene'],
   runtime_status: {
     status: 'idle',
     sender_status: {
@@ -97,12 +97,9 @@ describe('Renderer HDMI panel', () => {
     await waitFor(() =>
       expect(rendererApi.startProjectorMode).toHaveBeenCalledWith(
         'proj-hdmi-local',
-        'structured_light',
+        'blank',
         expect.objectContaining({
-          pattern_set: 'gray_code',
-          safe_black_between_frames: true,
-          loop: false,
-          show_hud: false,
+          background_color: 'black',
         })
       )
     );

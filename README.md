@@ -151,7 +151,7 @@ The `ControlPlaneClient` interface (`mobile-app/src/control-plane/client.ts`) ab
 
 1. Create calibration session → Gray-code pattern sequence planned
 2. Host-side worker (`structured_lighting_worker.py`) captures camera frames per pattern
-3. Each pattern: send to projector via DLNA → settle → capture → upload
+3. Each pattern: present through the structured-lighting module via DLNA or HDMI Step -> settle -> capture -> upload
 4. Decode Gray-code patterns → depth/geometry map
 5. Operator reviews artifacts (accept/recapture workflow)
 6. Calibration export → mapping scene for projection use
@@ -243,7 +243,7 @@ cd web
 
 The HDMI projector adapter must run in the logged-in user's desktop session so it can enumerate monitors and launch the projector browser window on the selected display. Docker containers and scheduled/background Windows services may run without access to the interactive desktop, so use a user-session startup task or run the dashboard directly for HDMI projection.
 
-Set `NANODLNA_SERVER_BASE_URL` when the backend is not on `http://localhost:8000`; HDMI identify, structured-light, overlay, blank, and heartbeat URLs use that base URL.
+Set `NANODLNA_SERVER_BASE_URL` when the backend is not on `http://localhost:8000`; HDMI identify, overlay, blank, heartbeat, and structured-lighting step presentation URLs use that base URL. Structured-light calibration is launched from `/structured-lighting`, not from the renderer HDMI controls.
 
 Windows helper scripts are available under `scripts/`:
 

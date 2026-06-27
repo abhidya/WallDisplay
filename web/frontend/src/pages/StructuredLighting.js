@@ -21,7 +21,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import { structuredLightingApi, discoveryV2Api } from '../services/api';
+import { structuredLightingApi, discoveryV2Api, rendererApi } from '../services/api';
 
 function SummaryCard({ title, value, subtitle }) {
   return (
@@ -171,17 +171,27 @@ function StructuredLighting() {
     const load = async () => {
       try {
         setLoading(true);
-        const [capabilitiesRes, statusRes, projectorRes] = await Promise.all([
+        const [capabilitiesRes, statusRes, projectorRes, rendererProjectorsRes] = await Promise.all([
           structuredLightingApi.getCapabilities(),
           structuredLightingApi.getStatus(),
           discoveryV2Api.getDevices({ casting_method: 'dlna' }),
+          rendererApi.listProjectors(),
         ]);
         if (!active) {
           return;
         }
         setCapabilities(capabilitiesRes.data);
         setStatus(statusRes.data);
-        const nextProjectors = Array.isArray(projectorRes.data) ? projectorRes.data : [];
+        const dlnaProjectors = Array.isArray(projectorRes.data) ? projectorRes.data : [];
+        const hdmiProjectors = (rendererProjectorsRes.data?.data?.projectors || [])
+          .filter((projector) => projector.sender === 'hdmi')
+          .map((projector) => ({
+            ...projector,
+            device_id: projector.id,
+            friendly_name: `${projector.name || projector.id} (HDMI)`,
+            casting_method: 'hdmi',
+          }));
+        const nextProjectors = [...dlnaProjectors, ...hdmiProjectors];
         setProjectors(nextProjectors);
         setForm((current) => {
           const currentProjectorId = current.projector_device_id || '';
