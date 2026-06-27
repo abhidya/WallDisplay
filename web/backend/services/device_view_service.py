@@ -12,6 +12,12 @@ from web.backend.services.projector_redirect_runtime import get_recent_live_proj
 logger = logging.getLogger(__name__)
 
 
+def get_renderer_service_for_device_view():
+    from web.backend.routers.renderer_router import get_renderer_service
+
+    return get_renderer_service()
+
+
 class DeviceViewService:
     """
     Assemble frontend-facing device read models from persisted state and live runtime state.
@@ -59,12 +65,16 @@ class DeviceViewService:
                 status_info = self.device_status[device.name]
                 device_dict["status"] = status_info.get("status", device.status)
                 device_dict["last_seen"] = status_info.get("last_updated")
+                device_dict["is_playing"] = status_info.get("is_playing", device.is_playing)
                 device_dict["manager_is_playing"] = status_info.get("is_playing", device.is_playing)
                 device_dict["last_seen_at"] = status_info.get("last_seen_at")
                 device_dict["last_lost_at"] = status_info.get("last_lost_at")
                 device_dict["reconnect_count"] = status_info.get("reconnect_count", 0)
                 device_dict["degraded_count"] = status_info.get("degraded_count", 0)
                 device_dict["offline_count"] = status_info.get("offline_count", 0)
+
+        if device.type == "hdmi":
+            device_dict.update(self.get_hdmi_renderer_state(device))
 
         device_dict.update(self.derive_runtime_state(device, device_dict))
         return device_dict
@@ -253,6 +263,52 @@ class DeviceViewService:
             "overlay_cast_direct_config_id": None,
             "overlay_cast_direct_visibility": None,
         }
+
+    def get_hdmi_renderer_state(self, device: DeviceModel) -> Dict[str, Any]:
+        config = device.config if isinstance(device.config, dict) else {}
+        projector_id = config.get("renderer_projector_id") or device.name
+        renderer_status = self._get_renderer_projector_status(projector_id)
+        sender_status = (renderer_status or {}).get("sender_status") or {}
+        connection_state = sender_status.get("connection_state") or config.get("connection_state") or "detached"
+        projection_state = sender_status.get("projection_state") or config.get("projection_state") or "idle"
+        content_url = sender_status.get("content_url")
+        display = sender_status.get("display") or config.get("display")
+        now = time.time()
+
+        is_attached = connection_state == "attached"
+        is_projecting = projection_state == "projecting"
+        state = {
+            "casting_method": "hdmi",
+            "renderer_projector_id": projector_id,
+            "hdmi_target_name": sender_status.get("target") or config.get("target_name") or device.hostname,
+            "hdmi_connection_state": connection_state,
+            "hdmi_projection_state": projection_state,
+            "hdmi_power_state": sender_status.get("power_state") or config.get("power_state") or "unknown",
+            "hdmi_display": display,
+            "status": "connected" if is_attached else "disconnected",
+            "manager_status": "connected" if is_attached else "disconnected",
+            "manager_is_playing": is_projecting,
+            "is_playing": is_projecting,
+            "current_video": content_url if content_url is not None else device.current_video,
+        }
+        if is_attached:
+            state["last_seen"] = now
+            state["last_seen_at"] = now
+            state["last_lost_at"] = None
+        return state
+
+    def _get_renderer_projector_status(self, projector_id: str) -> Optional[Dict[str, Any]]:
+        try:
+            renderer_service = get_renderer_service_for_device_view()
+            active_status = renderer_service.get_renderer_status(projector_id)
+            if active_status:
+                return active_status
+            for projector in renderer_service.list_projectors():
+                if projector.get("id") == projector_id:
+                    return projector.get("runtime_status")
+        except Exception as exc:
+            logger.debug("Unable to read HDMI renderer status for %s: %s", projector_id, exc)
+        return None
 
     def get_direct_overlay_client_state(self, device: DeviceModel) -> Optional[Dict[str, Any]]:
         client_state = None

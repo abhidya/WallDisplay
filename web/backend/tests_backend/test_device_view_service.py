@@ -237,3 +237,83 @@ def test_build_device_dict_uses_live_direct_overlay_client_when_ip_matches(monke
     assert device_dict["overlay_cast_direct_visibility"] == "visible"
     assert device_dict["overlay_cast_direct_url"] == "/backend-static/overlay_window.html?config_id=7&controls=hidden"
     assert device_dict["overlay_cast_session_id"] == "direct-client:10.0.0.80"
+
+
+def test_build_device_dict_includes_hdmi_renderer_state(monkeypatch, device_manager):
+    device = SimpleNamespace(
+        id=5,
+        name="proj-hdmi-local",
+        type="hdmi",
+        hostname=r"\\.\DISPLAY5",
+        action_url=None,
+        friendly_name="HDMI Projector",
+        manufacturer="Local HDMI",
+        location="renderer://projectors/proj-hdmi-local",
+        status="disconnected",
+        is_playing=False,
+        current_video=None,
+        playback_position=None,
+        playback_duration=None,
+        playback_progress=None,
+        config={
+            "casting_method": "hdmi",
+            "managed_by": "renderer_config",
+            "renderer_projector_id": "proj-hdmi-local",
+            "target_name": r"\\.\DISPLAY5",
+        },
+        playback_started_at=None,
+        created_at=None,
+        updated_at=None,
+    )
+
+    renderer_service = SimpleNamespace(
+        get_renderer_status=lambda projector_id: {
+            "projector_id": projector_id,
+            "sender_status": {
+                "target": r"\\.\DISPLAY5",
+                "connection_state": "attached",
+                "projection_state": "projecting",
+                "power_state": "manual_on",
+                "content_url": "http://127.0.0.1:8088/backend-static/video.html",
+                "display": {
+                    "index": 5,
+                    "name": r"\\.\DISPLAY5",
+                    "x": 1920,
+                    "y": 0,
+                    "width": 3840,
+                    "height": 2160,
+                    "is_primary": False,
+                },
+            },
+        },
+        list_projectors=lambda: [],
+    )
+    monkeypatch.setattr(
+        "web.backend.services.device_view_service.get_renderer_service_for_device_view",
+        lambda: renderer_service,
+    )
+    monkeypatch.setattr(
+        "web.backend.services.device_view_service.get_overlay_cast_service",
+        lambda: _FakeCastService([]),
+    )
+    monkeypatch.setattr(
+        "web.backend.services.device_view_service.get_recent_live_projector_client",
+        lambda _client_ip: None,
+    )
+
+    view_service = DeviceViewService(device_manager)
+    device_dict = view_service.build_device_dict(device)
+
+    assert device_dict["casting_method"] == "hdmi"
+    assert device_dict["renderer_projector_id"] == "proj-hdmi-local"
+    assert device_dict["hdmi_target_name"] == r"\\.\DISPLAY5"
+    assert device_dict["hdmi_connection_state"] == "attached"
+    assert device_dict["hdmi_projection_state"] == "projecting"
+    assert device_dict["hdmi_power_state"] == "manual_on"
+    assert device_dict["hdmi_display"]["width"] == 3840
+    assert device_dict["status"] == "connected"
+    assert device_dict["manager_status"] == "connected"
+    assert device_dict["manager_is_playing"] is True
+    assert device_dict["is_playing"] is True
+    assert device_dict["availability"] == "online"
+    assert device_dict["current_video"].endswith("/backend-static/video.html")

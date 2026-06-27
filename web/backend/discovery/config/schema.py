@@ -12,6 +12,7 @@ class CastingMethodEnum(str, Enum):
     """Supported casting methods"""
     DLNA = "dlna"
     AIRPLAY = "airplay"
+    HDMI = "hdmi"
     OVERLAY = "overlay"
     CHROMECAST = "chromecast"
     MIRACAST = "miracast"
@@ -88,6 +89,10 @@ class DeviceConfig(BaseModel):
     overlay_config_id: Optional[int] = None
     widgets: Optional[List[Dict[str, Any]]] = None
 
+    # HDMI specific
+    renderer_projector_id: Optional[str] = None
+    target_name: Optional[str] = None
+
 
 class GlobalConfig(BaseModel):
     """Global configuration settings"""
@@ -103,6 +108,7 @@ class GlobalConfig(BaseModel):
     backends: Dict[str, bool] = Field(default_factory=lambda: {
         "dlna": True,
         "airplay": True,
+        "hdmi": True,
         "overlay": True,
         "chromecast": False,
         "miracast": False
@@ -215,6 +221,7 @@ EXAMPLE_CONFIG = {
         "backends": {
             "dlna": True,
             "airplay": True,
+            "hdmi": True,
             "overlay": True
         }
     },

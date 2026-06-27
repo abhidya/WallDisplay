@@ -3,6 +3,7 @@ from typing import Any, Dict, Optional
 
 from web.backend.core.device import Device
 from web.backend.core.dlna_device import DLNADevice
+from web.backend.core.hdmi_device import HDMIDevice
 from web.backend.core.transcreen_device import TranscreenDevice
 
 logger = logging.getLogger(__name__)
@@ -65,6 +66,8 @@ class DeviceLifecycleService:
                 device = DLNADevice(device_info)
             elif device_type == "transcreen":
                 device = TranscreenDevice(device_info)
+            elif device_type == "hdmi":
+                device = HDMIDevice(device_info)
             else:
                 logger.error("Unknown device type: %s", device_type)
                 return None

@@ -107,7 +107,41 @@ function getAvailabilityColor(availability) {
   }
 }
 
+function getCastingMethod(device) {
+  return device?.casting_method || device?.config?.casting_method || device?.type || '';
+}
+
+function isHdmiDevice(device) {
+  return getCastingMethod(device) === 'hdmi' || device?.type === 'hdmi';
+}
+
+function getHdmiConnectionColor(connectionState) {
+  switch (connectionState) {
+    case 'attached':
+      return 'success';
+    case 'unresponsive':
+      return 'warning';
+    case 'detached':
+    default:
+      return 'default';
+  }
+}
+
 function getProjectionChipProps(device) {
+  if (isHdmiDevice(device)) {
+    const projectionState = device?.hdmi_projection_state || 'idle';
+    switch (projectionState) {
+      case 'projecting':
+        return { label: projectionState, color: 'success' };
+      case 'launching':
+        return { label: projectionState, color: 'info' };
+      case 'stale':
+        return { label: projectionState, color: 'warning' };
+      default:
+        return { label: projectionState, color: 'default' };
+    }
+  }
+
   if (!device?.active_overlay_cast) {
     return { label: 'stopped', color: 'default' };
   }
@@ -123,6 +157,9 @@ function getProjectionChipProps(device) {
 }
 
 function getProjectionSourceLabel(device) {
+  if (isHdmiDevice(device)) {
+    return 'local HDMI';
+  }
   if (device?.overlay_cast_source === 'direct_client') {
     return 'browser client';
   }
@@ -180,6 +217,23 @@ function Devices() {
     }
     return Math.max(maxSeen, Number(seen));
   }, 0);
+  const visibleDevices = devices.filter((device) => {
+    const config = device.config || {};
+    const castingMethod = getCastingMethod(device);
+    if (filters.castingMethod && castingMethod !== filters.castingMethod) {
+      return false;
+    }
+    if (filters.onlineOnly && getAvailabilityLabel(device) !== 'online') {
+      return false;
+    }
+    if (filters.group && (config.group || device.group || '') !== filters.group) {
+      return false;
+    }
+    if (filters.zone && (config.zone || device.zone || '') !== filters.zone) {
+      return false;
+    }
+    return true;
+  });
 
   useEffect(() => {
     fetchDevices();
@@ -231,16 +285,6 @@ function Devices() {
       }
       setError(null); // Clear any previous errors
       const response = await deviceApi.getDevices();
-      // Debug: log playing devices
-      const playingDevices = response.data.devices.filter(d => d.is_playing);
-      if (playingDevices.length > 0) {
-        console.log('Playing devices:', playingDevices.map(d => ({
-          name: d.name,
-          playback_started_at: d.playback_started_at,
-          is_playing: d.is_playing,
-          current_video: d.current_video
-        })));
-      }
       setDevices(response.data.devices);
       if (!isPolling) {
         setLoading(false);
@@ -880,6 +924,7 @@ function Devices() {
                 <MenuItem value="dlna">DLNA</MenuItem>
                 <MenuItem value="airplay">AirPlay</MenuItem>
                 <MenuItem value="transcreen">TranScreen</MenuItem>
+                <MenuItem value="hdmi">HDMI</MenuItem>
                 <MenuItem value="overlay">Overlay</MenuItem>
               </Select>
             </FormControl>
@@ -934,21 +979,37 @@ function Devices() {
             </Typography>
           </Paper>
         </Grid>
+      ) : visibleDevices.length === 0 ? (
+        <Grid item xs={12}>
+          <Paper sx={{ p: 3, textAlign: 'center' }}>
+            <Typography variant="h6" color="textSecondary">
+              No devices match these filters
+            </Typography>
+          </Paper>
+        </Grid>
       ) : (
-        devices.map(device => (
+        visibleDevices.map(device => {
+          const hdmi = isHdmiDevice(device);
+          const managedDevice = device.config?.managed_by === 'renderer_config';
+          const canStop = device.is_playing || (hdmi && ['launching', 'projecting', 'stale'].includes(device.hdmi_projection_state));
+          return (
           <Grid item xs={12} sm={6} md={4} key={device.id}>
             <Card>
               <CardHeader
                 title={device.friendly_name}
                 subheader={`Type: ${device.type}`}
                 action={
-                  <IconButton onClick={() => { setSelectedDevice(device); setOpenDeleteDialog(true); }}>
+                  managedDevice ? (
+                    <Chip label="managed" size="small" variant="outlined" />
+                  ) : (
+                    <IconButton onClick={() => { setSelectedDevice(device); setOpenDeleteDialog(true); }}>
                     <DeleteIcon />
                   </IconButton>
+                  )
                 }
               />
               <CardContent>
-                <Typography variant="body2" color="textSecondary" gutterBottom>
+                <Typography variant="body2" color="textSecondary" gutterBottom component="div">
                   Status: <Chip 
                     label={getAvailabilityLabel(device)}
                     color={getAvailabilityColor(getAvailabilityLabel(device))}
@@ -963,7 +1024,7 @@ function Devices() {
                     />
                   )}
                 </Typography>
-                <Typography variant="body2" color="textSecondary" gutterBottom>
+                <Typography variant="body2" color="textSecondary" gutterBottom component="div">
                   Playing: <Chip 
                     label={device.is_playing ? 'Yes' : 'No'} 
                     color={device.is_playing ? 'success' : 'default'} 
@@ -979,7 +1040,7 @@ function Devices() {
                     />
                   )}
                 </Typography>
-                <Typography variant="body2" color="textSecondary" gutterBottom>
+                <Typography variant="body2" color="textSecondary" gutterBottom component="div">
                   Projection:{' '}
                   <Chip {...getProjectionChipProps(device)} size="small" />
                   {getProjectionSourceLabel(device) && (
@@ -999,6 +1060,22 @@ function Devices() {
                     />
                   )}
                 </Typography>
+                {hdmi && (
+                  <Typography variant="body2" color="textSecondary" gutterBottom component="div">
+                    HDMI:{' '}
+                    <Chip
+                      label={device.hdmi_connection_state || 'unknown'}
+                      color={getHdmiConnectionColor(device.hdmi_connection_state)}
+                      size="small"
+                    />
+                    <Chip
+                      label={`power: ${device.hdmi_power_state || 'unknown'}`}
+                      variant="outlined"
+                      size="small"
+                      sx={{ ml: 1 }}
+                    />
+                  </Typography>
+                )}
                 <Typography variant="body2" color="textSecondary" gutterBottom>
                   {formatLastSeen(device.seconds_since_seen)}
                   {formatDurationSeconds(device.uptime_seconds) && ` • uptime ${formatDurationSeconds(device.uptime_seconds)}`}
@@ -1037,7 +1114,7 @@ function Devices() {
                   </>
                 )}
                 <Typography variant="body2" color="textSecondary">
-                  Hostname: {device.hostname}
+                  {hdmi ? 'Target' : 'Hostname'}: {hdmi ? (device.hdmi_target_name || device.hostname || 'Not selected') : device.hostname}
                 </Typography>
               </CardContent>
               <CardActions>
@@ -1048,9 +1125,10 @@ function Devices() {
                 >
                   Details
                 </Button>
-                {device.is_playing && (
+                {canStop && (
                   <>
-                    <Button 
+                    {!hdmi && (
+                      <Button 
                       size="small" 
                       color="primary"
                       onClick={() => handleDeviceAction(device.id, 'pause')}
@@ -1058,6 +1136,7 @@ function Devices() {
                     >
                       Pause
                     </Button>
+                    )}
                     <Button 
                       size="small" 
                       color="secondary"
@@ -1088,7 +1167,8 @@ function Devices() {
               </CardActions>
             </Card>
           </Grid>
-        ))
+          );
+        })
       )}
 
       {/* Add Device Dialog */}

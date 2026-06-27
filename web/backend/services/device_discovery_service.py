@@ -310,6 +310,8 @@ class DeviceDiscoveryService:
     def sync_device_status_with_discovery(self, discovered_device_names: set) -> None:
         all_devices = self.db.query(DeviceModel).all()
         for device in all_devices:
+            if getattr(device, "type", None) == "hdmi":
+                continue
             if device.name not in discovered_device_names:
                 self.update_device_status(device.name, "disconnected", is_playing=False)
                 continue

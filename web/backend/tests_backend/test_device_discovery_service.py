@@ -75,6 +75,25 @@ def test_sync_device_status_with_discovery_marks_missing_devices_disconnected():
     assert status_updates == [("Missing Device", "disconnected", False)]
 
 
+def test_sync_device_status_with_discovery_ignores_hdmi_devices():
+    devices = [SimpleNamespace(name="proj-hdmi-local", type="hdmi", is_playing=True, current_video="video.mp4")]
+    status_updates = []
+
+    service = DeviceDiscoveryService(
+        db=_FakeDB(devices),
+        runtime=SimpleNamespace(),
+        runtime_sync_service=SimpleNamespace(get_core_device=lambda device_name: None),
+        get_device_by_name=lambda device_name: None,
+        update_device_status=lambda device_name, status, is_playing=False: status_updates.append(
+            (device_name, status, is_playing)
+        ),
+    )
+
+    service.sync_device_status_with_discovery(set())
+
+    assert status_updates == []
+
+
 def test_load_devices_from_config_resolves_relative_video_paths(tmp_path):
     config_path = tmp_path / "devices.json"
     media_dir = tmp_path / "media"

@@ -5,13 +5,14 @@ import traceback
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
-from datetime import datetime
+from datetime import datetime, timezone
 
 from web.backend.models.device import DeviceModel
 from web.backend.schemas.device import DeviceCreate, DeviceUpdate
 from web.backend.core.config_service import ConfigService
 from web.backend.services.device_playback_service import DevicePlaybackService
 from web.backend.services.device_discovery_service import DeviceDiscoveryService
+from web.backend.services.hdmi_device_sync_service import HDMIDeviceSyncService
 from web.backend.services.device_runtime_sync_service import DeviceRuntimeSyncService
 from web.backend.services.device_view_service import DeviceViewService
 from web.backend.services.app_runtime import get_app_runtime
@@ -46,6 +47,10 @@ class DeviceService:
             get_device_by_name=self.get_device_by_name,
             update_device_status=self.update_device_status,
         )
+        self.hdmi_device_sync_service = HDMIDeviceSyncService(
+            db=db,
+            runtime=self.runtime,
+        )
     
     def get_devices(self, skip: int = 0, limit: int = 100) -> List[Dict[str, Any]]:
         """
@@ -58,6 +63,7 @@ class DeviceService:
         Returns:
             List[Dict[str, Any]]: List of devices as dictionaries
         """
+        self.sync_local_hdmi_devices()
         devices = self.db.query(DeviceModel).offset(skip).limit(limit).all()
         result = [self._device_to_dict(device) for device in devices]
         return result
@@ -313,7 +319,16 @@ class DeviceService:
         )
     
     def discover_devices(self, timeout: float = 5.0) -> List[Dict[str, Any]]:
-        return self.device_discovery_service.discover_devices(timeout=timeout)
+        discovered = self.device_discovery_service.discover_devices(timeout=timeout)
+        self.sync_local_hdmi_devices()
+        return discovered
+
+    def sync_local_hdmi_devices(self) -> List[DeviceModel]:
+        try:
+            return self.hdmi_device_sync_service.sync_configured_projectors()
+        except Exception as exc:
+            logger.error("Error synchronizing HDMI devices: %s", exc)
+            return []
     
     def load_devices_from_config(self, config_file: str) -> List[Dict[str, Any]]:
         return self.device_discovery_service.load_devices_from_config(config_file)

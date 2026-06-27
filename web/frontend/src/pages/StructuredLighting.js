@@ -21,7 +21,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import { structuredLightingApi, discoveryV2Api, rendererApi } from '../services/api';
+import { structuredLightingApi, discoveryV2Api } from '../services/api';
 
 function SummaryCard({ title, value, subtitle }) {
   return (
@@ -171,24 +171,29 @@ function StructuredLighting() {
     const load = async () => {
       try {
         setLoading(true);
-        const [capabilitiesRes, statusRes, projectorRes, rendererProjectorsRes] = await Promise.all([
+        const [capabilitiesRes, statusRes] = await Promise.all([
           structuredLightingApi.getCapabilities(),
           structuredLightingApi.getStatus(),
+        ]);
+        await Promise.allSettled([
+          discoveryV2Api.triggerDiscovery('dlna', 5),
+          discoveryV2Api.triggerDiscovery('hdmi', 2),
+        ]);
+        const [dlnaProjectorRes, hdmiProjectorRes] = await Promise.all([
           discoveryV2Api.getDevices({ casting_method: 'dlna' }),
-          rendererApi.listProjectors(),
+          discoveryV2Api.getDevices({ casting_method: 'hdmi' }),
         ]);
         if (!active) {
           return;
         }
         setCapabilities(capabilitiesRes.data);
         setStatus(statusRes.data);
-        const dlnaProjectors = Array.isArray(projectorRes.data) ? projectorRes.data : [];
-        const hdmiProjectors = (rendererProjectorsRes.data?.data?.projectors || [])
-          .filter((projector) => projector.sender === 'hdmi')
+        const dlnaProjectors = Array.isArray(dlnaProjectorRes.data) ? dlnaProjectorRes.data : [];
+        const hdmiProjectors = (Array.isArray(hdmiProjectorRes.data) ? hdmiProjectorRes.data : [])
           .map((projector) => ({
             ...projector,
-            device_id: projector.id,
-            friendly_name: `${projector.name || projector.id} (HDMI)`,
+            device_id: projector.device_id || projector.id,
+            friendly_name: `${projector.friendly_name || projector.name || projector.id} (HDMI)`,
             casting_method: 'hdmi',
           }));
         const nextProjectors = [...dlnaProjectors, ...hdmiProjectors];

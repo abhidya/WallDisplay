@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 import threading
 
 from .base import DiscoveryBackend, Device, CastingMethod, CastingSession, DeviceCapability
-from .backends import DLNADiscoveryBackend, AirPlayDiscoveryBackend, OverlayDiscoveryBackend
+from .backends import DLNADiscoveryBackend, AirPlayDiscoveryBackend, HDMIDiscoveryBackend, OverlayDiscoveryBackend
 from .config import ConfigurationManager
 
 logger = logging.getLogger(__name__)
@@ -539,6 +539,7 @@ class DiscoveryManager:
         known_backends = {
             "dlna": DLNADiscoveryBackend,
             "airplay": AirPlayDiscoveryBackend,
+            "hdmi": HDMIDiscoveryBackend,
             "overlay": OverlayDiscoveryBackend,
         }
 

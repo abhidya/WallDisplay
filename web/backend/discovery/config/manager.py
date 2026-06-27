@@ -300,7 +300,7 @@ class ConfigurationManager:
                 
         # Additional validation
         if "casting_method" in config:
-            valid_methods = ["dlna", "airplay", "overlay", "chromecast", "miracast"]
+            valid_methods = ["dlna", "airplay", "hdmi", "overlay", "chromecast", "miracast"]
             if config["casting_method"] not in valid_methods:
                 logger.error(f"Invalid casting method: {config['casting_method']}")
                 return False
@@ -327,7 +327,16 @@ class ConfigurationManager:
         }
         
         # Copy additional fields
-        for key in ["schedule", "group", "zone", "loop", "airplay_mode", "airplay_url"]:
+        for key in [
+            "schedule",
+            "group",
+            "zone",
+            "loop",
+            "airplay_mode",
+            "airplay_url",
+            "renderer_projector_id",
+            "target_name",
+        ]:
             if key in config:
                 normalized[key] = config[key]
                 

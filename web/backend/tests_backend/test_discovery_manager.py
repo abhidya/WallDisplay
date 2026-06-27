@@ -59,16 +59,19 @@ def test_discovery_manager_finds_session_by_device_id():
 
 def test_discovery_manager_register_enabled_backends_from_config(monkeypatch):
     manager = DiscoveryManager()
-    config_manager = SimpleNamespace(get_global_config=lambda: {"backends": {"dlna": True, "airplay": False, "overlay": True}})
+    config_manager = SimpleNamespace(
+        get_global_config=lambda: {"backends": {"dlna": True, "airplay": False, "hdmi": True, "overlay": True}}
+    )
 
     monkeypatch.setattr("web.backend.discovery.discovery_manager.ConfigurationManager.get_instance", lambda: config_manager)
     monkeypatch.setattr("web.backend.discovery.discovery_manager.DLNADiscoveryBackend", lambda: _FakeBackend("DLNA"))
     monkeypatch.setattr("web.backend.discovery.discovery_manager.AirPlayDiscoveryBackend", lambda: _FakeBackend("AirPlay"))
+    monkeypatch.setattr("web.backend.discovery.discovery_manager.HDMIDiscoveryBackend", lambda: _FakeBackend("HDMI"))
     monkeypatch.setattr("web.backend.discovery.discovery_manager.OverlayDiscoveryBackend", lambda: _FakeBackend("Overlay"))
 
     asyncio.run(manager._register_enabled_backends())
 
-    assert set(manager.backends.keys()) == {"DLNA", "Overlay"}
+    assert set(manager.backends.keys()) == {"DLNA", "HDMI", "Overlay"}
     assert manager.is_running is False
 
 
@@ -77,7 +80,7 @@ def test_discovery_manager_register_enabled_backends_sync_wrapper(monkeypatch):
     calls = []
     monkeypatch.setattr(
         "web.backend.discovery.discovery_manager.ConfigurationManager.get_instance",
-        lambda: SimpleNamespace(get_global_config=lambda: {"backends": {"dlna": True}}),
+        lambda: SimpleNamespace(get_global_config=lambda: {"backends": {"dlna": True, "airplay": False, "hdmi": False, "overlay": False}}),
     )
     monkeypatch.setattr(
         "web.backend.discovery.discovery_manager.DLNADiscoveryBackend",

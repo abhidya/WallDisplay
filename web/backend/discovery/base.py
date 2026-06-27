@@ -17,6 +17,7 @@ class CastingMethod(Enum):
     """Supported casting methods"""
     DLNA = "dlna"
     AIRPLAY = "airplay"
+    HDMI = "hdmi"
     OVERLAY = "overlay"
     CHROMECAST = "chromecast"
     MIRACAST = "miracast"

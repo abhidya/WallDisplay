@@ -7,7 +7,7 @@ class DeviceBase(BaseModel):
     Base schema for a device
     """
     name: str = Field(..., description="Device name")
-    type: str = Field(..., description="Device type (dlna or transcreen)")
+    type: str = Field(..., description="Device type (dlna, transcreen, hdmi, airplay, or overlay)")
     hostname: str = Field(..., description="Device hostname or IP address")
     friendly_name: str = Field(..., description="User-friendly device name")
 
@@ -25,7 +25,7 @@ class DeviceUpdate(BaseModel):
     Schema for updating a device
     """
     name: Optional[str] = Field(None, description="Device name")
-    type: Optional[str] = Field(None, description="Device type (dlna or transcreen)")
+    type: Optional[str] = Field(None, description="Device type (dlna, transcreen, hdmi, airplay, or overlay)")
     hostname: Optional[str] = Field(None, description="Device hostname or IP address")
     friendly_name: Optional[str] = Field(None, description="User-friendly device name")
     action_url: Optional[str] = Field(None, description="Action URL for DLNA devices")
@@ -77,6 +77,13 @@ class DeviceResponse(DeviceBase):
     overlay_cast_ffmpeg_bitrate_kbps: Optional[float] = Field(None, description="Current FFmpeg bitrate for overlay cast")
     overlay_cast_active_clients: Optional[int] = Field(None, description="Number of active relay clients for overlay cast")
     overlay_cast_session_id: Optional[str] = Field(None, description="Active overlay cast session ID")
+    casting_method: Optional[str] = Field(None, description="Unified casting method")
+    renderer_projector_id: Optional[str] = Field(None, description="Renderer projector ID for HDMI devices")
+    hdmi_target_name: Optional[str] = Field(None, description="Selected HDMI display target")
+    hdmi_connection_state: Optional[str] = Field(None, description="HDMI connection state")
+    hdmi_projection_state: Optional[str] = Field(None, description="HDMI projection state")
+    hdmi_power_state: Optional[str] = Field(None, description="Manually observed HDMI power state")
+    hdmi_display: Optional[Dict[str, Any]] = Field(None, description="Attached HDMI display metadata")
     
     model_config = {"from_attributes": True}
 
