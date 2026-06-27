@@ -1,6 +1,6 @@
 # Renderer Service
 
-The Renderer Service is a component of the nano-dlna Dashboard that provides a unified interface for managing scene projections on different types of displays.
+The Renderer Service is a component of the WallDisplay Dashboard that provides a unified interface for managing scene projections on different types of displays.
 
 ## Features
 

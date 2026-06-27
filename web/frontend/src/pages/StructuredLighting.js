@@ -40,7 +40,40 @@ function getProjectorOptionId(projector) {
 }
 
 function getProjectorOptionLabel(projector) {
-  return projector?.name || projector?.friendly_name || getProjectorOptionId(projector);
+  return projector?.friendly_name || projector?.name || getProjectorOptionId(projector);
+}
+
+function getProjectorCastingMethod(projector) {
+  return projector?.casting_method || projector?.metadata?.casting_method || projector?.type || '';
+}
+
+function getProjectorResolution(projector) {
+  const resolution = projector?.resolution;
+  if (Array.isArray(resolution) && resolution.length >= 2) {
+    return {
+      width: Number(resolution[0]),
+      height: Number(resolution[1]),
+    };
+  }
+  const display = projector?.metadata?.display || projector?.display;
+  if (display?.width && display?.height) {
+    return {
+      width: Number(display.width),
+      height: Number(display.height),
+    };
+  }
+  return null;
+}
+
+function presentationModeForProjector(projector, fallback) {
+  const castingMethod = getProjectorCastingMethod(projector);
+  if (castingMethod === 'hdmi') {
+    return 'hdmi_step';
+  }
+  if (castingMethod === 'dlna') {
+    return 'dlna_step';
+  }
+  return fallback;
 }
 
 function parseGridValues(value, parser) {
@@ -105,6 +138,7 @@ function StructuredLighting() {
     projector_width: 1280,
     projector_height: 720,
     presentation_mode: 'dlna_step',
+    pattern_set: 'gray_code',
     hold_ms: 1200,
     notes: '',
   });
@@ -203,8 +237,14 @@ function StructuredLighting() {
           if (!currentProjectorId) {
             return current;
           }
-          const stillExists = nextProjectors.some((projector) => getProjectorOptionId(projector) === currentProjectorId);
-          return stillExists ? current : { ...current, projector_device_id: '' };
+          const selectedProjector = nextProjectors.find((projector) => getProjectorOptionId(projector) === currentProjectorId);
+          if (!selectedProjector) {
+            return { ...current, projector_device_id: '' };
+          }
+          return {
+            ...current,
+            presentation_mode: presentationModeForProjector(selectedProjector, current.presentation_mode),
+          };
         });
         await refreshSessions();
         setError('');
@@ -295,6 +335,8 @@ function StructuredLighting() {
   }, [runtime?.session?.decode?.metrics?.tuning_params]);
 
   const selectedSession = sessions.find((session) => session.session_id === selectedSessionId) || null;
+  const selectedProjector = projectors.find((projector) => getProjectorOptionId(projector) === form.projector_device_id) || null;
+  const selectedProjectorMethod = getProjectorCastingMethod(selectedProjector);
   const selectedSessionStatus = runtime?.session?.status || selectedSession?.status || '';
   const decodeStatus = runtime?.session?.decode?.status || selectedSession?.decode?.status || '';
   const tuningSearchStatus = tuningSearch?.status || 'not_started';
@@ -382,10 +424,27 @@ function StructuredLighting() {
       setMessage('');
     } catch (err) {
       console.error('Failed to create structured lighting session', err);
-      setError('Failed to create structured lighting session.');
+      setError(formatApiError(err, 'Failed to create structured lighting session.'));
     } finally {
       setActionLoading(false);
     }
+  };
+
+  const handleProjectorChange = (event) => {
+    const projectorId = event.target.value || '';
+    const projector = projectors.find((item) => getProjectorOptionId(item) === projectorId) || null;
+    const resolution = getProjectorResolution(projector);
+    setForm((current) => ({
+      ...current,
+      projector_device_id: projectorId,
+      presentation_mode: presentationModeForProjector(projector, current.presentation_mode),
+      ...(resolution?.width && resolution?.height
+        ? {
+            projector_width: resolution.width,
+            projector_height: resolution.height,
+          }
+        : {}),
+    }));
   };
 
   const handleStartWorker = async () => {
@@ -467,7 +526,7 @@ function StructuredLighting() {
       setMessage('');
     } catch (err) {
       console.error('Failed to start structured lighting session', err);
-      setError('Failed to start structured lighting session.');
+      setError(formatApiError(err, 'Failed to start structured lighting session.'));
     } finally {
       setActionLoading(false);
     }
@@ -519,7 +578,7 @@ function StructuredLighting() {
       setMessage(tuningParams ? 'Decoded using selected tuning candidate.' : 'Decoded using the current brightness and threshold settings.');
     } catch (err) {
       console.error('Failed to decode structured lighting session', err);
-      setError('Failed to decode structured lighting session.');
+      setError(formatApiError(err, 'Failed to decode structured lighting session.'));
     } finally {
       setActionLoading(false);
     }
@@ -843,7 +902,7 @@ function StructuredLighting() {
       <Box>
         <Typography variant="h4">Structured Lighting</Typography>
         <Typography variant="body2" color="text.secondary">
-          Graycode calibration planning for the DLNA step-by-step capture workflow.
+          Graycode calibration planning for projector step-by-step capture.
         </Typography>
       </Box>
 
@@ -1001,7 +1060,7 @@ function StructuredLighting() {
                 select
                 label="Projector"
                 value={form.projector_device_id || ''}
-                onChange={(e) => setForm({ ...form, projector_device_id: e.target.value || '' })}
+                onChange={handleProjectorChange}
                 fullWidth
               >
                 <MenuItem value="">Unassigned</MenuItem>
@@ -1011,6 +1070,17 @@ function StructuredLighting() {
                   </MenuItem>
                 ))}
               </TextField>
+              {selectedProjector ? (
+                <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap' }}>
+                  <Chip label={`target ${selectedProjectorMethod || 'unknown'}`} size="small" />
+                  <Chip
+                    label={form.presentation_mode === 'hdmi_step' ? 'mode HDMI Step' : 'mode DLNA Step'}
+                    size="small"
+                    color={form.presentation_mode === 'hdmi_step' ? 'primary' : 'default'}
+                    variant="outlined"
+                  />
+                </Stack>
+              ) : null}
               <Grid container spacing={2}>
                 <Grid item xs={6}>
                   <TextField
@@ -1059,8 +1129,33 @@ function StructuredLighting() {
                 fullWidth
               >
                 {(capabilities?.presentation_modes || []).map((mode) => (
-                  <MenuItem key={mode.id} value={mode.id}>
+                  <MenuItem
+                    key={mode.id}
+                    value={mode.id}
+                    disabled={
+                      (selectedProjectorMethod === 'hdmi' && mode.id !== 'hdmi_step')
+                      || (selectedProjectorMethod === 'dlna' && mode.id !== 'dlna_step')
+                    }
+                  >
                     {mode.label}
+                  </MenuItem>
+                ))}
+              </TextField>
+              <TextField
+                select
+                label="Pattern Set"
+                value={form.pattern_set}
+                onChange={(e) => setForm({ ...form, pattern_set: e.target.value })}
+                fullWidth
+              >
+                {(capabilities?.pattern_sets || [
+                  { id: 'gray_code', label: 'Gray Code' },
+                  { id: 'calibration', label: 'Calibration' },
+                  { id: 'grid', label: 'Grid' },
+                  { id: 'checkerboard', label: 'Checkerboard' },
+                ]).map((patternSet) => (
+                  <MenuItem key={patternSet.id} value={patternSet.id}>
+                    {patternSet.label}
                   </MenuItem>
                 ))}
               </TextField>
@@ -1249,7 +1344,7 @@ function StructuredLighting() {
                         <Chip label={session.status} size="small" />
                       </Stack>
                       <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                        {session.pattern_frame_count} frames • hold {session.hold_ms} ms
+                        {(session.pattern_set || 'gray_code').replace('_', ' ')} • {session.pattern_frame_count} frames • hold {session.hold_ms} ms
                       </Typography>
                       {session.decode ? (
                         <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
@@ -1300,6 +1395,7 @@ function StructuredLighting() {
                         </Button>
                         <Button
                           size="small"
+                          disabled={(session.pattern_set || 'gray_code') !== 'gray_code'}
                           onClick={(event) => {
                             event.stopPropagation();
                             handleDecodeSession(session.session_id);
@@ -1333,10 +1429,11 @@ function StructuredLighting() {
             <Typography variant="h6" gutterBottom>Capture Plan</Typography>
             <Divider sx={{ mb: 1.5 }} />
             {!plan ? (
-              <Typography variant="body2" color="text.secondary">Select a session to inspect its graycode plan.</Typography>
+              <Typography variant="body2" color="text.secondary">Select a session to inspect its capture plan.</Typography>
             ) : (
               <Stack spacing={2}>
                 <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                  <Chip label={`${(plan.summary.pattern_set || 'gray_code').replace('_', ' ')} pattern set`} size="small" />
                   <Chip label={`${plan.summary.total_frames} total frames`} size="small" />
                   <Chip label={`${plan.summary.graycode_frames} graycode frames`} size="small" />
                   <Chip label={`${plan.summary.reference_frames} reference frames`} size="small" />

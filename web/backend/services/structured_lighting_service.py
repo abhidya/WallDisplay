@@ -13,13 +13,15 @@ from io import BytesIO
 from typing import Dict, List, Optional
 from urllib.parse import urlencode, urlparse
 
-from PIL import Image
+from PIL import Image, ImageDraw
 from web.backend.core.streaming_service import get_streaming_service
 from discovery.base import CastingMethod, Device, DeviceCapability
 from web.backend.services.app_runtime import get_app_runtime
 
 
 WORKER_TIMEOUT_SECONDS = 15
+SUPPORTED_PRESENTATION_MODES = {"dlna_step", "hdmi_step"}
+SUPPORTED_PATTERN_SETS = {"gray_code", "calibration", "grid", "checkerboard"}
 
 
 def _utcnow() -> datetime:
@@ -235,6 +237,7 @@ class StructuredLightingService:
             session = self._sessions.get(session_id)
             if not session:
                 return None
+            self._validate_session_projector(session)
             self._clear_derived_outputs(session_id)
             self._clear_capture_dir(session_id)
             session["status"] = "waiting_for_worker" if not self._worker_is_connected() else "ready"
@@ -925,11 +928,21 @@ class StructuredLightingService:
         presentation_mode: str,
         hold_ms: int,
         notes: Optional[str] = None,
+        pattern_set: str = "gray_code",
     ) -> Dict:
         now = _utcnow_iso()
+        if presentation_mode not in SUPPORTED_PRESENTATION_MODES:
+            raise ValueError(f"Unsupported structured-lighting presentation mode: {presentation_mode}")
+        if pattern_set not in SUPPORTED_PATTERN_SETS:
+            raise ValueError(f"Unsupported structured-lighting pattern set: {pattern_set}")
         bit_planes_x = max(1, math.ceil(math.log2(max(2, projector_width))))
         bit_planes_y = max(1, math.ceil(math.log2(max(2, projector_height))))
-        pattern_frame_count = self._graycode_pattern_count(projector_width, projector_height)
+        pattern_frame_count = len(self._build_capture_steps({
+            "projector_width": projector_width,
+            "projector_height": projector_height,
+            "hold_ms": hold_ms,
+            "pattern_set": pattern_set,
+        }))
         session = {
             "session_id": str(uuid.uuid4()),
             "name": name,
@@ -938,6 +951,7 @@ class StructuredLightingService:
             "projector_width": projector_width,
             "projector_height": projector_height,
             "presentation_mode": presentation_mode,
+            "pattern_set": pattern_set,
             "hold_ms": hold_ms,
             "notes": notes or "",
             "status": "draft",
@@ -966,50 +980,81 @@ class StructuredLightingService:
         if not session:
             return None
 
-        graycode_patterns = self._generate_graycode_patterns(
-            session["projector_width"],
-            session["projector_height"],
-        )
-
-        steps = [
-            {
-                "index": 0,
-                "kind": "reference_white",
-                "label": "Reference White",
-                "hold_ms": session["hold_ms"],
-                "capture_required": True,
-            },
-            {
-                "index": 1,
-                "kind": "reference_black",
-                "label": "Reference Black",
-                "hold_ms": session["hold_ms"],
-                "capture_required": True,
-            },
-        ]
-
-        for pattern_index, _pattern in enumerate(graycode_patterns):
-            steps.append(
-                {
-                    "index": pattern_index + 2,
-                    "kind": "graycode",
-                    "pattern_index": pattern_index,
-                    "label": f"Graycode Pattern {pattern_index:03d}",
-                    "hold_ms": session["hold_ms"],
-                    "capture_required": True,
-                }
-            )
+        steps = self._build_capture_steps(session)
 
         return {
             "session": session,
             "summary": {
-                "reference_frames": 2,
-                "graycode_frames": len(steps) - 2,
+                "pattern_set": session.get("pattern_set", "gray_code"),
+                "reference_frames": len([step for step in steps if step["kind"].startswith("reference_")]),
+                "graycode_frames": len([step for step in steps if step["kind"] == "graycode"]),
                 "total_frames": len(steps),
                 "estimated_capture_seconds": round((len(steps) * session["hold_ms"]) / 1000, 1),
             },
             "steps": steps,
         }
+
+    def _build_capture_steps(self, session: Dict) -> List[Dict]:
+        pattern_set = session.get("pattern_set", "gray_code")
+        hold_ms = session["hold_ms"]
+        if pattern_set == "gray_code":
+            steps = [
+                {
+                    "index": 0,
+                    "kind": "reference_white",
+                    "label": "Reference White",
+                    "hold_ms": hold_ms,
+                    "capture_required": True,
+                },
+                {
+                    "index": 1,
+                    "kind": "reference_black",
+                    "label": "Reference Black",
+                    "hold_ms": hold_ms,
+                    "capture_required": True,
+                },
+            ]
+            graycode_patterns = self._generate_graycode_patterns(
+                session["projector_width"],
+                session["projector_height"],
+            )
+            for pattern_index, _pattern in enumerate(graycode_patterns):
+                steps.append(
+                    {
+                        "index": pattern_index + 2,
+                        "kind": "graycode",
+                        "pattern_index": pattern_index,
+                        "label": f"Graycode Pattern {pattern_index:03d}",
+                        "hold_ms": hold_ms,
+                        "capture_required": True,
+                    }
+                )
+            return steps
+
+        steps_by_pattern_set = {
+            "calibration": [
+                ("reference_white", "Reference White"),
+                ("reference_black", "Reference Black"),
+                ("grid", "Alignment Grid"),
+                ("checkerboard", "Checkerboard"),
+            ],
+            "grid": [
+                ("grid", "Alignment Grid"),
+            ],
+            "checkerboard": [
+                ("checkerboard", "Checkerboard"),
+            ],
+        }
+        return [
+            {
+                "index": index,
+                "kind": kind,
+                "label": label,
+                "hold_ms": hold_ms,
+                "capture_required": True,
+            }
+            for index, (kind, label) in enumerate(steps_by_pattern_set.get(pattern_set, []))
+        ]
 
     def render_step_image(self, session_id: str, step_index: int) -> Optional[bytes]:
         plan = self.get_capture_plan(session_id)
@@ -1031,6 +1076,10 @@ class StructuredLightingService:
         elif step["kind"] == "graycode":
             patterns = self._generate_graycode_patterns(width, height)
             image = Image.fromarray(patterns[step["pattern_index"]], mode="L")
+        elif step["kind"] == "grid":
+            image = self._render_grid_pattern(width, height)
+        elif step["kind"] == "checkerboard":
+            image = self._render_checkerboard_pattern(width, height)
         else:
             return None
 
@@ -1101,6 +1150,8 @@ class StructuredLightingService:
         session = self.get_session(session_id)
         if not session:
             raise RuntimeError("Structured lighting session not found")
+        if session.get("pattern_set", "gray_code") != "gray_code":
+            raise RuntimeError("Decode requires a gray_code pattern set.")
         tuning = self._normalize_tuning_params(tuning_params)
         self._set_decode_progress(session_id, phase="loading", label="Loading captures", percent=5)
         cam2proj_u, white_path, black_path = self._decode_raw_cam2proj(session_id, sample_step, tuning)
@@ -1241,6 +1292,36 @@ class StructuredLightingService:
             patterns.append(np.tile(col, (1, projector_width)))
             patterns.append(np.tile((255 - col).astype(np.uint8), (1, projector_width)))
         return patterns
+
+    def _render_grid_pattern(self, width: int, height: int) -> Image.Image:
+        image = Image.new("L", (width, height), color=0)
+        draw = ImageDraw.Draw(image)
+        spacing = max(32, min(width, height) // 12)
+        line_width = max(1, min(width, height) // 360)
+        for x in range(0, width, spacing):
+            draw.line([(x, 0), (x, height)], fill=255, width=line_width)
+        for y in range(0, height, spacing):
+            draw.line([(0, y), (width, y)], fill=255, width=line_width)
+        draw.rectangle([(0, 0), (width - 1, height - 1)], outline=255, width=max(line_width, 2))
+        return image
+
+    def _render_checkerboard_pattern(self, width: int, height: int) -> Image.Image:
+        image = Image.new("L", (width, height), color=0)
+        draw = ImageDraw.Draw(image)
+        cols = 12
+        rows = max(2, round(cols * height / max(width, 1)))
+        cell_w = max(1, math.ceil(width / cols))
+        cell_h = max(1, math.ceil(height / rows))
+        for row in range(rows):
+            for col in range(cols):
+                if (row + col) % 2 == 0:
+                    left = col * cell_w
+                    top = row * cell_h
+                    draw.rectangle(
+                        [(left, top), (min(width - 1, left + cell_w - 1), min(height - 1, top + cell_h - 1))],
+                        fill=255,
+                    )
+        return image
 
     def _graycode_pattern_count(self, projector_width: int, projector_height: int) -> int:
         return 2 + len(self._generate_graycode_patterns(projector_width, projector_height))
@@ -2173,6 +2254,26 @@ class StructuredLightingService:
         from web.backend.routers.renderer_router import get_renderer_service
 
         return get_renderer_service()
+
+    def _validate_session_projector(self, session: Dict) -> None:
+        presentation_mode = session.get("presentation_mode")
+        projector_id = session.get("projector_device_id")
+        if presentation_mode not in SUPPORTED_PRESENTATION_MODES:
+            raise RuntimeError(f"Unsupported structured-lighting presentation mode: {presentation_mode}")
+        if not projector_id:
+            raise RuntimeError("Structured-lighting session requires a selected projector device.")
+
+        projector_config = None
+        try:
+            projector_config = self._get_renderer_service().get_projector_config(projector_id)
+        except Exception:
+            projector_config = None
+
+        projector_sender = projector_config.get("sender") if projector_config else None
+        if presentation_mode == "hdmi_step" and projector_sender != "hdmi":
+            raise RuntimeError("HDMI presentation mode requires a configured HDMI projector.")
+        if presentation_mode == "dlna_step" and projector_sender == "hdmi":
+            raise RuntimeError("DLNA presentation mode cannot target an HDMI projector. Use HDMI Step.")
 
     def _server_base_url(self) -> str:
         return os.environ.get("NANODLNA_SERVER_BASE_URL") or "http://localhost:8000"

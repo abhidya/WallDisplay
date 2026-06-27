@@ -1118,7 +1118,7 @@ function Settings() {
             <ListItem>
               <ListItemText
                 primary="Version"
-                secondary="nano-dlna Dashboard v1.0.0"
+                          secondary="WallDisplay Dashboard v1.0.0"
               />
             </ListItem>
             <ListItem>

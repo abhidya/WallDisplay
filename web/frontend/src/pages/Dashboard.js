@@ -110,7 +110,7 @@ function Dashboard() {
           Dashboard
         </Typography>
         <Typography variant="body1" color="textSecondary" paragraph>
-          Welcome to the nano-dlna Dashboard. Manage your DLNA and Transcreen projectors from here.
+          Welcome to the WallDisplay dashboard. Manage HDMI, DLNA, and Transcreen projectors from here.
         </Typography>
       </Grid>
 

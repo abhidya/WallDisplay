@@ -128,7 +128,7 @@ function Layout({ children }) {
       <Toolbar sx={{ justifyContent: drawerCollapsed ? 'center' : 'space-between' }}>
         {!drawerCollapsed && (
           <Typography variant="h6" noWrap component="div">
-            nano-dlna
+            WallDisplay
           </Typography>
         )}
         <IconButton onClick={handleDrawerCollapse} sx={{ ml: drawerCollapsed ? 0 : 'auto' }}>

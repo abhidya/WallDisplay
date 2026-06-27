@@ -14,6 +14,10 @@ except ImportError as exc:  # pragma: no cover - runtime dependency
     raise SystemExit("OpenCV is required for structured-lighting capture worker.") from exc
 
 
+REMOTE_PRESENTATION_MODES = {"dlna_step", "hdmi_step"}
+LOCAL_WINDOW_PRESENTATION_MODES = {"local_window_step"}
+
+
 def get_hostname() -> str:
     try:
         return socket.gethostname()
@@ -201,9 +205,12 @@ def capture_step(
             f"Captured stale frame after {max_attempts} attempts (mean delta {last_delta:.2f} < {min_frame_delta:.2f})."
         )
 
-    if presentation_mode == "dlna_step":
+    if presentation_mode in REMOTE_PRESENTATION_MODES:
         time.sleep(max(settle_seconds, 0.0))
         return capture_with_retry()
+
+    if presentation_mode not in LOCAL_WINDOW_PRESENTATION_MODES:
+        raise RuntimeError(f"Unsupported structured-lighting presentation mode: {presentation_mode}")
 
     if not projector_window or not pattern_image_path:
         raise RuntimeError("Local projector presentation requires a projector window and pattern image.")
@@ -293,7 +300,7 @@ def main():
                 presentation_mode = step.get("presentation_mode", "dlna_step")
                 pattern_path = None
                 projector_window = None
-                if presentation_mode != "dlna_step":
+                if presentation_mode in LOCAL_WINDOW_PRESENTATION_MODES:
                     create_projector_window(
                         args.projector_window,
                         args.projector_screen_x,

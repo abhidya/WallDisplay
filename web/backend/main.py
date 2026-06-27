@@ -231,8 +231,8 @@ async def lifespan(_app: FastAPI):
 
 # Create FastAPI app
 app = FastAPI(
-    title="nano-dlna Dashboard",
-    description="Web dashboard for managing DLNA and Transcreen projectors",
+    title="WallDisplay Dashboard",
+    description="Web dashboard for managing HDMI, DLNA, and Transcreen projectors",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -390,7 +390,7 @@ def _is_pytest_run() -> bool:
 async def startup_event():
     global device_manager, streaming_service, streaming_registry, renderer_service, migration_adapter, video_preprocessing_service, mask_preprocessing_service
     
-    logger.info("Starting nano-dlna Dashboard API")
+    logger.info("Starting WallDisplay Dashboard API")
     service_diagnostics.start_run()
     service_diagnostics.install_asyncio_exception_handler(asyncio.get_running_loop())
     await service_diagnostics.start_heartbeat()
@@ -527,7 +527,7 @@ async def startup_event():
 
 async def shutdown_event():
     global migration_adapter, video_preprocessing_service, mask_preprocessing_service
-    logger.info("Shutting down nano-dlna Dashboard API")
+    logger.info("Shutting down WallDisplay Dashboard API")
     service_diagnostics.mark_clean_shutdown("shutdown_event")
     await service_diagnostics.stop_heartbeat()
     

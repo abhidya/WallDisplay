@@ -30,6 +30,35 @@ def test_structured_lighting_session_persists_metadata(tmp_path):
     assert session["review"]["status"] == "pending"
 
 
+def test_calibration_pattern_set_builds_grid_and_checkerboard_steps(tmp_path):
+    service = StructuredLightingService()
+    service._upload_root = str(tmp_path)
+
+    session = service.create_session(
+        name="Alignment Check",
+        projector_device_id="dlna-projector",
+        camera_index=1,
+        projector_width=320,
+        projector_height=180,
+        presentation_mode="dlna_step",
+        pattern_set="calibration",
+        hold_ms=500,
+        notes="test run",
+    )
+    plan = service.get_capture_plan(session["session_id"])
+
+    assert session["pattern_frame_count"] == 4
+    assert plan["summary"]["pattern_set"] == "calibration"
+    assert [step["kind"] for step in plan["steps"]] == [
+        "reference_white",
+        "reference_black",
+        "grid",
+        "checkerboard",
+    ]
+    assert service.render_step_image(session["session_id"], 2) is not None
+    assert service.render_step_image(session["session_id"], 3) is not None
+
+
 def test_hdmi_step_presentation_uses_structured_lighting_step_url(monkeypatch, tmp_path):
     service = StructuredLightingService()
     service._upload_root = str(tmp_path)
@@ -38,6 +67,11 @@ def test_hdmi_step_presentation_uses_structured_lighting_step_url(monkeypatch, t
     calls = []
 
     class FakeRendererService:
+        def get_projector_config(self, projector_id):
+            if projector_id == "proj-hdmi-local":
+                return {"sender": "hdmi"}
+            return None
+
         def start_projector_url(self, projector_id, content_url, content_mode, options):
             calls.append({
                 "projector_id": projector_id,
@@ -86,6 +120,38 @@ def test_hdmi_step_presentation_uses_structured_lighting_step_url(monkeypatch, t
             },
         }
     ]
+
+
+def test_dlna_step_rejects_configured_hdmi_projector(monkeypatch, tmp_path):
+    service = StructuredLightingService()
+    service._upload_root = str(tmp_path)
+    service._sessions = {}
+
+    class FakeRendererService:
+        def get_projector_config(self, projector_id):
+            if projector_id == "proj-hdmi-local":
+                return {"sender": "hdmi"}
+            return None
+
+    monkeypatch.setattr(service, "_get_renderer_service", lambda: FakeRendererService(), raising=False)
+
+    session = service.create_session(
+        name="Wrong Mode",
+        projector_device_id="proj-hdmi-local",
+        camera_index=1,
+        projector_width=1280,
+        projector_height=720,
+        presentation_mode="dlna_step",
+        hold_ms=1200,
+        notes="test run",
+    )
+
+    try:
+        service.start_session(session["session_id"])
+    except RuntimeError as exc:
+        assert "Use HDMI Step" in str(exc)
+    else:
+        raise AssertionError("Expected HDMI projector in DLNA mode to be rejected")
 
 
 def test_record_capture_uses_notebook_reference_filenames(tmp_path):

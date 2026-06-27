@@ -12,11 +12,12 @@ router = APIRouter(prefix="/api/structured-lighting", tags=["structured-lighting
 
 class StructuredLightingSessionCreate(BaseModel):
     name: str = Field(..., description="User-facing calibration session name")
-    projector_device_id: Optional[str] = Field(None, description="Target DLNA projector device id")
+    projector_device_id: Optional[str] = Field(None, description="Target projector device id")
     camera_index: int = Field(0, ge=0, description="Host-side camera index")
     projector_width: int = Field(1280, ge=2, description="Projector width in pixels")
     projector_height: int = Field(720, ge=2, description="Projector height in pixels")
-    presentation_mode: str = Field("dlna_step", description="Pattern presentation mode")
+    presentation_mode: str = Field("dlna_step", pattern="^(dlna_step|hdmi_step)$", description="Pattern presentation mode")
+    pattern_set: str = Field("gray_code", pattern="^(gray_code|calibration|grid|checkerboard)$", description="Structured-light pattern set")
     hold_ms: int = Field(1200, ge=100, le=10000, description="How long each pattern is held before capture")
     notes: Optional[str] = Field(None, description="Optional operator notes")
 
@@ -78,9 +79,31 @@ def get_capabilities() -> Dict:
                 "description": "Present each session-owned pattern on a configured local HDMI projector.",
             }
         ],
+        "pattern_sets": [
+            {
+                "id": "gray_code",
+                "label": "Gray Code",
+                "description": "White/black references followed by OpenCV-compatible Gray-code patterns.",
+            },
+            {
+                "id": "calibration",
+                "label": "Calibration",
+                "description": "Reference, grid, and checkerboard frames for focus and alignment checks.",
+            },
+            {
+                "id": "grid",
+                "label": "Grid",
+                "description": "Full-frame alignment grid.",
+            },
+            {
+                "id": "checkerboard",
+                "label": "Checkerboard",
+                "description": "Full-frame checkerboard pattern.",
+            },
+        ],
         "workflow": [
             "Create calibration session",
-            "Generate graycode capture plan",
+            "Generate pattern capture plan",
             "Present each pattern to projector",
             "Capture camera frame after each projected pattern settles",
             "Decode captured set into projector-space masks",
@@ -103,7 +126,10 @@ def list_sessions() -> List[Dict]:
 @router.post("/sessions")
 def create_session(payload: StructuredLightingSessionCreate) -> Dict:
     service = get_structured_lighting_service()
-    return service.create_session(**payload.model_dump())
+    try:
+        return service.create_session(**payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/sessions/{session_id}")
@@ -118,7 +144,10 @@ def get_session(session_id: str) -> Dict:
 @router.post("/sessions/{session_id}/start")
 def start_session(session_id: str) -> Dict:
     service = get_structured_lighting_service()
-    session = service.start_session(session_id)
+    try:
+        session = service.start_session(session_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not session:
         raise HTTPException(status_code=404, detail="Structured lighting session not found")
     return session
@@ -419,7 +448,10 @@ def confirm_worker_ready(worker_id: str) -> Dict:
 @router.get("/worker/{worker_id}/next-step")
 def claim_next_step(worker_id: str) -> Dict:
     service = get_structured_lighting_service()
-    step = service.claim_next_step(worker_id)
+    try:
+        step = service.claim_next_step(worker_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"step": step}
 
 
