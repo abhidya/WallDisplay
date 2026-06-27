@@ -71,4 +71,11 @@ $logFile = Join-Path $Logs "backend-console.log"
 "LAN URL: http://$lanIp`:$Port/app" | Out-File -FilePath $logFile -Append -Encoding utf8
 
 $command = "chcp 65001 > nul && `"$Python`" `"$runPy`" --host 0.0.0.0 --port $Port >> `"$logFile`" 2>&1"
-& cmd.exe /c $command
+$launcher = Start-Process `
+    -FilePath "cmd.exe" `
+    -ArgumentList @("/d", "/c", $command) `
+    -WorkingDirectory $Backend `
+    -WindowStyle Hidden `
+    -PassThru
+
+"Started backend launcher PID: $($launcher.Id)" | Out-File -FilePath $logFile -Append -Encoding utf8
