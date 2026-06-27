@@ -25,6 +25,14 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { deviceApi, videoApi } from '../services/api';
 
+function getCastingMethod(device) {
+  return device?.casting_method || device?.config?.casting_method || device?.type || '';
+}
+
+function isHdmiDevice(device) {
+  return getCastingMethod(device) === 'hdmi' || device?.type === 'hdmi';
+}
+
 function Dashboard() {
   const navigate = useNavigate();
   const [devices, setDevices] = useState([]);
@@ -136,14 +144,16 @@ function Dashboard() {
                     <CardActions>
                       {device.is_playing ? (
                         <>
-                          <Button 
-                            size="small" 
-                            color="primary"
-                            aria-label={`Pause ${device.friendly_name || device.name || 'device'}`}
-                            onClick={() => handleDeviceAction(device.id, 'pause')}
-                          >
-                            <PauseIcon fontSize="small" />
-                          </Button>
+                          {!isHdmiDevice(device) && (
+                            <Button 
+                              size="small" 
+                              color="primary"
+                              aria-label={`Pause ${device.friendly_name || device.name || 'device'}`}
+                              onClick={() => handleDeviceAction(device.id, 'pause')}
+                            >
+                              <PauseIcon fontSize="small" />
+                            </Button>
+                          )}
                           <Button 
                             size="small" 
                             color="secondary"

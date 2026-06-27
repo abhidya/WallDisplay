@@ -98,7 +98,41 @@ function getAvailabilityColor(availability) {
   }
 }
 
+function getCastingMethod(device) {
+  return device?.casting_method || device?.config?.casting_method || device?.type || '';
+}
+
+function isHdmiDevice(device) {
+  return getCastingMethod(device) === 'hdmi' || device?.type === 'hdmi';
+}
+
+function getHdmiConnectionColor(connectionState) {
+  switch (connectionState) {
+    case 'attached':
+      return 'success';
+    case 'unresponsive':
+      return 'warning';
+    case 'detached':
+    default:
+      return 'default';
+  }
+}
+
 function getProjectionChipProps(device) {
+  if (isHdmiDevice(device)) {
+    const projectionState = device?.hdmi_projection_state || 'idle';
+    switch (projectionState) {
+      case 'projecting':
+        return { label: projectionState, color: 'success' };
+      case 'launching':
+        return { label: projectionState, color: 'info' };
+      case 'stale':
+        return { label: projectionState, color: 'warning' };
+      default:
+        return { label: projectionState, color: 'default' };
+    }
+  }
+
   if (!device?.active_overlay_cast) {
     return { label: 'stopped', color: 'default' };
   }
@@ -114,6 +148,9 @@ function getProjectionChipProps(device) {
 }
 
 function getProjectionSourceLabel(device) {
+  if (isHdmiDevice(device)) {
+    return 'Local HDMI';
+  }
   if (device?.overlay_cast_source === 'direct_client') {
     return 'Direct browser client';
   }
@@ -319,6 +356,8 @@ function DeviceDetail() {
     );
   }
 
+  const hdmi = isHdmiDevice(device);
+
   return (
     <Grid container spacing={3}>
       {/* Header */}
@@ -348,6 +387,7 @@ function DeviceDetail() {
               </ListItemIcon>
               <ListItemText 
                 primary="Status" 
+                secondaryTypographyProps={{ component: 'div' }}
                 secondary={
                   <Chip 
                     label={getAvailabilityLabel(device)}
@@ -363,6 +403,7 @@ function DeviceDetail() {
               </ListItemIcon>
               <ListItemText 
                 primary="Playing" 
+                secondaryTypographyProps={{ component: 'div' }}
                 secondary={
                   <Chip 
                     label={device.is_playing ? 'Yes' : 'No'} 
@@ -412,6 +453,48 @@ function DeviceDetail() {
               </ListItemIcon>
               <ListItemText primary="Hostname" secondary={device.hostname} />
             </ListItem>
+            {hdmi && (
+              <>
+                <ListItem>
+                  <ListItemIcon>
+                    <ComputerIcon />
+                  </ListItemIcon>
+                  <ListItemText primary="HDMI Target" secondary={device.hdmi_target_name || device.hostname || 'Not selected'} />
+                </ListItem>
+                <ListItem>
+                  <ListItemIcon>
+                    <InfoIcon />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary="HDMI Connection"
+                    secondaryTypographyProps={{ component: 'div' }}
+                    secondary={
+                      <Chip
+                        label={device.hdmi_connection_state || 'unknown'}
+                        color={getHdmiConnectionColor(device.hdmi_connection_state)}
+                        size="small"
+                      />
+                    }
+                  />
+                </ListItem>
+                <ListItem>
+                  <ListItemIcon>
+                    <InfoIcon />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary="HDMI Power"
+                    secondaryTypographyProps={{ component: 'div' }}
+                    secondary={
+                      <Chip
+                        label={device.hdmi_power_state || 'unknown'}
+                        size="small"
+                        variant="outlined"
+                      />
+                    }
+                  />
+                </ListItem>
+              </>
+            )}
             {device.action_url && (
               <ListItem>
                 <ListItemIcon>
@@ -481,12 +564,21 @@ function DeviceDetail() {
                 <MovieIcon />
               </ListItemIcon>
               <ListItemText
-                primary="Overlay Projection"
+                primary={hdmi ? 'HDMI Projection' : 'Overlay Projection'}
+                secondaryTypographyProps={{ component: 'div' }}
                 secondary={
                   <Chip {...getProjectionChipProps(device)} size="small" />
                 }
               />
             </ListItem>
+            {hdmi && (
+              <ListItem>
+                <ListItemIcon>
+                  <InfoIcon />
+                </ListItemIcon>
+                <ListItemText primary="Projection Source" secondary={getProjectionSourceLabel(device)} />
+              </ListItem>
+            )}
             {device.active_overlay_cast && (
               <>
                 <ListItem>
@@ -612,15 +704,17 @@ function DeviceDetail() {
             </Button>
             {device.is_playing && (
               <>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  startIcon={<PauseIcon />}
-                  onClick={() => handleDeviceAction('pause')}
-                  fullWidth
-                >
-                  Pause
-                </Button>
+                {!hdmi && (
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    startIcon={<PauseIcon />}
+                    onClick={() => handleDeviceAction('pause')}
+                    fullWidth
+                  >
+                    Pause
+                  </Button>
+                )}
                 <Button
                   variant="contained"
                   color="secondary"

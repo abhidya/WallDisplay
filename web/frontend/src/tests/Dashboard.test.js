@@ -92,6 +92,34 @@ describe('Dashboard user workflow', () => {
     await waitFor(() => expect(deviceApi.getDevices).toHaveBeenCalledTimes(2));
   });
 
+  test('does not show pause for playing HDMI devices', async () => {
+    deviceApi.getDevices.mockResolvedValue({
+      data: {
+        devices: [
+          {
+            id: 6,
+            friendly_name: 'HDMI Projector',
+            name: 'proj-hdmi-local',
+            status: 'connected',
+            type: 'hdmi',
+            casting_method: 'hdmi',
+            is_playing: true,
+          },
+        ],
+      },
+    });
+    videoApi.getVideos.mockResolvedValue({ data: { videos: [] } });
+
+    renderDashboard();
+    await screen.findByText('HDMI Projector');
+
+    expect(screen.queryByRole('button', { name: /pause hdmi projector/i })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /stop hdmi projector/i }));
+    await waitFor(() => expect(deviceApi.stopVideo).toHaveBeenCalledWith(6));
+    await waitFor(() => expect(deviceApi.getDevices).toHaveBeenCalledTimes(2));
+  });
+
   test('shows a retry state when the dashboard cannot load', async () => {
     const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
     deviceApi.getDevices.mockRejectedValueOnce(new Error('Network error'));

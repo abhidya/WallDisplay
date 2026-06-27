@@ -141,9 +141,12 @@ async def cast_content(
         if not session:
             raise HTTPException(status_code=400, detail="Failed to start casting")
             
+        session_id = getattr(session, "session_id", getattr(session, "id", None))
+        session_device = getattr(session, "device", None)
+        resolved_device_id = getattr(session, "device_id", getattr(session_device, "id", device_id))
         return {
-            "session_id": session.session_id,
-            "device_id": session.device_id,
+            "session_id": session_id,
+            "device_id": resolved_device_id,
             "status": "started"
         }
         
