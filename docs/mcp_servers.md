@@ -75,3 +75,30 @@ Example all-walls scene:
 ```
 
 This creates one mapping scene per wall, full-canvas masks, fish background group(s), pattern fill layers, rank metadata, and scene-control preset.
+
+## Structured Lighting MCP
+
+Run:
+
+```bash
+python run_structured_lighting_mcp_server.py
+```
+
+Config example: `mcp-structured-lighting-config.json`.
+
+Key tools:
+
+- `structured_lighting_status(base_url="http://127.0.0.1:8088")`
+- `hdmi_preflight(projector_id="proj-hdmi-local", camera_index=0)`
+- `start_hdmi_worker(projector_id, camera_index, force_restart=false)`
+- `confirm_hdmi_worker_ready(worker_id=null)`
+- `create_hdmi_calibration_session(name, projector_id, camera_index)`
+- `start_capture_session(session_id)`
+- `decode_calibration_session(session_id, sample_step=1)`
+- `accept_calibration_session(session_id, reviewed_by, notes)`
+- `publish_calibration_mapping_scene(session_id, scene_name, animation_id="neural_noise")`
+- `project_mapping_scene_to_hdmi(scene_id, projector_id="proj-hdmi-local")`
+- `stop_hdmi_projection(projector_id="proj-hdmi-local")`
+- `run_hdmi_structured_lighting_pipeline(...)`
+
+The high-level pipeline tool advances only until the next verifiable state. If the worker is waiting for camera framing confirmation, it returns `awaiting_operator_confirmation` unless `confirm_operator_ready=true` is explicitly supplied.

@@ -1,7 +1,7 @@
 import os
 from typing import List
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
@@ -24,9 +24,23 @@ from web.backend.schemas.scene_control_preset import (
 from web.backend.services.scene_control_preset_service import SceneControlPresetService
 from web.backend.services.overlay_event_bus import notify_overlay_config_update
 from web.backend.models.overlay import OverlayConfig
+from web.backend.services.scene_projection_service import SceneProjectionService
+from pydantic import BaseModel
 
 
 router = APIRouter(prefix="/api/mappings", tags=["mappings"])
+
+
+class MappingSceneProjectionRequest(BaseModel):
+    target_type: str
+    target_id: str
+    overlay_base_url: str | None = None
+    controls_hidden: bool = True
+
+
+class MappingSceneProjectionStopRequest(BaseModel):
+    target_type: str
+    target_id: str
 
 
 def _notify_mapping_scene_dependents(db: Session, scene_id: int, reason: str) -> None:
@@ -133,6 +147,40 @@ def get_mapping_scene(scene_id: int, db: Session = Depends(get_db)):
     if not scene:
         raise HTTPException(status_code=404, detail="Scene not found")
     return scene
+
+
+@router.post("/scenes/{scene_id}/project")
+async def project_mapping_scene(
+    scene_id: int,
+    payload: MappingSceneProjectionRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    try:
+        return await SceneProjectionService(db).launch(
+            scene_id,
+            target_type=payload.target_type,
+            target_id=payload.target_id,
+            overlay_base_url=payload.overlay_base_url or str(request.base_url).rstrip("/"),
+            controls_hidden=payload.controls_hidden,
+        )
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 404 if detail == "Mapping scene not found" else 400
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/scenes/project/stop")
+async def stop_mapping_scene_projection(
+    payload: MappingSceneProjectionStopRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        return await SceneProjectionService(db).stop(target_type=payload.target_type, target_id=payload.target_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/scenes/{scene_id}/export")

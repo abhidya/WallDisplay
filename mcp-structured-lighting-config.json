@@ -1,0 +1,27 @@
+{
+  "name": "nano-dlna-structured-lighting",
+  "description": "MCP server for HDMI structured-lighting calibration, Mapping scene publishing, and HDMI projection launch",
+  "version": "1.0.0",
+  "server": {
+    "command": "python",
+    "args": ["D:/manny/Documents/WallDisplay/run_structured_lighting_mcp_server.py"],
+    "env": {
+      "PYTHONPATH": "D:/manny/Documents/WallDisplay;D:/manny/Documents/WallDisplay/web/backend",
+      "WALLDISPLAY_BASE_URL": "http://127.0.0.1:8088"
+    }
+  },
+  "tools": [
+    "structured_lighting_status",
+    "hdmi_preflight",
+    "start_hdmi_worker",
+    "confirm_hdmi_worker_ready",
+    "create_hdmi_calibration_session",
+    "start_capture_session",
+    "decode_calibration_session",
+    "accept_calibration_session",
+    "publish_calibration_mapping_scene",
+    "project_mapping_scene_to_hdmi",
+    "stop_hdmi_projection",
+    "run_hdmi_structured_lighting_pipeline"
+  ]
+}

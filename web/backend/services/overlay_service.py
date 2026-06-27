@@ -29,6 +29,7 @@ from web.backend.schemas.overlay import (
     OverlayConfigResponse,
     OverlayStreamResponse,
     OverlayWindowInitResponse,
+    VideoTransform,
 )
 from web.backend.core.streaming_service import get_streaming_service
 from web.backend.services.overlay_playback_sync_service import get_overlay_playback_sync_service
@@ -244,9 +245,9 @@ class OverlayService:
             background_type=config_data.background_type,
             video_id=config_data.video_id,
             mapping_scene_id=config_data.mapping_scene_id,
-            video_transform=config_data.video_transform.dict(),
-            widgets=[w.dict() for w in config_data.widgets],
-            api_configs=config_data.api_configs.dict()
+            video_transform=config_data.video_transform.model_dump(),
+            widgets=[w.model_dump() for w in config_data.widgets],
+            api_configs=config_data.api_configs.model_dump(),
         )
         
         self.db.add(new_config)
@@ -292,13 +293,13 @@ class OverlayService:
             config.mapping_scene_id = mapping_scene_id
 
         if config_update.video_transform is not None:
-            config.video_transform = config_update.video_transform.dict()
+            config.video_transform = config_update.video_transform.model_dump()
         
         if config_update.widgets is not None:
-            config.widgets = [w.dict() for w in config_update.widgets]
+            config.widgets = [w.model_dump() for w in config_update.widgets]
         
         if config_update.api_configs is not None:
-            config.api_configs = config_update.api_configs.dict()
+            config.api_configs = config_update.api_configs.model_dump()
         
         config.updated_at = datetime.utcnow()
         
@@ -339,6 +340,36 @@ class OverlayService:
         self.db.refresh(duplicate)
         
         return self._to_response(duplicate)
+
+    def get_or_create_mapping_config(self, scene_id: int, name: Optional[str] = None) -> OverlayConfigResponse:
+        """Return the overlay config that presents a mapping scene, creating one when absent."""
+        scene = self.db.query(MappingScene).filter(MappingScene.id == int(scene_id)).first()
+        if not scene:
+            raise ValueError("Mapping scene not found")
+
+        config = (
+            self.db.query(OverlayConfig)
+            .filter(
+                OverlayConfig.background_type == "mapping",
+                OverlayConfig.mapping_scene_id == scene.id,
+            )
+            .order_by(OverlayConfig.updated_at.desc())
+            .first()
+        )
+        if config:
+            return self._to_response(config)
+
+        return self.create_config(
+            OverlayConfigCreate(
+                name=name or f"Scene Control: {scene.name}",
+                background_type="mapping",
+                video_id=None,
+                mapping_scene_id=scene.id,
+                video_transform=VideoTransform(),
+                widgets=[],
+                api_configs=ApiConfigs(),
+            )
+        )
 
     def create_stream(self, video_id: Optional[int], config_id: Optional[int] = None) -> OverlayStreamResponse:
         """Create a background payload for overlay projection"""

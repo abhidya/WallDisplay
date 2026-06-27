@@ -1,6 +1,6 @@
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel, Field
 
@@ -49,6 +49,8 @@ class StructuredLightingWorkerStartRequest(BaseModel):
     flush_count: int = Field(30, ge=0, le=120)
     pump_ms: int = Field(400, ge=1, le=2000)
     poll_seconds: float = Field(1.0, ge=0.1, le=10.0)
+    min_frame_delta: float = Field(2.0, ge=0.0, le=255.0)
+    max_capture_attempts: int = Field(4, ge=1, le=20)
 
 
 class StructuredLightingDecodeRequest(BaseModel):
@@ -70,6 +72,8 @@ class StructuredLightingReviewUpdate(BaseModel):
 
 class StructuredLightingPublishRequest(BaseModel):
     scene_name: Optional[str] = Field(None, description="Optional name for the new mapping scene")
+    animation_id: Optional[str] = Field("neural_noise", description="Animation id to bind to generated mapping groups")
+    create_animation_groups: bool = Field(True, description="Create one animation-bound mapping group per published mask")
 
 
 @router.get("/capabilities")
@@ -122,6 +126,22 @@ def get_capabilities() -> Dict:
 @router.get("/status")
 def get_status() -> Dict:
     return get_structured_lighting_session_module().get_status()
+
+
+@router.get("/hdmi-preflight")
+def get_hdmi_preflight(
+    projector_id: Optional[str] = Query(None, description="Configured HDMI projector id"),
+    camera_index: int = Query(0, ge=0, description="Host-side camera index"),
+    base_url: Optional[str] = Query(None, description="Backend URL the worker should call"),
+) -> Dict:
+    try:
+        return get_structured_lighting_service().get_hdmi_preflight(
+            projector_id=projector_id,
+            camera_index=camera_index,
+            base_url=base_url,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/sessions")
@@ -327,7 +347,12 @@ def export_session(session_id: str):
 @router.post("/sessions/{session_id}/publish-mapping-scene")
 def publish_mapping_scene(session_id: str, payload: StructuredLightingPublishRequest) -> Dict:
     try:
-        result = get_structured_lighting_session_module().publish_mapping_scene(session_id, scene_name=payload.scene_name)
+        result = get_structured_lighting_session_module().publish_mapping_scene(
+            session_id,
+            scene_name=payload.scene_name,
+            animation_id=payload.animation_id,
+            create_animation_groups=payload.create_animation_groups,
+        )
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not result:

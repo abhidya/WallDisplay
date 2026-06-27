@@ -6,9 +6,11 @@ import { discoveryV2Api, structuredLightingApi } from '../services/api';
 
 jest.mock('../services/api', () => ({
   structuredLightingApi: {
-    getCapabilities: jest.fn(),
-    getStatus: jest.fn(),
-    listSessions: jest.fn(),
+      getCapabilities: jest.fn(),
+      getStatus: jest.fn(),
+      getHdmiPreflight: jest.fn(),
+      startWorker: jest.fn(),
+      listSessions: jest.fn(),
     createSession: jest.fn(),
     getCapturePlan: jest.fn(),
     getRuntime: jest.fn(),
@@ -49,7 +51,7 @@ describe('StructuredLighting HDMI workflow', () => {
     });
     structuredLightingApi.getStatus.mockResolvedValue({
       data: {
-        worker: { state: 'stopped', message: 'Worker stopped.' },
+        worker: { state: 'stopped', process_state: 'stopped', message: 'Worker stopped.' },
         summary: {
           total_sessions: 0,
           active_sessions: 0,
@@ -58,6 +60,38 @@ describe('StructuredLighting HDMI workflow', () => {
         },
       },
     });
+    structuredLightingApi.getHdmiPreflight.mockResolvedValue({
+      data: {
+        status: 'ready',
+        checks: [
+          { id: 'display', label: 'HDMI display target', status: 'ok', detail: 'DISPLAY5 3840x2160 at 3840,0' },
+        ],
+        recommended_worker: {
+          base_url: 'http://localhost',
+          camera_index: 1,
+          projector_screen_x: 3840,
+          projector_screen_y: 0,
+          projector_width: 3840,
+          projector_height: 2160,
+          settle_seconds: 1,
+          flush_count: 30,
+          pump_ms: 400,
+          poll_seconds: 1,
+          min_frame_delta: 0,
+          max_capture_attempts: 1,
+        },
+        recommended_session: {
+          projector_device_id: 'proj-hdmi-local',
+          presentation_mode: 'hdmi_step',
+          camera_index: 1,
+          projector_width: 3840,
+          projector_height: 2160,
+          pattern_set: 'gray_code',
+          hold_ms: 1200,
+        },
+      },
+    });
+    structuredLightingApi.startWorker.mockResolvedValue({ data: {} });
     structuredLightingApi.listSessions.mockResolvedValue({ data: [] });
     structuredLightingApi.createSession.mockResolvedValue({ data: {} });
     structuredLightingApi.getCapturePlan.mockResolvedValue({
@@ -114,6 +148,10 @@ describe('StructuredLighting HDMI workflow', () => {
     const projectorSelect = await screen.findByLabelText('Projector');
     fireEvent.mouseDown(projectorSelect);
     fireEvent.click(await screen.findByRole('option', { name: /local hdmi projector/i }));
+    await waitFor(() => expect(structuredLightingApi.getHdmiPreflight).toHaveBeenCalledWith(
+      expect.objectContaining({ projector_id: 'proj-hdmi-local' })
+    ));
+    await screen.findByText(/HDMI preflight: ready/i);
 
     fireEvent.click(screen.getByRole('button', { name: /create session/i }));
 
@@ -123,12 +161,37 @@ describe('StructuredLighting HDMI workflow', () => {
           projector_device_id: 'proj-hdmi-local',
           presentation_mode: 'hdmi_step',
           pattern_set: 'gray_code',
-          projector_width: 1920,
-          projector_height: 1080,
+          projector_width: 3840,
+          projector_height: 2160,
         })
       )
     );
     await waitFor(() => expect(structuredLightingApi.listSessions).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(structuredLightingApi.getStatus).toHaveBeenCalledTimes(2));
+  });
+
+  test('HDMI preflight defaults are used to start the worker', async () => {
+    renderStructuredLighting();
+
+    const projectorSelect = await screen.findByLabelText('Projector');
+    fireEvent.mouseDown(projectorSelect);
+    fireEvent.click(await screen.findByRole('option', { name: /local hdmi projector/i }));
+
+    await screen.findByText(/HDMI preflight: ready/i);
+    fireEvent.click(screen.getByRole('button', { name: /start worker/i }));
+
+    await waitFor(() =>
+      expect(structuredLightingApi.startWorker).toHaveBeenCalledWith(
+        expect.objectContaining({
+          base_url: window.location.origin,
+          projector_screen_x: 3840,
+          projector_screen_y: 0,
+          projector_width: 3840,
+          projector_height: 2160,
+          min_frame_delta: 0,
+          max_capture_attempts: 1,
+        })
+      )
+    );
   });
 });

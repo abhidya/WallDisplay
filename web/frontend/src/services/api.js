@@ -143,6 +143,7 @@ const overlayApi = {
 const structuredLightingApi = {
   getCapabilities: () => api.get('/structured-lighting/capabilities'),
   getStatus: () => api.get('/structured-lighting/status'),
+  getHdmiPreflight: (params = {}) => api.get('/structured-lighting/hdmi-preflight', { params }),
   startWorker: (payload) => api.post('/structured-lighting/worker/start', payload),
   stopWorker: () => api.post('/structured-lighting/worker/stop'),
   confirmWorkerReady: (workerId) => api.post(`/structured-lighting/worker/${workerId}/confirm-ready`),
@@ -223,6 +224,8 @@ const mappingsApi = {
   createSceneControlPreset: (data) => api.post('/mappings/scene-control-presets', data),
   updateSceneControlPreset: (id, data) => api.put(`/mappings/scene-control-presets/${id}`, data),
   deleteSceneControlPreset: (id) => api.delete(`/mappings/scene-control-presets/${id}`),
+  projectScene: (id, payload) => api.post(`/mappings/scenes/${id}/project`, payload),
+  stopSceneProjection: (payload) => api.post('/mappings/scenes/project/stop', payload),
   importScene: (formData) => api.post('/mappings/scenes/import', formData, {
     headers: {
       'Content-Type': 'multipart/form-data',

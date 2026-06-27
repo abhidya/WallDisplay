@@ -21,6 +21,8 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
+import PageHeader from '../components/PageHeader';
+import StatusPanel from '../components/StatusPanel';
 import { structuredLightingApi, discoveryV2Api } from '../services/api';
 
 function SummaryCard({ title, value, subtitle }) {
@@ -121,6 +123,7 @@ function StructuredLighting() {
   const [previewTuning, setPreviewTuning] = useState(null);
   const [tuningSearch, setTuningSearch] = useState(null);
   const [projectors, setProjectors] = useState([]);
+  const [hdmiPreflight, setHdmiPreflight] = useState(null);
   const [selectedSessionId, setSelectedSessionId] = useState('');
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
@@ -143,12 +146,14 @@ function StructuredLighting() {
     notes: '',
   });
   const [workerForm, setWorkerForm] = useState({
-    base_url: 'http://localhost:8000',
+    base_url: window.location.origin,
     camera_index: 1,
     projector_screen_x: 1280,
     projector_screen_y: 0,
     projector_width: 1280,
     projector_height: 720,
+    min_frame_delta: 0,
+    max_capture_attempts: 1,
   });
   const [decodeControls, setDecodeControls] = useState({
     edge_mode: 'morph_gradient',
@@ -430,10 +435,41 @@ function StructuredLighting() {
     }
   };
 
-  const handleProjectorChange = (event) => {
+  const applyHdmiPreflight = async (projectorId, cameraIndex = form.camera_index) => {
+    if (!projectorId) {
+      setHdmiPreflight(null);
+      return null;
+    }
+    const response = await structuredLightingApi.getHdmiPreflight({
+      projector_id: projectorId,
+      camera_index: Number(cameraIndex) || 0,
+      base_url: window.location.origin,
+    });
+    const preflight = response.data;
+    setHdmiPreflight(preflight);
+    if (preflight?.recommended_worker) {
+      setWorkerForm((current) => ({
+        ...current,
+        ...preflight.recommended_worker,
+        base_url: window.location.origin,
+      }));
+    }
+    if (preflight?.recommended_session) {
+      setForm((current) => ({
+        ...current,
+        ...preflight.recommended_session,
+        projector_device_id: projectorId,
+        camera_index: Number(cameraIndex) || 0,
+      }));
+    }
+    return preflight;
+  };
+
+  const handleProjectorChange = async (event) => {
     const projectorId = event.target.value || '';
     const projector = projectors.find((item) => getProjectorOptionId(item) === projectorId) || null;
     const resolution = getProjectorResolution(projector);
+    const presentationMode = presentationModeForProjector(projector, form.presentation_mode);
     setForm((current) => ({
       ...current,
       projector_device_id: projectorId,
@@ -445,6 +481,40 @@ function StructuredLighting() {
           }
         : {}),
     }));
+    if (presentationMode === 'hdmi_step') {
+      try {
+        const preflight = await applyHdmiPreflight(projectorId, form.camera_index);
+        setError('');
+        if (preflight?.status === 'ready') {
+          setMessage('Loaded HDMI projector geometry into worker defaults.');
+        }
+      } catch (err) {
+        console.error('Failed to load HDMI preflight', err);
+        setHdmiPreflight(null);
+        setError(formatApiError(err, 'Failed to load HDMI projector defaults.'));
+      }
+    } else {
+      setHdmiPreflight(null);
+    }
+  };
+
+  const handleUseHdmiDefaults = async () => {
+    try {
+      setActionLoading(true);
+      const projectorId = form.projector_device_id;
+      const preflight = await applyHdmiPreflight(projectorId, form.camera_index);
+      setError('');
+      setMessage(
+        preflight?.status === 'ready'
+          ? 'Loaded HDMI projector geometry into worker defaults.'
+          : 'Loaded HDMI defaults with warnings. Review preflight checks before capture.'
+      );
+    } catch (err) {
+      console.error('Failed to apply HDMI defaults', err);
+      setError(formatApiError(err, 'Failed to apply HDMI defaults.'));
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   const handleStartWorker = async () => {
@@ -457,13 +527,15 @@ function StructuredLighting() {
         projector_screen_y: Number(workerForm.projector_screen_y),
         projector_width: Number(workerForm.projector_width),
         projector_height: Number(workerForm.projector_height),
+        min_frame_delta: Number(workerForm.min_frame_delta),
+        max_capture_attempts: Number(workerForm.max_capture_attempts),
       });
       await refreshStatus();
       setError('');
       setMessage('');
     } catch (err) {
       console.error('Failed to start structured lighting worker', err);
-      setError('Failed to start structured lighting worker.');
+      setError(formatApiError(err, 'Failed to start structured lighting worker.'));
     } finally {
       setActionLoading(false);
     }
@@ -891,20 +963,27 @@ function StructuredLighting() {
 
   if (loading) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '50vh' }}>
-        <CircularProgress />
-      </Box>
+      <StatusPanel
+        icon={<CircularProgress size={24} />}
+        title="Loading Structured Lighting"
+        description="Preparing calibration capabilities, worker status, and projector discovery."
+      />
     );
   }
 
   return (
     <Stack spacing={3}>
-      <Box>
-        <Typography variant="h4">Structured Lighting</Typography>
-        <Typography variant="body2" color="text.secondary">
-          Graycode calibration planning for projector step-by-step capture.
-        </Typography>
-      </Box>
+      <PageHeader
+        title="Structured Lighting"
+        subtitle="Graycode calibration planning for projector step-by-step capture."
+        meta={(
+          <>
+            <Chip label={`worker ${status?.worker?.state || 'unknown'}`} color={status?.worker?.state === 'ready' ? 'success' : 'default'} />
+            <Chip label={`${status?.summary?.total_sessions || 0} sessions`} variant="outlined" />
+            <Chip label={`${projectors.length} projectors`} variant="outlined" />
+          </>
+        )}
+      />
 
       {error ? <Alert severity="error">{error}</Alert> : null}
       {message ? <Alert severity="success">{message}</Alert> : null}
@@ -948,6 +1027,20 @@ function StructuredLighting() {
               <Typography variant="body2" color="text.secondary">
                 Start the local host worker, verify the native camera preview, then confirm framing before capture.
               </Typography>
+              {hdmiPreflight ? (
+                <Alert severity={hdmiPreflight.status === 'ready' ? 'success' : 'warning'}>
+                  <Stack spacing={0.5}>
+                    <Typography variant="body2">
+                      HDMI preflight: {hdmiPreflight.status === 'ready' ? 'ready' : 'needs attention'}
+                    </Typography>
+                    {(hdmiPreflight.checks || []).map((check) => (
+                      <Typography key={check.id} variant="caption" color="text.secondary">
+                        {check.label}: {check.detail}
+                      </Typography>
+                    ))}
+                  </Stack>
+                </Alert>
+              ) : null}
               <Grid container spacing={2}>
                 <Grid item xs={12} md={3}>
                   <TextField
@@ -1002,6 +1095,24 @@ function StructuredLighting() {
                     fullWidth
                   />
                 </Grid>
+                <Grid item xs={6} md={2}>
+                  <TextField
+                    label="Frame Delta"
+                    type="number"
+                    value={workerForm.min_frame_delta}
+                    onChange={(e) => setWorkerForm({ ...workerForm, min_frame_delta: e.target.value })}
+                    fullWidth
+                  />
+                </Grid>
+                <Grid item xs={6} md={2}>
+                  <TextField
+                    label="Attempts"
+                    type="number"
+                    value={workerForm.max_capture_attempts}
+                    onChange={(e) => setWorkerForm({ ...workerForm, max_capture_attempts: e.target.value })}
+                    fullWidth
+                  />
+                </Grid>
               </Grid>
               <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
                 <Chip label={`worker ${workerState}`} size="small" />
@@ -1029,6 +1140,13 @@ function StructuredLighting() {
                   disabled={actionLoading}
                 >
                   Use Session Camera
+                </Button>
+                <Button
+                  variant="outlined"
+                  onClick={handleUseHdmiDefaults}
+                  disabled={actionLoading || form.presentation_mode !== 'hdmi_step' || !form.projector_device_id}
+                >
+                  Use HDMI Defaults
                 </Button>
                 <Button variant="contained" color="success" onClick={handleConfirmWorkerReady} disabled={actionLoading || !workerCanConfirm}>
                   Confirm Camera Ready

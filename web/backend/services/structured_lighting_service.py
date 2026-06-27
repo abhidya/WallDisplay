@@ -93,6 +93,139 @@ class StructuredLightingService:
             },
         }
 
+    def get_hdmi_preflight(
+        self,
+        projector_id: Optional[str] = None,
+        camera_index: int = 0,
+        base_url: Optional[str] = None,
+    ) -> Dict:
+        """Return operator/agent-ready defaults for an HDMI structured-lighting run."""
+        renderer_service = self._get_renderer_service()
+        projectors = renderer_service.list_projectors() if hasattr(renderer_service, "list_projectors") else []
+        hdmi_projectors = [
+            projector for projector in projectors
+            if projector.get("sender") == "hdmi"
+        ]
+        projector = next(
+            (item for item in hdmi_projectors if item.get("id") == projector_id),
+            hdmi_projectors[0] if hdmi_projectors and not projector_id else None,
+        )
+
+        display = self._resolve_hdmi_projector_display(renderer_service, projector)
+        checks = []
+        warnings = []
+        errors = []
+
+        def add_check(check_id: str, label: str, ok: bool, detail: str) -> None:
+            checks.append({
+                "id": check_id,
+                "label": label,
+                "status": "ok" if ok else "needs_attention",
+                "detail": detail,
+            })
+            if not ok:
+                warnings.append(detail)
+
+        if projector:
+            add_check(
+                "projector",
+                "HDMI projector",
+                True,
+                f"Using {projector.get('name') or projector.get('id')} ({projector.get('id')}).",
+            )
+        else:
+            detail = "No configured HDMI projector was found."
+            add_check("projector", "HDMI projector", False, detail)
+            errors.append(detail)
+
+        display_attached = bool(display and display.get("attached", True))
+        if display:
+            add_check(
+                "display",
+                "HDMI display target",
+                display_attached,
+                (
+                    f"{display.get('name') or display.get('id')} "
+                    f"{display.get('width')}x{display.get('height')} at "
+                    f"{display.get('x', 0)},{display.get('y', 0)}"
+                ),
+            )
+        else:
+            detail = "The selected HDMI projector does not resolve to an attached display."
+            add_check("display", "HDMI display target", False, detail)
+            errors.append(detail)
+
+        worker = self._get_worker_status()
+        recommended_worker = {
+            "base_url": base_url or self._server_base_url(),
+            "camera_index": int(camera_index),
+            "projector_screen_x": int(display.get("x", 0)) if display else 0,
+            "projector_screen_y": int(display.get("y", 0)) if display else 0,
+            "projector_width": int(display.get("width", 1280)) if display else 1280,
+            "projector_height": int(display.get("height", 720)) if display else 720,
+            "settle_seconds": 1.0,
+            "flush_count": 30,
+            "pump_ms": 400,
+            "poll_seconds": 1.0,
+            "min_frame_delta": 0.0,
+            "max_capture_attempts": 1,
+        }
+        recommended_session = {
+            "projector_device_id": projector.get("id") if projector else projector_id,
+            "presentation_mode": "hdmi_step",
+            "camera_index": int(camera_index),
+            "projector_width": recommended_worker["projector_width"],
+            "projector_height": recommended_worker["projector_height"],
+            "pattern_set": "gray_code",
+            "hold_ms": 1200,
+        }
+
+        launch_config = worker.get("launch_config") or {}
+        process_running = worker.get("process_state") in {"starting", "running"} or bool(worker.get("process_pid"))
+        if process_running and launch_config:
+            expected_keys = (
+                "camera_index",
+                "projector_screen_x",
+                "projector_screen_y",
+                "projector_width",
+                "projector_height",
+                "min_frame_delta",
+                "max_capture_attempts",
+            )
+            mismatches = [
+                key for key in expected_keys
+                if str(launch_config.get(key)) != str(recommended_worker.get(key))
+            ]
+            add_check(
+                "worker_geometry",
+                "Worker geometry",
+                not mismatches,
+                (
+                    "Running worker matches HDMI defaults."
+                    if not mismatches
+                    else f"Running worker differs from HDMI defaults: {', '.join(mismatches)}."
+                ),
+            )
+        else:
+            add_check(
+                "worker_geometry",
+                "Worker geometry",
+                True,
+                "Worker is stopped; it can be started with the recommended HDMI defaults.",
+            )
+
+        return {
+            "status": "ready" if not errors else "needs_attention",
+            "projector": projector,
+            "display": display,
+            "worker": worker,
+            "recommended_worker": recommended_worker,
+            "recommended_session": recommended_session,
+            "checks": checks,
+            "warnings": warnings,
+            "errors": errors,
+        }
+
     def update_worker_status(
         self,
         worker_id: str,
@@ -127,6 +260,8 @@ class StructuredLightingService:
         flush_count: int = 30,
         pump_ms: int = 400,
         poll_seconds: float = 1.0,
+        min_frame_delta: float = 2.0,
+        max_capture_attempts: int = 4,
     ) -> Dict:
         with self._lock:
             self._refresh_worker_process_state_locked()
@@ -143,6 +278,7 @@ class StructuredLightingService:
             )
             cmd = [
                 sys.executable,
+                "-u",
                 worker_script,
                 "--base-url", base_url,
                 "--camera-index", str(camera_index),
@@ -154,6 +290,8 @@ class StructuredLightingService:
                 "--flush-count", str(flush_count),
                 "--pump-ms", str(pump_ms),
                 "--poll-seconds", str(poll_seconds),
+                "--min-frame-delta", str(min_frame_delta),
+                "--max-capture-attempts", str(max_capture_attempts),
                 "--worker-id", worker_id,
             ]
             self._worker_process = subprocess.Popen(
@@ -190,6 +328,8 @@ class StructuredLightingService:
                     "flush_count": flush_count,
                     "pump_ms": pump_ms,
                     "poll_seconds": poll_seconds,
+                    "min_frame_delta": min_frame_delta,
+                    "max_capture_attempts": max_capture_attempts,
                 },
             })
             return self._get_worker_status()
@@ -2054,27 +2194,84 @@ class StructuredLightingService:
             suffix += 1
         return f"{base_name} {suffix}"
 
-    def publish_mapping_scene(self, session_id: str, scene_name: Optional[str] = None) -> Optional[Dict]:
+    def _build_mapping_animation_groups(
+        self,
+        masks: List[Dict],
+        *,
+        animation_id: Optional[str],
+    ) -> List[Dict]:
+        groups = []
+        palette = [
+            ("#00bbf9", "#003049"),
+            ("#bfd7ea", "#087e8b"),
+            ("#f77f00", "#003049"),
+            ("#c7f9cc", "#22577a"),
+        ]
+        for index, mask in enumerate(masks or []):
+            color_a, color_b = palette[index % len(palette)]
+            if isinstance(mask, dict):
+                mask_id = mask.get("id")
+                mask_name = mask.get("name")
+            else:
+                mask_id = getattr(mask, "id", None)
+                mask_name = getattr(mask, "name", None)
+            if not mask_id:
+                continue
+            groups.append({
+                "id": f"sl-mask-{index + 1}-{str(mask_id)[:8]}",
+                "name": f"{mask_name or f'Mask {index + 1}'} Animation",
+                "mask_ids": [mask_id],
+                "layout_scope": "scene",
+                "media_binding_type": "animation" if animation_id else "pattern",
+                "animation_id": animation_id,
+                "animation_list_id": None,
+                "z_index": index,
+                "visible": True,
+                "transform": {"scale": 1, "offset_x": 0, "offset_y": 0, "rotation": 0},
+                "fill_mode": "gradient",
+                "color_a": color_a,
+                "color_b": color_b,
+            })
+        return groups
+
+    def _collect_mapping_mask_entries(self, session: Dict) -> List[Dict]:
+        artifacts = session.get("decode", {}).get("artifacts", {})
+        manifest_path = artifacts.get("filtered_masks_manifest")
+        if manifest_path and os.path.exists(manifest_path):
+            with open(manifest_path, "r", encoding="utf-8") as handle:
+                manifest = json.load(handle)
+            mask_entries = manifest.get("masks", [])
+            if mask_entries:
+                return mask_entries
+
+        projector_wall_mask = artifacts.get("projector_wall_mask")
+        if projector_wall_mask and os.path.exists(projector_wall_mask):
+            return [{
+                "file_path": projector_wall_mask,
+                "name": "Projector Wall Mask",
+                "file_name": os.path.basename(projector_wall_mask),
+            }]
+        return []
+
+    def publish_mapping_scene(
+        self,
+        session_id: str,
+        scene_name: Optional[str] = None,
+        animation_id: Optional[str] = None,
+        create_animation_groups: bool = False,
+    ) -> Optional[Dict]:
         session = self.get_session(session_id)
         if not session:
             return None
         if session.get("review", {}).get("status") != "accepted":
             raise RuntimeError("Session must be accepted before publishing to Mapping.")
 
-        artifacts = session.get("decode", {}).get("artifacts", {})
-        manifest_path = artifacts.get("filtered_masks_manifest")
-        if not manifest_path or not os.path.exists(manifest_path):
-            raise RuntimeError("Filtered masks have not been generated for this session.")
-
-        with open(manifest_path, "r", encoding="utf-8") as handle:
-            manifest = json.load(handle)
-
-        mask_entries = manifest.get("masks", [])
+        mask_entries = self._collect_mapping_mask_entries(session)
         if not mask_entries:
-            raise RuntimeError("No filtered masks are available to publish.")
+            raise RuntimeError("No filtered masks or projector wall mask are available to publish.")
 
         from database.database import get_db
-        from schemas.mapping_scene import MappingSceneCreate
+        from schemas.mapping_scene import MappingSceneCreate, MappingSceneUpdate
         from services.mapping_scene_service import MappingSceneService
 
         requested_name = (scene_name or f"{session['name']} {session_id[:8]}").strip()
@@ -2104,17 +2301,49 @@ class StructuredLightingService:
                     for entry in mask_entries
                 ],
             )
+            groups = []
+            if create_animation_groups:
+                groups = self._build_mapping_animation_groups(scene.masks or [], animation_id=animation_id)
+                if groups:
+                    scene = mapping_service.update_scene(scene.id, MappingSceneUpdate(groups=groups))
             return {
                 "session_id": session_id,
                 "scene_id": scene.id,
                 "scene_name": scene.name,
                 "mask_count": len(scene.masks or []),
+                "group_count": len(scene.groups or []),
+                "animation_id": animation_id if groups else None,
             }
         finally:
             try:
                 db_generator.close()
             except Exception:
                 pass
+
+    def _resolve_hdmi_projector_display(self, renderer_service, projector: Optional[Dict]) -> Optional[Dict]:
+        if not projector:
+            return None
+        runtime_status = projector.get("runtime_status") or {}
+        sender_status = runtime_status.get("sender_status") or {}
+        display = sender_status.get("display") or projector.get("display")
+        if display:
+            return display
+
+        target_name = projector.get("target_name")
+        if not target_name or not hasattr(renderer_service, "list_hdmi_displays"):
+            return None
+        target = str(target_name)
+        for candidate in renderer_service.list_hdmi_displays():
+            aliases = {
+                str(candidate.get("id")),
+                str(candidate.get("index")),
+                str(candidate.get("name")),
+            }
+            if candidate.get("device_name"):
+                aliases.add(str(candidate.get("device_name")))
+            if target in aliases:
+                return candidate
+        return None
 
     def _worker_is_connected(self) -> bool:
         last_seen = self._worker.get("last_seen_at")

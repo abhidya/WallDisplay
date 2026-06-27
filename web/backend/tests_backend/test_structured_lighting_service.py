@@ -122,6 +122,130 @@ def test_hdmi_step_presentation_uses_structured_lighting_step_url(monkeypatch, t
     ]
 
 
+def test_start_worker_passes_capture_retry_controls(monkeypatch, tmp_path):
+    service = StructuredLightingService()
+    service._upload_root = str(tmp_path)
+    popen_calls = []
+
+    class FakeProcess:
+        pid = 1234
+
+        def poll(self):
+            return None
+
+    def fake_popen(cmd, **kwargs):
+        popen_calls.append((cmd, kwargs))
+        return FakeProcess()
+
+    monkeypatch.setattr("web.backend.services.structured_lighting_service.subprocess.Popen", fake_popen)
+
+    status = service.start_worker(
+        base_url="http://127.0.0.1:8088",
+        camera_index=0,
+        projector_screen_x=3840,
+        projector_screen_y=0,
+        projector_width=3840,
+        projector_height=2160,
+        min_frame_delta=0,
+        max_capture_attempts=1,
+    )
+
+    cmd = popen_calls[0][0]
+    assert "-u" in cmd
+    assert cmd[cmd.index("--min-frame-delta") + 1] == "0"
+    assert cmd[cmd.index("--max-capture-attempts") + 1] == "1"
+    assert status["launch_config"]["min_frame_delta"] == 0
+    assert status["launch_config"]["max_capture_attempts"] == 1
+
+
+def test_hdmi_preflight_returns_projector_worker_defaults(monkeypatch, tmp_path):
+    service = StructuredLightingService()
+    service._upload_root = str(tmp_path)
+
+    class FakeRendererService:
+        def list_projectors(self):
+            return [
+                {
+                    "id": "proj-hdmi-local",
+                    "name": "HDMI Projector",
+                    "sender": "hdmi",
+                    "target_name": "\\\\.\\DISPLAY5",
+                    "runtime_status": {
+                        "sender_status": {
+                            "display": {
+                                "id": "\\\\.\\DISPLAY5",
+                                "name": "\\\\.\\DISPLAY5",
+                                "x": 3840,
+                                "y": 0,
+                                "width": 3840,
+                                "height": 2160,
+                                "attached": True,
+                            }
+                        }
+                    },
+                }
+            ]
+
+    monkeypatch.setattr(service, "_get_renderer_service", lambda: FakeRendererService(), raising=False)
+
+    preflight = service.get_hdmi_preflight(
+        projector_id="proj-hdmi-local",
+        camera_index=0,
+        base_url="http://127.0.0.1:8088",
+    )
+
+    assert preflight["status"] == "ready"
+    assert preflight["recommended_worker"]["base_url"] == "http://127.0.0.1:8088"
+    assert preflight["recommended_worker"]["projector_screen_x"] == 3840
+    assert preflight["recommended_worker"]["projector_width"] == 3840
+    assert preflight["recommended_worker"]["projector_height"] == 2160
+    assert preflight["recommended_worker"]["min_frame_delta"] == 0.0
+    assert preflight["recommended_worker"]["max_capture_attempts"] == 1
+    assert preflight["recommended_session"]["presentation_mode"] == "hdmi_step"
+
+
+def test_mapping_animation_groups_bind_each_mask_to_animation(tmp_path):
+    service = StructuredLightingService()
+    service._upload_root = str(tmp_path)
+
+    groups = service._build_mapping_animation_groups(
+        [
+            {"id": "mask-a", "name": "Left Wall"},
+            {"id": "mask-b", "name": "Right Wall"},
+        ],
+        animation_id="neural_noise",
+    )
+
+    assert [group["mask_ids"] for group in groups] == [["mask-a"], ["mask-b"]]
+    assert {group["media_binding_type"] for group in groups} == {"animation"}
+    assert {group["animation_id"] for group in groups} == {"neural_noise"}
+    assert [group["z_index"] for group in groups] == [0, 1]
+
+
+def test_mapping_publish_masks_fall_back_to_projector_wall_mask(tmp_path):
+    service = StructuredLightingService()
+    service._upload_root = str(tmp_path)
+    wall_mask = tmp_path / "projector_wall_mask_second_pass.png"
+    wall_mask.write_bytes(b"png")
+    empty_manifest = tmp_path / "mask_manifest.json"
+    empty_manifest.write_text('{"masks": []}', encoding="utf-8")
+
+    entries = service._collect_mapping_mask_entries({
+        "decode": {
+            "artifacts": {
+                "filtered_masks_manifest": str(empty_manifest),
+                "projector_wall_mask": str(wall_mask),
+            }
+        }
+    })
+
+    assert entries == [{
+        "file_path": str(wall_mask),
+        "name": "Projector Wall Mask",
+        "file_name": "projector_wall_mask_second_pass.png",
+    }]
+
+
 def test_dlna_step_rejects_configured_hdmi_projector(monkeypatch, tmp_path):
     service = StructuredLightingService()
     service._upload_root = str(tmp_path)

@@ -82,5 +82,16 @@ class StructuredLightingSessionModule:
     def export_session_bundle(self, session_id: str):
         return self.service.export_session_bundle(session_id)
 
-    def publish_mapping_scene(self, session_id: str, scene_name: Optional[str] = None) -> Optional[Dict]:
-        return self.service.publish_mapping_scene(session_id, scene_name=scene_name)
+    def publish_mapping_scene(
+        self,
+        session_id: str,
+        scene_name: Optional[str] = None,
+        animation_id: Optional[str] = None,
+        create_animation_groups: bool = False,
+    ) -> Optional[Dict]:
+        return self.service.publish_mapping_scene(
+            session_id,
+            scene_name=scene_name,
+            animation_id=animation_id,
+            create_animation_groups=create_animation_groups,
+        )

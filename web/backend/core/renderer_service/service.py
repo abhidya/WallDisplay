@@ -9,12 +9,11 @@ import logging
 import os
 import json
 import threading
-from urllib.parse import urlencode
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List
 
+from .output_session import ProjectorOutputSession
 from .renderer import Renderer, ChromeRenderer
 from .sender import AirPlaySender, HDMISender
-from ..dlna_device import DLNADevice
 
 
 def _resolve_runtime_device(device_name: str):
@@ -249,17 +248,15 @@ class RendererService:
             sender = None
 
             if sender_type == 'hdmi':
-                sender = self._create_sender('hdmi', projector_id)
-                if not target_name:
-                    self.logger.error(f"No target name specified for HDMI projector {projector_id}")
+                output_session = self._create_hdmi_output_session(projector_id, projector_config)
+                if not output_session.start_url(
+                    rendered_content_url,
+                    content_mode='scene',
+                    options={},
+                    scene_id=scene_id,
+                ):
                     return False
-                if not sender.connect(target_name):
-                    self.logger.error(f"Failed to connect HDMI display {target_name}")
-                    return False
-                if not sender.send_content(rendered_content_url):
-                    self.logger.error(f"Failed to send content to HDMI display {target_name}")
-                    sender.disconnect()
-                    return False
+                sender = output_session.sender
             else:
                 # Start the renderer for sender types that consume renderer output indirectly.
                 if not renderer.start():
@@ -323,7 +320,7 @@ class RendererService:
                 return False
             
             # Store the active renderer
-            self.active_renderers[projector_id] = {
+            active_renderer = {
                 'renderer': renderer,
                 'sender': sender,
                 'scene_id': scene_id,
@@ -333,6 +330,9 @@ class RendererService:
                 'content_mode': 'scene',
                 'options': {}
             }
+            if sender_type == 'hdmi':
+                active_renderer['output_session'] = output_session
+            self.active_renderers[projector_id] = active_renderer
             
             self.logger.info(f"Started renderer for scene {scene_id} on projector {projector_id}")
             return True
@@ -450,30 +450,18 @@ class RendererService:
                 self.logger.error(f"Content mode {mode} requires an HDMI projector, got {sender_type}")
                 return False
 
-            sender = self._create_sender('hdmi', projector_id)
-            target_name = projector_config.get('target_name')
-            if not target_name:
-                self.logger.error(f"No target name specified for HDMI projector {projector_id}")
-                return False
-            if not sender.connect(target_name):
-                return False
-
-            content_url = self._content_mode_url(mode, projector_id, options)
-            if not content_url:
-                sender.disconnect()
-                return False
-
-            if not sender.send_content(content_url):
-                sender.disconnect()
+            output_session = self._create_hdmi_output_session(projector_id, projector_config)
+            if not output_session.start_mode(mode, options):
                 return False
 
             self.active_renderers[projector_id] = {
                 'renderer': None,
-                'sender': sender,
+                'sender': output_session.sender,
+                'output_session': output_session,
                 'scene_id': None,
                 'projector_id': projector_id,
                 'sender_type': sender_type,
-                'target_name': target_name,
+                'target_name': projector_config.get('target_name'),
                 'content_mode': mode,
                 'options': options,
             }
@@ -500,25 +488,22 @@ class RendererService:
                 self.logger.error(f"URL presentation requires an HDMI projector: {projector_id}")
                 return False
 
-            target_name = projector_config.get('target_name')
-            if not target_name:
-                self.logger.error(f"No target name specified for HDMI projector {projector_id}")
-                return False
-
-            sender = self._create_sender('hdmi', projector_id)
-            if not sender.connect(target_name):
-                return False
-            if not sender.send_content(content_url):
-                sender.disconnect()
+            output_session = self._create_hdmi_output_session(projector_id, projector_config)
+            if not output_session.start_url(
+                content_url,
+                content_mode=content_mode,
+                options=options,
+            ):
                 return False
 
             self.active_renderers[projector_id] = {
                 'renderer': None,
-                'sender': sender,
+                'sender': output_session.sender,
+                'output_session': output_session,
                 'scene_id': None,
                 'projector_id': projector_id,
                 'sender_type': 'hdmi',
-                'target_name': target_name,
+                'target_name': projector_config.get('target_name'),
                 'content_mode': content_mode,
                 'options': options,
             }
@@ -535,9 +520,13 @@ class RendererService:
             return False
         self.projector_power_states[projector_id] = power_state
         active = self.active_renderers.get(projector_id)
-        sender = active.get('sender') if active else None
-        if hasattr(sender, 'set_power_state'):
-            sender.set_power_state(power_state)
+        output_session = active.get('output_session') if active else None
+        if output_session:
+            output_session.set_power_state(power_state)
+        else:
+            sender = active.get('sender') if active else None
+            if hasattr(sender, 'set_power_state'):
+                sender.set_power_state(power_state)
         return True
 
     def set_projector_target(self, projector_id: str, target_name: str) -> bool:
@@ -557,37 +546,22 @@ class RendererService:
     def record_projector_heartbeat(self, projector_id: str) -> bool:
         """Record a heartbeat from a browser-based projector page."""
         active = self.active_renderers.get(projector_id)
+        output_session = active.get('output_session') if active else None
+        if output_session:
+            return output_session.record_heartbeat()
         sender = active.get('sender') if active else None
-        if hasattr(sender, 'record_heartbeat'):
-            sender.record_heartbeat()
-            return True
-        return False
+        if not hasattr(sender, 'record_heartbeat'):
+            return False
+        sender.record_heartbeat()
+        return True
 
     def _idle_hdmi_status(self, projector_id: str, projector: Dict[str, Any]) -> Dict[str, Any]:
-        target_name = projector.get('target_name')
-        display = self._find_hdmi_display(target_name)
-        sender_status = {
-            'type': 'hdmi',
-            'target': target_name,
-            'connection_state': 'attached' if display else 'detached',
-            'projection_state': 'idle',
-            'power_state': self.projector_power_states.get(projector_id, 'unknown'),
-            'process_running': False,
-            'content_url': None,
-            'last_error': None,
-            'last_heartbeat_at': None,
-        }
-        if display:
-            sender_status['display'] = display
-        return {
-            'projector_id': projector_id,
-            'sender_type': 'hdmi',
-            'target_name': target_name,
-            'content_mode': None,
-            'options': {},
-            'status': 'idle',
-            'sender_status': sender_status,
-        }
+        return ProjectorOutputSession.idle_status(
+            projector_id,
+            projector,
+            display_finder=self._find_hdmi_display,
+            power_state=self.projector_power_states.get(projector_id, 'unknown'),
+        )
 
     def _find_hdmi_display(self, target_name: Optional[str]) -> Optional[Dict[str, Any]]:
         if target_name is None:
@@ -615,45 +589,21 @@ class RendererService:
             return AirPlaySender(sender_config, self.logger)
         return None
 
+    def _create_hdmi_output_session(self, projector_id: str, projector_config: Dict[str, Any]) -> ProjectorOutputSession:
+        return ProjectorOutputSession(
+            projector_id,
+            projector_config,
+            sender_factory=lambda: self._create_sender('hdmi', projector_id),
+            server_base_url=self._server_base_url(),
+            logger=self.logger,
+        )
+
     def _server_base_url(self) -> str:
         return (
             os.environ.get('NANODLNA_SERVER_BASE_URL')
             or self.config.get('server_base_url')
             or 'http://localhost:8000'
         )
-
-    def _content_mode_url(
-        self,
-        mode: str,
-        projector_id: str,
-        options: Optional[Dict[str, Any]] = None,
-    ) -> Optional[str]:
-        options = dict(options or {})
-        page_by_mode = {
-            'identify': 'hdmi_identify.html',
-            'overlay': 'overlay_window.html',
-            'blank': 'blank.html',
-        }
-        page = page_by_mode.get(mode)
-        if not page:
-            self.logger.error(f"Unsupported projector content mode: {mode}")
-            return None
-        if mode == 'overlay':
-            options.setdefault('controls', 'hidden')
-
-        params = {'projector_id': projector_id, 'mode': mode}
-        params.update({
-            key: self._url_param_value(value)
-            for key, value in options.items()
-            if value is not None
-        })
-        return f"{self._server_base_url().rstrip('/')}/backend-static/{page}?{urlencode(params)}"
-
-    @staticmethod
-    def _url_param_value(value: Any) -> Any:
-        if isinstance(value, bool):
-            return str(value).lower()
-        return value
 
     def _persist_config(self) -> bool:
         try:
@@ -715,10 +665,14 @@ class RendererService:
                     self.logger.error(f"Error disconnecting from AirPlay device {target_name}: {str(e)}")
             elif sender_type == 'hdmi':
                 try:
-                    sender = active_renderer.get('sender')
-                    if sender:
-                        sender.disconnect()
-                        self.logger.info(f"Stopped HDMI output on display {target_name}")
+                    output_session = active_renderer.get('output_session')
+                    if output_session:
+                        output_session.stop()
+                    else:
+                        sender = active_renderer.get('sender')
+                        if sender:
+                            sender.disconnect()
+                    self.logger.info(f"Stopped HDMI output on display {target_name}")
                 except Exception as e:
                     self.logger.error(f"Error stopping HDMI output on display {target_name}: {str(e)}")
             
@@ -803,6 +757,10 @@ class RendererService:
                 return None
             
             active_renderer = self.active_renderers[projector_id]
+            output_session = active_renderer.get('output_session')
+            if output_session:
+                return output_session.status()
+
             renderer = active_renderer['renderer']
             sender = active_renderer.get('sender')
 
