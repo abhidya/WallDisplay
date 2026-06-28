@@ -52,6 +52,7 @@ import {
     DarkMode as DarkModeIcon,
     Sync as SyncIcon
 } from '@mui/icons-material';
+import PageHeader from '../components/PageHeader';
 import { api, discoveryV2Api, mappingsApi, overlayApi } from '../services/api';
 
 function OverlayProjection() {
@@ -152,7 +153,6 @@ function OverlayProjection() {
         fetchMappingScenes();
         fetchBrightness();
         fetchCastDevices();
-        fetchCastSessions();
         fetchGlobalApiConfigs();
     }, []);
     
@@ -230,7 +230,7 @@ function OverlayProjection() {
         }
     };
 
-    const fetchCastSessions = async () => {
+    const fetchCastSessions = useCallback(async () => {
         try {
             const response = await overlayApi.listCastSessions();
             const sessions = Array.isArray(response.data) ? response.data : [];
@@ -242,7 +242,7 @@ function OverlayProjection() {
         } catch (error) {
             console.error('Error fetching cast sessions:', error);
         }
-    };
+    }, [selectedConfig]);
 
     const fetchGlobalApiConfigs = async () => {
         try {
@@ -266,7 +266,7 @@ function OverlayProjection() {
         }, 1500);
 
         return () => window.clearInterval(intervalId);
-    }, [castLoading, castSession, selectedConfig]);
+    }, [castLoading, castSession, fetchCastSessions]);
     
     const updateBrightness = async (value) => {
         setBrightness(value);
@@ -620,7 +620,7 @@ function OverlayProjection() {
 
     useEffect(() => {
         fetchCastSessions();
-    }, [selectedConfig]);
+    }, [fetchCastSessions]);
     
     const addWidget = (type) => {
         if (!selectedConfig || !widgetTemplates[type]) {
@@ -675,14 +675,17 @@ function OverlayProjection() {
     return (
         <Grid container spacing={3}>
             <Grid item xs={12}>
-                <Paper sx={{ p: 3 }}>
-                    <Typography variant="h4" gutterBottom>
-                        Overlay Projection
-                    </Typography>
-                    <Typography variant="body1" color="text.secondary">
-                        Select a background source and configure live information overlays for projection via AirPlay
-                    </Typography>
-                </Paper>
+                <PageHeader
+                    title="Overlay Projection"
+                    subtitle="Select a background source and configure live information overlays for projection or DLNA casting."
+                    meta={(
+                        <>
+                            <Chip label={backgroundType === 'video' ? 'video background' : 'mapping background'} color="primary" />
+                            <Chip label={`${overlayConfigs.length} configs`} variant="outlined" />
+                            <Chip label={castSession ? `cast ${castSession.status}` : 'cast idle'} variant="outlined" />
+                        </>
+                    )}
+                />
             </Grid>
             
             {/* Background Selection */}

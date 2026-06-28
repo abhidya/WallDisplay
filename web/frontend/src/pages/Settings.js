@@ -54,6 +54,7 @@ import {
   InfoOutlined as InfoIcon,
 } from '@mui/icons-material';
 import axios from 'axios';
+import PageHeader from '../components/PageHeader';
 import { diagnosticsApi, overlayApi } from '../services/api';
 
 const UI_PREFS_KEY = 'nanoDlnaUiPrefs';
@@ -532,17 +533,22 @@ function Settings() {
   return (
     <Grid container spacing={3}>
       <Grid item xs={12}>
-        <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} justifyContent="space-between" alignItems={{ xs: 'flex-start', md: 'center' }}>
-          <Box>
-            <Typography variant="h4">Settings</Typography>
-            <Typography variant="body2" color="text.secondary">
-              Tidy global settings, data sources, and projector redirect routing in one place.
-            </Typography>
-          </Box>
-          <Button variant="contained" color="primary" startIcon={<SaveIcon />} onClick={handleSaveSettings}>
-            Save Settings
-          </Button>
-        </Stack>
+        <PageHeader
+          title="Settings"
+          subtitle="Tidy global settings, data sources, and projector redirect routing in one place."
+          meta={(
+            <>
+              <Chip label={projectorRedirect.enabled ? 'redirect enabled' : 'redirect disabled'} color={projectorRedirect.enabled ? 'success' : 'default'} />
+              <Chip label={`${(projectorRedirect.rules || []).length} redirect rules`} variant="outlined" />
+              <Chip label={`${recentProjectorRequests.length} recent requests`} variant="outlined" />
+            </>
+          )}
+          actions={(
+            <Button variant="contained" color="primary" startIcon={<SaveIcon />} onClick={handleSaveSettings}>
+              Save Settings
+            </Button>
+          )}
+        />
       </Grid>
 
       <Grid item xs={12}>

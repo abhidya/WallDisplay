@@ -4076,11 +4076,12 @@ function ProjectionMapping() {
                                     </small>
                                 </div>
                                 <div className="layer-controls">
-                                    <button onClick={() => selectLayer(index)} title="Select for editing">✏️</button>
-                                    <button onClick={() => copyLayer(index)} title="Copy layer">📋</button>
-                                    <button onClick={() => { selectLayer(index); setIsFullscreenMode(true); }} title="Edit in fullscreen">🔍</button>
-                                    <button onClick={() => openProjectionWindow(index)} title="Projection window">📺</button>
-                                    <button onClick={() => deleteLayer(index)} title="Delete layer">🗑️</button>
+                                    <button onClick={() => selectLayer(index)} title="Select for editing">Edit</button>
+                                    <button onClick={() => copyLayer(index)} title="Copy layer">Copy</button>
+                                    <button onClick={() => { selectLayer(index); setIsFullscreenMode(true); }} title="Edit in fullscreen">Focus</button>
+                                    <button onClick={() => openFullscreenEditor(index)} title="Open layer editor window">Editor</button>
+                                    <button onClick={() => openProjectionWindow(index)} title="Projection window">Project</button>
+                                    <button onClick={() => deleteLayer(index)} title="Delete layer">Delete</button>
                                     <select 
                                         onChange={(e) => {
                                             const action = e.target.value;

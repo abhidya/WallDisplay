@@ -36,11 +36,10 @@ export default function App() {
       <View style={styles.appShell}>
         <View style={styles.header}>
           <View style={styles.headerTextBlock}>
-            <Text style={styles.eyebrow}>nano-dlna mobile rewrite</Text>
-            <Text style={styles.title}>Cross-platform operator console</Text>
+            <Text style={styles.eyebrow}>WallDisplay Ops</Text>
+            <Text style={styles.title}>Mobile operator console</Text>
             <Text style={styles.subtitle}>
-              Local-first Expo app for iOS and Android. It can run with an on-device control plane
-              or fall back to the existing FastAPI runtime when needed.
+              Local-first controls for devices, media, projection, overlay casting, diagnostics, and structured-lighting workflows.
             </Text>
           </View>
           <View style={styles.headerMetaRow}>
@@ -72,8 +71,15 @@ export default function App() {
               <Pressable
                 key={tab.key}
                 accessibilityRole="button"
+                accessibilityLabel={`Open ${tab.label}`}
+                accessibilityState={{ selected: isActive }}
+                hitSlop={4}
                 onPress={() => setActiveTab(tab.key)}
-                style={[styles.tabButton, isActive && styles.activeTabButton]}
+                style={({ pressed }) => [
+                  styles.tabButton,
+                  isActive && styles.activeTabButton,
+                  pressed && styles.pressedTabButton,
+                ]}
               >
                 <Text style={[styles.tabLabel, isActive && styles.activeTabLabel]}>{tab.label}</Text>
               </Pressable>
@@ -163,7 +169,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   header: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 24,
     paddingTop: 20,
     paddingBottom: 16,
     gap: 16,
@@ -183,7 +189,7 @@ const styles = StyleSheet.create({
   },
   title: {
     color: colors.text,
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: '700',
   },
   subtitle: {
@@ -201,7 +207,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 12,
+    borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 10,
     gap: 4,
@@ -225,14 +231,14 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     backgroundColor: colors.accentMuted,
     borderWidth: 1,
-    borderColor: colors.accent,
-    borderRadius: 12,
+    borderColor: colors.secondary,
+    borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 10,
     gap: 4,
   },
   selectionChipLabel: {
-    color: colors.accent,
+    color: colors.secondary,
     fontSize: 11,
     fontWeight: '700',
     textTransform: 'uppercase',
@@ -245,8 +251,8 @@ const styles = StyleSheet.create({
   tabBar: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
-    paddingHorizontal: 20,
+    gap: 8,
+    paddingHorizontal: 24,
     paddingVertical: 14,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
@@ -255,7 +261,9 @@ const styles = StyleSheet.create({
   tabButton: {
     paddingHorizontal: 14,
     paddingVertical: 10,
-    borderRadius: 999,
+    minHeight: 44,
+    justifyContent: 'center',
+    borderRadius: 8,
     backgroundColor: colors.background,
     borderWidth: 1,
     borderColor: colors.border,
@@ -264,12 +272,15 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accent,
     borderColor: colors.accent,
   },
+  pressedTabButton: {
+    opacity: 0.82,
+  },
   tabLabel: {
     color: colors.text,
     fontSize: 13,
     fontWeight: '600',
   },
   activeTabLabel: {
-    color: '#0a0f19',
+    color: colors.onAccent,
   },
 });

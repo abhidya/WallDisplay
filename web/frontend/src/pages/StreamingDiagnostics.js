@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
   Alert,
-  Box,
   Button,
   Card,
   CardContent,
@@ -16,6 +15,8 @@ import {
   Stack,
   Typography,
 } from '@mui/material';
+import PageHeader from '../components/PageHeader';
+import StatusPanel from '../components/StatusPanel';
 import { overlayApi, streamingApi } from '../services/api';
 
 function renderCountMap(data) {
@@ -159,9 +160,11 @@ function StreamingDiagnostics() {
 
   if (loading && !stats) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '50vh' }}>
-        <CircularProgress />
-      </Box>
+      <StatusPanel
+        icon={<CircularProgress size={24} />}
+        title="Loading Streaming Diagnostics"
+        description="Checking stream ownership, session health, and overlay relay state."
+      />
     );
   }
 
@@ -175,12 +178,17 @@ function StreamingDiagnostics() {
 
   return (
     <Stack spacing={3}>
-      <Box>
-        <Typography variant="h4">Streaming Diagnostics</Typography>
-        <Typography variant="body2" color="text.secondary">
-          Ownership and health view for device streams, projection streams, and overlay mapping streams.
-        </Typography>
-      </Box>
+      <PageHeader
+        title="Streaming Diagnostics"
+        subtitle="Ownership and health view for device streams, projection streams, and overlay mapping streams."
+        meta={(
+          <>
+            <Chip label={`health ${health?.status || 'unknown'}`} color={health?.status === 'healthy' ? 'success' : 'default'} />
+            <Chip label={`${stats?.active_sessions || 0} active`} variant="outlined" />
+            <Chip label={`${runningOverlaySessions.length} overlay running`} variant="outlined" />
+          </>
+        )}
+      />
 
       {error ? <Alert severity="error">{error}</Alert> : null}
       {sessionActionError ? <Alert severity="error">{sessionActionError}</Alert> : null}

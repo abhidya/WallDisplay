@@ -48,6 +48,8 @@ import {
   PowerSettingsNew as PowerIcon,
   Lightbulb as LightIcon
 } from '@mui/icons-material';
+import PageHeader from '../components/PageHeader';
+import StatusPanel from '../components/StatusPanel';
 import { rendererApi } from '../services/api';
 
 function displayTargetValue(display) {
@@ -546,39 +548,53 @@ function Renderer() {
 
   if (loading && projectors.length === 0) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-        <CircularProgress />
-      </Box>
+      <StatusPanel
+        icon={<CircularProgress size={24} />}
+        title="Loading Renderer Control"
+        description="Checking projectors, scenes, active renderers, and HDMI display targets."
+      />
     );
   }
 
   if (error && projectors.length === 0) {
     return (
-      <Box sx={{ p: 3 }}>
-        <Typography color="error" variant="h6">{error}</Typography>
-        <Button variant="contained" onClick={fetchData}>
-          Retry
-        </Button>
-      </Box>
+      <StatusPanel
+        severity="error"
+        title="Renderer Control Unavailable"
+        description={error}
+        action={(
+          <Button variant="contained" onClick={fetchData}>
+            Retry
+          </Button>
+        )}
+      />
     );
   }
 
   return (
     <Grid container spacing={3}>
-      {/* Header */}
       <Grid item xs={12}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Typography variant="h4">Renderer Management</Typography>
-          <Button
-            variant="contained"
-            color="primary"
-            startIcon={<RefreshIcon />}
-            onClick={fetchData}
-          >
-            Refresh
-          </Button>
-        </Box>
-        <Divider sx={{ mb: 2 }} />
+        <PageHeader
+          title="Renderer Management"
+          subtitle="Start, stop, and inspect projection renderers across configured projectors and external displays."
+          meta={(
+            <>
+              <Chip label={`${activeRenderers.length} active`} color={activeRenderers.length ? 'success' : 'default'} />
+              <Chip label={`${projectors.length} projectors`} variant="outlined" />
+              <Chip label={`${hdmiDisplays.length} HDMI displays`} variant="outlined" />
+            </>
+          )}
+          actions={(
+            <Button
+              variant="contained"
+              color="primary"
+              startIcon={<RefreshIcon />}
+              onClick={fetchData}
+            >
+              Refresh
+            </Button>
+          )}
+        />
       </Grid>
 
       {/* Start Renderer Section */}
@@ -805,10 +821,10 @@ function Renderer() {
                       size="small"
                     />
                   </Box>
-                  <Typography variant="body2" color="textSecondary">
+                  <Typography variant="body2" color="text.secondary">
                     Target: {selectedHdmiProjectorConfig?.target_name || selectedHdmiTarget || 'none'}
                   </Typography>
-                  <Typography variant="body2" color="textSecondary">
+                  <Typography variant="body2" color="text.secondary">
                     Display: {selectedHdmiDisplay ? formatDisplayGeometry(selectedHdmiDisplay) : 'not detected'}
                   </Typography>
                   <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
@@ -841,7 +857,7 @@ function Renderer() {
         <Paper sx={{ p: 2 }}>
           <Typography variant="h6" gutterBottom>Active Renderers</Typography>
           {activeRenderers.length === 0 ? (
-            <Typography variant="body2" color="textSecondary" sx={{ py: 2 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
               No active renderers. Start a renderer using the form above.
             </Typography>
           ) : (
@@ -978,23 +994,23 @@ function Renderer() {
                         </Box>
                       );
                     })()}
-                    <Typography variant="body2" color="textSecondary" gutterBottom component="div">
+                    <Typography variant="body2" color="text.secondary" gutterBottom component="div">
                       Status: <Chip 
                         label={isProjectorActive(projector.id) ? 'Active' : 'Inactive'} 
                         color={isProjectorActive(projector.id) ? 'success' : 'default'} 
                         size="small" 
                       />
                     </Typography>
-                    <Typography variant="body2" color="textSecondary" gutterBottom>
+                    <Typography variant="body2" color="text.secondary" gutterBottom>
                       Target: {projector.target_name}
                     </Typography>
                     {projector.scene && (
-                      <Typography variant="body2" color="textSecondary" gutterBottom>
+                      <Typography variant="body2" color="text.secondary" gutterBottom>
                         Default Scene: {projector.scene}
                       </Typography>
                     )}
                     {projector.fallback_sender && (
-                      <Typography variant="body2" color="textSecondary" gutterBottom>
+                      <Typography variant="body2" color="text.secondary" gutterBottom>
                         Fallback: {projector.fallback_sender} → {projector.fallback_target}
                       </Typography>
                     )}
@@ -1124,7 +1140,7 @@ function Renderer() {
               {airplayTabValue === 0 && (
                 <List>
                   {airplayDevices.length === 0 ? (
-                    <Typography variant="body2" color="textSecondary" sx={{ py: 2 }}>
+                    <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
                       No AirPlay devices found. Click Refresh to discover devices.
                     </Typography>
                   ) : (
@@ -1168,7 +1184,7 @@ function Renderer() {
               {airplayTabValue === 1 && (
                 <List>
                   {airplayDevices.filter(d => d.source === 'network').length === 0 ? (
-                    <Typography variant="body2" color="textSecondary" sx={{ py: 2 }}>
+                    <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
                       No AirPlay devices found on the network. Click Refresh to discover devices.
                     </Typography>
                   ) : (
@@ -1212,7 +1228,7 @@ function Renderer() {
               {airplayTabValue === 2 && (
                 <List>
                   {airplayDevices.filter(d => d.source === 'system').length === 0 ? (
-                    <Typography variant="body2" color="textSecondary" sx={{ py: 2 }}>
+                    <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
                       No AirPlay devices found in System Preferences. Click Refresh to discover devices.
                     </Typography>
                   ) : (

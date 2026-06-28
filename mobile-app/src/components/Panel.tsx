@@ -1,7 +1,7 @@
 import type { PropsWithChildren } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-import { colors } from '../theme';
+import { colors, radii, spacing } from '../theme';
 
 interface PanelProps extends PropsWithChildren {
   title: string;
@@ -12,7 +12,7 @@ export function Panel({ title, subtitle, children }: PanelProps) {
   return (
     <View style={styles.panel}>
       <View style={styles.header}>
-        <Text style={styles.title}>{title}</Text>
+        <Text accessibilityRole="header" style={styles.title}>{title}</Text>
         {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
       </View>
       {children}
@@ -25,12 +25,12 @@ const styles = StyleSheet.create({
     backgroundColor: colors.panel,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 16,
-    padding: 16,
-    gap: 12,
+    borderRadius: radii.lg,
+    padding: spacing.md,
+    gap: spacing.md,
   },
   header: {
-    gap: 6,
+    gap: spacing.xs,
   },
   title: {
     color: colors.text,

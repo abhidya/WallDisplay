@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import {
   Accordion,
   AccordionDetails,
@@ -25,7 +25,6 @@ import {
   CircularProgress,
   Box,
   Chip,
-  Divider,
   Alert,
   Snackbar,
   LinearProgress,
@@ -46,6 +45,8 @@ import {
 import { deviceApi } from '../services/api';
 import { useNavigate } from 'react-router-dom';
 import ConfigurationManager from '../components/ConfigurationManager';
+import PageHeader from '../components/PageHeader';
+import StatusPanel from '../components/StatusPanel';
 
 function formatDurationSeconds(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) {
@@ -235,22 +236,6 @@ function Devices() {
     return true;
   });
 
-  useEffect(() => {
-    fetchDevices();
-    fetchDiscoveryStatus();
-    
-    // Keep device/discovery state fresh without excessive poll noise.
-    const pollingInterval = setInterval(() => {
-      fetchDevices(true); // true = isPolling, to avoid showing loading spinner
-      fetchDiscoveryStatus();
-    }, 15000);
-    
-    // Cleanup polling interval on unmount
-    return () => {
-      clearInterval(pollingInterval);
-    };
-  }, []);
-
   // Add a state to force re-renders for timer updates
   const [, forceUpdate] = useState(0);
 
@@ -277,7 +262,7 @@ function Devices() {
     };
   }, [devices]);
 
-  const fetchDevices = async (isPolling = false) => {
+  const fetchDevices = useCallback(async (isPolling = false) => {
     try {
       // Only show loading spinner on initial load or manual refresh
       if (!isPolling) {
@@ -314,9 +299,9 @@ function Devices() {
         setLoading(false);
       }
     }
-  };
+  }, []);
 
-  const fetchDiscoveryStatus = async () => {
+  const fetchDiscoveryStatus = useCallback(async () => {
     try {
       const response = await deviceApi.getDiscoveryStatus();
       setDiscoveryStatus(response.data);
@@ -326,7 +311,23 @@ function Devices() {
     } catch (err) {
       console.error('Error fetching discovery status:', err);
     }
-  };
+  }, [discoveryIntervalDirty]);
+
+  useEffect(() => {
+    fetchDevices();
+    fetchDiscoveryStatus();
+    
+    // Keep device/discovery state fresh without excessive poll noise.
+    const pollingInterval = setInterval(() => {
+      fetchDevices(true); // true = isPolling, to avoid showing loading spinner
+      fetchDiscoveryStatus();
+    }, 15000);
+    
+    // Cleanup polling interval on unmount
+    return () => {
+      clearInterval(pollingInterval);
+    };
+  }, [fetchDevices, fetchDiscoveryStatus]);
 
   const handleSaveDiscoveryInterval = async () => {
     const seconds = Number.parseInt(discoveryIntervalInput, 10);
@@ -693,20 +694,23 @@ function Devices() {
 
   if (loading) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-        <CircularProgress />
-      </Box>
+      <StatusPanel
+        loading
+        title="Loading devices"
+        message="Reading device inventory, playback status, and discovery loop state."
+      />
     );
   }
 
   if (error) {
     return (
-      <Box sx={{ p: 3 }}>
-        <Typography color="error" variant="h6">{error}</Typography>
-        <Button variant="contained" onClick={fetchDevices}>
-          Retry
-        </Button>
-      </Box>
+      <StatusPanel
+        severity="error"
+        title={error}
+        message="Check the backend connection, then retry the device inventory."
+        actionLabel="Retry"
+        onAction={fetchDevices}
+      />
     );
   }
 
@@ -714,9 +718,20 @@ function Devices() {
     <Grid container spacing={3}>
       {/* Header */}
       <Grid item xs={12}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Typography variant="h4">Devices</Typography>
-          <Box>
+        <PageHeader
+          title="Devices"
+          subtitle="Track discovered renderers, playback state, projection targets, and manual control overrides."
+          meta={(
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+              <Chip label={`${onlineDevices.length} online`} color="success" />
+              <Chip label={`${degradedDevices.length} degraded`} color="warning" variant="outlined" />
+              <Chip label={`${offlineDevices.length} offline`} variant="outlined" />
+              <Chip label={`${activePlaybackDevices.length} playing`} color={activePlaybackDevices.length > 0 ? 'success' : 'default'} variant="outlined" />
+              <Chip label={`${manualControlDevices.length} manual`} color={manualControlDevices.length > 0 ? 'warning' : 'default'} variant="outlined" />
+            </Box>
+          )}
+          actions={(
+            <>
             <Button
               variant="contained"
               color="primary"
@@ -734,9 +749,9 @@ function Devices() {
             >
               Add Device
             </Button>
-          </Box>
-        </Box>
-        <Divider sx={{ mb: 2 }} />
+            </>
+          )}
+        />
       </Grid>
 
       {/* Discovery Control */}
@@ -746,7 +761,7 @@ function Devices() {
             <Box>
               <Typography variant="h6">Discovery Control</Typography>
               <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                <Typography variant="body2" color="textSecondary" component="span">
+                <Typography variant="body2" color="text.secondary" component="span">
                   Discovery Loop: 
                 </Typography>
                 {discoveryStatus?.running ? 
@@ -754,7 +769,7 @@ function Devices() {
                   <Chip label="Paused" color="default" size="small" sx={{ ml: 1 }} />
                 }
               </Box>
-              <Typography variant="body2" color="textSecondary" sx={{ mt: 0.75 }}>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>
                 Status is now derived from last-seen timing with an `online / degraded / offline` model instead of raw poll results.
               </Typography>
               <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1.5 }}>
@@ -764,7 +779,7 @@ function Devices() {
                 <Chip label={`${activePlaybackDevices.length} playing`} color={activePlaybackDevices.length > 0 ? 'success' : 'default'} size="small" />
                 <Chip label={`${manualControlDevices.length} manual override`} color={manualControlDevices.length > 0 ? 'warning' : 'default'} size="small" />
               </Box>
-              <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
                 {devices.length > 0
                   ? `Observed ${devices.length} devices. Worst-case last seen: ${formatLastSeen(stalestSeenSeconds)}.`
                   : 'No devices have been observed yet.'}
@@ -784,7 +799,7 @@ function Devices() {
                   expandIcon={<ExpandMoreIcon />}
                   sx={{ px: 0, minHeight: 'auto', '& .MuiAccordionSummary-content': { my: 0 } }}
                 >
-                  <Typography variant="body2" color="textSecondary">
+                  <Typography variant="body2" color="text.secondary">
                     Discovery Diagnostics
                   </Typography>
                 </AccordionSummary>
@@ -833,14 +848,14 @@ function Devices() {
                     )}
                   </Box>
                   <Box sx={{ mt: 1 }}>
-                    <Typography variant="caption" color="textSecondary" display="block">
+                    <Typography variant="caption" color="text.secondary" display="block">
                       Last cycle finished: {formatCycleAge(discoveryStatus?.last_cycle_finished_at)}
                       {discoveryStatus?.last_cycle_duration_ms !== undefined && discoveryStatus?.last_cycle_duration_ms !== null
                         ? ` • duration ${discoveryStatus.last_cycle_duration_ms}ms`
                         : ''}
                     </Typography>
                     {Array.isArray(discoveryStatus?.candidate_hosts) && discoveryStatus.candidate_hosts.length > 0 && (
-                      <Typography variant="caption" color="textSecondary" display="block">
+                      <Typography variant="caption" color="text.secondary" display="block">
                         Candidate interfaces: {discoveryStatus.candidate_hosts.join(', ')}
                       </Typography>
                     )}
@@ -971,10 +986,10 @@ function Devices() {
       {devices.length === 0 ? (
         <Grid item xs={12}>
           <Paper sx={{ p: 3, textAlign: 'center' }}>
-            <Typography variant="h6" color="textSecondary">
+            <Typography variant="h6" color="text.secondary">
               No devices found
             </Typography>
-            <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
               Add a device manually or discover devices on your network
             </Typography>
           </Paper>
@@ -982,7 +997,7 @@ function Devices() {
       ) : visibleDevices.length === 0 ? (
         <Grid item xs={12}>
           <Paper sx={{ p: 3, textAlign: 'center' }}>
-            <Typography variant="h6" color="textSecondary">
+            <Typography variant="h6" color="text.secondary">
               No devices match these filters
             </Typography>
           </Paper>
@@ -1009,7 +1024,7 @@ function Devices() {
                 }
               />
               <CardContent>
-                <Typography variant="body2" color="textSecondary" gutterBottom component="div">
+                <Typography variant="body2" color="text.secondary" gutterBottom component="div">
                   Status: <Chip 
                     label={getAvailabilityLabel(device)}
                     color={getAvailabilityColor(getAvailabilityLabel(device))}
@@ -1024,7 +1039,7 @@ function Devices() {
                     />
                   )}
                 </Typography>
-                <Typography variant="body2" color="textSecondary" gutterBottom component="div">
+                <Typography variant="body2" color="text.secondary" gutterBottom component="div">
                   Playing: <Chip 
                     label={device.is_playing ? 'Yes' : 'No'} 
                     color={device.is_playing ? 'success' : 'default'} 
@@ -1040,7 +1055,7 @@ function Devices() {
                     />
                   )}
                 </Typography>
-                <Typography variant="body2" color="textSecondary" gutterBottom component="div">
+                <Typography variant="body2" color="text.secondary" gutterBottom component="div">
                   Projection:{' '}
                   <Chip {...getProjectionChipProps(device)} size="small" />
                   {getProjectionSourceLabel(device) && (
@@ -1061,7 +1076,7 @@ function Devices() {
                   )}
                 </Typography>
                 {hdmi && (
-                  <Typography variant="body2" color="textSecondary" gutterBottom component="div">
+                  <Typography variant="body2" color="text.secondary" gutterBottom component="div">
                     HDMI:{' '}
                     <Chip
                       label={device.hdmi_connection_state || 'unknown'}
@@ -1076,31 +1091,31 @@ function Devices() {
                     />
                   </Typography>
                 )}
-                <Typography variant="body2" color="textSecondary" gutterBottom>
+                <Typography variant="body2" color="text.secondary" gutterBottom>
                   {formatLastSeen(device.seconds_since_seen)}
                   {formatDurationSeconds(device.uptime_seconds) && ` • uptime ${formatDurationSeconds(device.uptime_seconds)}`}
                   {!formatDurationSeconds(device.uptime_seconds) && formatDurationSeconds(device.downtime_seconds) && ` • downtime ${formatDurationSeconds(device.downtime_seconds)}`}
                 </Typography>
                 {device.overlay_cast_source === 'direct_client' && (
-                  <Typography variant="body2" color="textSecondary" gutterBottom>
+                  <Typography variant="body2" color="text.secondary" gutterBottom>
                     Direct overlay page {formatCycleAge(device.overlay_cast_last_seen_at)}
                   </Typography>
                 )}
-                <Typography variant="body2" color="textSecondary" gutterBottom>
+                <Typography variant="body2" color="text.secondary" gutterBottom>
                   Reconnects {device.reconnect_count ?? 0} • degraded {device.degraded_count ?? 0} • offline {device.offline_count ?? 0}
                 </Typography>
                 {device.current_video && (
                   <>
-                    <Typography variant="body2" color="textSecondary" gutterBottom>
+                    <Typography variant="body2" color="text.secondary" gutterBottom>
                       Current Video: {device.current_video.split('/').pop()}
                     </Typography>
                     {device.is_playing && (
                       <Box sx={{ mt: 1, mb: 1 }}>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                          <Typography variant="caption" color="textSecondary">
+                          <Typography variant="caption" color="text.secondary">
                             {calculateCurrentPosition(device)}
                           </Typography>
-                          <Typography variant="caption" color="textSecondary">
+                          <Typography variant="caption" color="text.secondary">
                             {device.playback_duration || "00:00:00"}
                           </Typography>
                         </Box>
@@ -1113,7 +1128,7 @@ function Devices() {
                     )}
                   </>
                 )}
-                <Typography variant="body2" color="textSecondary">
+                <Typography variant="body2" color="text.secondary">
                   {hdmi ? 'Target' : 'Hostname'}: {hdmi ? (device.hdmi_target_name || device.hostname || 'Not selected') : device.hostname}
                 </Typography>
               </CardContent>

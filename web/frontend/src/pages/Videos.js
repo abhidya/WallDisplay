@@ -18,7 +18,6 @@ import {
   TextField,
   CircularProgress,
   Box,
-  Divider,
   Alert,
   Snackbar,
   LinearProgress,
@@ -49,6 +48,8 @@ import {
 } from '@mui/icons-material';
 import { mediaLibraryApi, videoApi } from '../services/api';
 import { useNavigate } from 'react-router-dom';
+import PageHeader from '../components/PageHeader';
+import StatusPanel from '../components/StatusPanel';
 
 function Videos() {
   const navigate = useNavigate();
@@ -590,20 +591,23 @@ function Videos() {
 
   if (loading) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-        <CircularProgress />
-      </Box>
+      <StatusPanel
+        loading
+        title="Loading media library"
+        message="Reading videos, media folders, lists, and channels from the control plane."
+      />
     );
   }
 
   if (error) {
     return (
-      <Box sx={{ p: 3 }}>
-        <Typography color="error" variant="h6">{error}</Typography>
-        <Button variant="contained" onClick={fetchVideos}>
-          Retry
-        </Button>
-      </Box>
+      <StatusPanel
+        severity="error"
+        title={error}
+        message="Check the backend connection and retry the media library request."
+        actionLabel="Retry"
+        onAction={fetchVideos}
+      />
     );
   }
 
@@ -611,9 +615,19 @@ function Videos() {
     <Grid container spacing={3}>
       {/* Header */}
       <Grid item xs={12}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Typography variant="h4">Videos</Typography>
-          <Box>
+        <PageHeader
+          title="Videos"
+          subtitle="Organize indexed media, reusable folders, playlists, and playback channels for projections and overlays."
+          meta={(
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              <Chip label={`${videos.length} videos`} color="primary" />
+              <Chip label={`${mediaDirectories.length} folders`} variant="outlined" />
+              <Chip label={`${mediaLists.length} lists`} variant="outlined" color="secondary" />
+              <Chip label={`${mediaChannels.length} channels`} variant="outlined" color="secondary" />
+            </Stack>
+          )}
+          actions={(
+            <>
             <Button
               variant="contained"
               color="secondary"
@@ -686,9 +700,9 @@ function Videos() {
             >
               Add Video
             </Button>
-          </Box>
-        </Box>
-        <Divider sx={{ mb: 2 }} />
+            </>
+          )}
+        />
       </Grid>
 
       {/* Upload Video */}
@@ -833,14 +847,14 @@ function Videos() {
             </Button>
           </Box>
           {uploadFile && (
-            <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
               Selected: {uploadFile.name} ({(uploadFile.size / 1024 / 1024).toFixed(2)} MB)
             </Typography>
           )}
           {isUploading && (
             <Box sx={{ mt: 2 }}>
               <LinearProgress variant="determinate" value={uploadProgress} />
-              <Typography variant="body2" color="textSecondary" align="center" sx={{ mt: 1 }}>
+              <Typography variant="body2" color="text.secondary" align="center" sx={{ mt: 1 }}>
                 {uploadProgress}% uploaded
               </Typography>
             </Box>
@@ -852,10 +866,10 @@ function Videos() {
       {videos.length === 0 ? (
         <Grid item xs={12}>
           <Paper sx={{ p: 3, textAlign: 'center' }}>
-            <Typography variant="h6" color="textSecondary">
+            <Typography variant="h6" color="text.secondary">
               No videos found
             </Typography>
-            <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
               Add a video manually, upload a video, or scan a directory for videos
             </Typography>
           </Paper>
@@ -896,14 +910,14 @@ function Videos() {
                     <Chip label="Overlay Optimized" size="small" color="success" variant="outlined" />
                   )}
                 </Box>
-                <Typography variant="body2" color="textSecondary" gutterBottom>
+                <Typography variant="body2" color="text.secondary" gutterBottom>
                   Duration: {formatDuration(video.duration)}
                 </Typography>
-                <Typography variant="body2" color="textSecondary" gutterBottom>
+                <Typography variant="body2" color="text.secondary" gutterBottom>
                   Size: {formatFileSize(video.file_size)}
                 </Typography>
                 {video.resolution && (
-                  <Typography variant="body2" color="textSecondary" gutterBottom>
+                  <Typography variant="body2" color="text.secondary" gutterBottom>
                     Resolution: {video.resolution}
                   </Typography>
                 )}

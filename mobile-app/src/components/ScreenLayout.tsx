@@ -1,9 +1,14 @@
 import type { PropsWithChildren } from 'react';
 import { ScrollView, StyleSheet } from 'react-native';
+import { colors, spacing } from '../theme';
 
 export function ScreenLayout({ children }: PropsWithChildren) {
   return (
-    <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+    <ScrollView
+      contentContainerStyle={styles.content}
+      indicatorStyle="white"
+      showsVerticalScrollIndicator={false}
+    >
       {children}
     </ScrollView>
   );
@@ -11,7 +16,10 @@ export function ScreenLayout({ children }: PropsWithChildren) {
 
 const styles = StyleSheet.create({
   content: {
-    padding: 20,
-    gap: 16,
+    backgroundColor: colors.background,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.xxl,
+    gap: spacing.md,
   },
 });

@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import {
   AppBar,
   Box,
+  Chip,
   CssBaseline,
   Divider,
   Drawer,
@@ -23,6 +24,7 @@ import {
   VideoLibrary as VideoLibraryIcon,
   PhotoLibrary as PhotoLibraryIcon,
   Settings as SettingsIcon,
+  Sensors as SensorsIcon,
   ViewInAr as RendererIcon,
   Layers as DepthIcon,
   CameraAlt as ProjectionIcon,
@@ -127,11 +129,20 @@ function Layout({ children }) {
     <div>
       <Toolbar sx={{ justifyContent: drawerCollapsed ? 'center' : 'space-between' }}>
         {!drawerCollapsed && (
-          <Typography variant="h6" noWrap component="div">
-            WallDisplay
-          </Typography>
+          <Box>
+            <Typography variant="h6" noWrap component="div">
+              WallDisplay
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              Operator console
+            </Typography>
+          </Box>
         )}
-        <IconButton onClick={handleDrawerCollapse} sx={{ ml: drawerCollapsed ? 0 : 'auto' }}>
+        <IconButton
+          aria-label={drawerCollapsed ? 'Expand navigation' : 'Collapse navigation'}
+          onClick={handleDrawerCollapse}
+          sx={{ ml: drawerCollapsed ? 0 : 'auto' }}
+        >
           {drawerCollapsed ? <ChevronRightIcon /> : <ChevronLeftIcon />}
         </IconButton>
       </Toolbar>
@@ -146,11 +157,13 @@ function Layout({ children }) {
                 sx={{
                   justifyContent: drawerCollapsed ? 'center' : 'flex-start',
                   px: drawerCollapsed ? 1 : 2,
+                  my: 0.25,
                 }}
               >
                 <ListItemIcon sx={{ 
                   minWidth: drawerCollapsed ? 0 : 56,
-                  justifyContent: 'center' 
+                  justifyContent: 'center',
+                  color: activeMenuItem?.path === item.path ? 'primary.main' : 'text.secondary',
                 }}>
                   {item.icon}
                 </ListItemIcon>
@@ -175,11 +188,15 @@ function Layout({ children }) {
             easing: theme.transitions.easing.sharp,
             duration: theme.transitions.duration.leavingScreen,
           }),
+          bgcolor: 'background.paper',
+          color: 'text.primary',
+          borderBottom: '1px solid',
+          borderColor: 'divider',
+          boxShadow: 'none',
         }}
       >
-        <Toolbar>
+        <Toolbar sx={{ gap: 2 }}>
           <IconButton
-            color="inherit"
             aria-label="open drawer"
             edge="start"
             onClick={handleDrawerToggle}
@@ -187,9 +204,21 @@ function Layout({ children }) {
           >
             <MenuIcon />
           </IconButton>
-          <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
-            {activeMenuItem?.text || 'Not Found'}
-          </Typography>
+          <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+            <Typography variant="h6" noWrap component="div">
+              {activeMenuItem?.text || 'Not Found'}
+            </Typography>
+            <Typography variant="caption" color="text.secondary" noWrap>
+              Local media, projection, overlay, and diagnostics workflows
+            </Typography>
+          </Box>
+          <Chip
+            icon={<SensorsIcon />}
+            label="Local control"
+            color="primary"
+            variant="outlined"
+            sx={{ display: { xs: 'none', md: 'inline-flex' } }}
+          />
         </Toolbar>
       </AppBar>
       <Box
@@ -202,7 +231,7 @@ function Layout({ children }) {
             duration: theme.transitions.duration.leavingScreen,
           }),
         }}
-        aria-label="mailbox folders"
+        aria-label="primary navigation"
       >
         {/* The implementation can be swapped with js to avoid SEO duplication of links. */}
         <Drawer
@@ -214,7 +243,11 @@ function Layout({ children }) {
           }}
           sx={{
             display: { xs: 'block', sm: 'none' },
-            '& .MuiDrawer-paper': { boxSizing: 'border-box', width: drawerWidth },
+            '& .MuiDrawer-paper': {
+              boxSizing: 'border-box',
+              width: drawerWidth,
+              borderRightColor: 'divider',
+            },
           }}
         >
           {drawer}
@@ -231,6 +264,8 @@ function Layout({ children }) {
                 duration: theme.transitions.duration.leavingScreen,
               }),
               overflowX: 'hidden',
+              borderRightColor: 'divider',
+              bgcolor: 'background.paper',
             },
           }}
           open
@@ -242,7 +277,9 @@ function Layout({ children }) {
         component="main"
         sx={{ 
           flexGrow: 1, 
-          p: 3, 
+          p: { xs: 2, md: 3 },
+          bgcolor: 'background.default',
+          minHeight: '100vh',
           width: { sm: `calc(100% - ${drawerCollapsed ? collapsedDrawerWidth : drawerWidth}px)` },
           ml: { sm: `${drawerCollapsed ? collapsedDrawerWidth : drawerWidth}px` },
           transition: theme => theme.transitions.create(['margin', 'width'], {

@@ -127,7 +127,9 @@ def test_load_airplay_projection_automation_config_uses_projector_defaults():
     assert config.display_mode == "extend"
     assert config.overlay_config_id == 2
     assert config.build_overlay_url() == "http://localhost:8000/backend-static/overlay_window.html?config_id=2&controls=hidden"
-    assert "--disable-gpu" in config.chrome_args
+    assert "--disable-gpu" not in config.chrome_args
+    assert "--enable-gpu" in config.chrome_args
+    assert "--ignore-gpu-blocklist" in config.chrome_args
     assert "--start-fullscreen" in config.chrome_args
     assert config.airplay_sender_config["connect_timeout"] == 9
 
@@ -273,7 +275,7 @@ def test_airplay_projection_automation_service_activates_and_tears_down(monkeypa
         {
             "url": "http://localhost:8000/backend-static/overlay_window.html?config_id=2&controls=hidden",
             "display_bounds": {"x": 1440, "y": 0, "width": 1920, "height": 1080},
-            "args": ["--test-flag", "--new-window", "--no-first-run", "--disable-session-crashed-bubble", "--disable-infobars", "--start-fullscreen"],
+            "args": ["--test-flag", "--enable-gpu", "--ignore-gpu-blocklist", "--new-window", "--no-first-run", "--disable-session-crashed-bubble", "--disable-infobars", "--start-fullscreen"],
         }
     ]
     assert sender_events[:2] == [

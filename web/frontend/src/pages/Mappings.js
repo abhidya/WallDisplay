@@ -266,6 +266,68 @@ function Mappings() {
   });
   const requestedSceneId = searchParams.get('scene');
 
+  const selectedScene = useMemo(
+    () => scenes.find((scene) => scene.id === selectedSceneId) || null,
+    [scenes, selectedSceneId]
+  );
+
+  const selectedGroup = useMemo(
+    () => sceneDraft?.groups?.find((group) => group.id === selectedGroupId) || null,
+    [sceneDraft, selectedGroupId]
+  );
+
+  const stageRenderState = useMemo(() => {
+    if (!sceneDraft) {
+      return null;
+    }
+
+    return {
+      canvas_width: sceneDraft.canvas_width,
+      canvas_height: sceneDraft.canvas_height,
+      mask_mode: sceneDraft.mask_mode,
+      render_settings: {
+        background: sceneDraft.render_settings?.background || '#000000',
+      },
+      groups: (sceneDraft.groups || []).map((group) => ({
+        id: group.id,
+        mask_ids: group.mask_ids || [],
+        z_index: group.z_index || 0,
+        visible: group.visible,
+        fill_mode: group.fill_mode,
+        color_a: group.color_a,
+        color_b: group.color_b,
+        transform: group.transform || { scale: 1, offset_x: 0, offset_y: 0, rotation: 0 },
+      })),
+    };
+  }, [sceneDraft]);
+
+  const loadScene = useCallback((scene) => {
+    const normalizedScene = normalizeScene(scene);
+    setSelectedSceneId(normalizedScene.id);
+    setSceneDraft(JSON.parse(JSON.stringify(normalizedScene)));
+    setSelectedGroupId(normalizedScene.groups?.[0]?.id || '');
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.set('scene', String(normalizedScene.id));
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  const createSceneDraft = useCallback(() => {
+    const firstGroup = emptyGroup();
+    setSelectedSceneId('');
+    setSceneDraft(normalizeScene({
+      name: `Scene ${new Date().toLocaleString()}`,
+      canvas_width: 1280,
+      canvas_height: 720,
+      mask_mode: 'luminance',
+      masks: [],
+      groups: [firstGroup],
+      render_settings: { background: '#000000' },
+    }));
+    setSelectedGroupId(firstGroup.id);
+  }, []);
+
   useEffect(() => {
     const pickInitialScene = (loadedScenes) => {
       if (!loadedScenes?.length) {
@@ -304,69 +366,7 @@ function Mappings() {
       console.error(err);
       setError('Failed to load mappings workspace');
     });
-  }, [requestedSceneId]);
-
-  const selectedScene = useMemo(
-    () => scenes.find((scene) => scene.id === selectedSceneId) || null,
-    [scenes, selectedSceneId]
-  );
-
-  const selectedGroup = useMemo(
-    () => sceneDraft?.groups?.find((group) => group.id === selectedGroupId) || null,
-    [sceneDraft, selectedGroupId]
-  );
-
-  const stageRenderState = useMemo(() => {
-    if (!sceneDraft) {
-      return null;
-    }
-
-    return {
-      canvas_width: sceneDraft.canvas_width,
-      canvas_height: sceneDraft.canvas_height,
-      mask_mode: sceneDraft.mask_mode,
-      render_settings: {
-        background: sceneDraft.render_settings?.background || '#000000',
-      },
-      groups: (sceneDraft.groups || []).map((group) => ({
-        id: group.id,
-        mask_ids: group.mask_ids || [],
-        z_index: group.z_index || 0,
-        visible: group.visible,
-        fill_mode: group.fill_mode,
-        color_a: group.color_a,
-        color_b: group.color_b,
-        transform: group.transform || { scale: 1, offset_x: 0, offset_y: 0, rotation: 0 },
-      })),
-    };
-  }, [sceneDraft]);
-
-  const loadScene = (scene) => {
-    const normalizedScene = normalizeScene(scene);
-    setSelectedSceneId(normalizedScene.id);
-    setSceneDraft(JSON.parse(JSON.stringify(normalizedScene)));
-    setSelectedGroupId(normalizedScene.groups?.[0]?.id || '');
-    setSearchParams((current) => {
-      const next = new URLSearchParams(current);
-      next.set('scene', String(normalizedScene.id));
-      return next;
-    }, { replace: true });
-  };
-
-  const createSceneDraft = () => {
-    const firstGroup = emptyGroup();
-    setSelectedSceneId('');
-    setSceneDraft(normalizeScene({
-      name: `Scene ${new Date().toLocaleString()}`,
-      canvas_width: 1280,
-      canvas_height: 720,
-      mask_mode: 'luminance',
-      masks: [],
-      groups: [firstGroup],
-      render_settings: { background: '#000000' },
-    }));
-    setSelectedGroupId(firstGroup.id);
-  };
+  }, [createSceneDraft, loadScene, requestedSceneId]);
 
   const getMaskUrl = useCallback((mask) => {
     if (!selectedSceneId || !mask?.id) return null;

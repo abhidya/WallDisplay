@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Box,
@@ -7,7 +7,6 @@ import {
   CardContent,
   Checkbox,
   Chip,
-  CircularProgress,
   FormControl,
   FormControlLabel,
   Grid,
@@ -25,7 +24,19 @@ import {
   Typography,
 } from '@mui/material';
 
-import { mappingsApi, mediaLibraryApi, photoApi, photoListApi, projectionApi, videoApi } from '../services/api';
+import PageHeader from '../components/PageHeader';
+import StatusPanel from '../components/StatusPanel';
+import {
+  api,
+  discoveryV2Api,
+  mappingsApi,
+  mediaLibraryApi,
+  photoApi,
+  photoListApi,
+  projectionApi,
+  rendererApi,
+  videoApi,
+} from '../services/api';
 
 const SCENE_CONTROL_PRESET_KEY = 'nanoDlnaSceneControlPresetId';
 
@@ -125,35 +136,6 @@ async function hydrateSceneWithCoverage(scene) {
   };
 }
 
-function createGroupAssignments(hydratedScenes) {
-  if (!hydratedScenes.length) {
-    return {};
-  }
-  const canonical = hydratedScenes[0]._sortedGroups || [];
-  const canonicalNames = canonical.map((group) => normalizeGroupName(group.name));
-
-  return Object.fromEntries(hydratedScenes.map((scene, sceneIndex) => {
-    const sortedGroups = scene._sortedGroups || [];
-    if (sceneIndex === 0) {
-      return [scene.id, sortedGroups.map((group) => [group.id])];
-    }
-
-    const remaining = [...sortedGroups];
-    const orderedIds = [];
-    canonicalNames.forEach((name) => {
-      const matchIndex = remaining.findIndex((group) => normalizeGroupName(group.name) === name);
-      if (matchIndex >= 0) {
-        orderedIds.push([remaining[matchIndex].id]);
-        remaining.splice(matchIndex, 1);
-      } else {
-        orderedIds.push([]);
-      }
-    });
-    remaining.forEach((group) => orderedIds.push([group.id]));
-    return [scene.id, orderedIds];
-  }));
-}
-
 function createSmartGroupAssignments(hydratedScenes) {
   if (!hydratedScenes.length) {
     return {};
@@ -216,6 +198,59 @@ function createSmartGroupAssignments(hydratedScenes) {
   ]));
 }
 
+function normalizeRendererProjectors(response) {
+  const data = response?.data;
+  if (Array.isArray(data?.data?.projectors)) {
+    return data.data.projectors;
+  }
+  if (Array.isArray(data?.projectors)) {
+    return data.projectors;
+  }
+  if (Array.isArray(data)) {
+    return data;
+  }
+  return [];
+}
+
+function normalizeDiscoveryDevices(response) {
+  const data = response?.data;
+  if (Array.isArray(data?.data?.devices)) {
+    return data.data.devices;
+  }
+  if (Array.isArray(data?.devices)) {
+    return data.devices;
+  }
+  if (Array.isArray(data)) {
+    return data;
+  }
+  return [];
+}
+
+function projectionTargetKey(target) {
+  return `${target.type}:${target.id}`;
+}
+
+function createProjectionTargets(projectors, devices) {
+  const hdmiTargets = projectors
+    .filter((projector) => String(projector.sender || projector.sender_type || '').toLowerCase() === 'hdmi')
+    .map((projector) => ({
+      type: 'hdmi',
+      id: String(projector.id),
+      name: projector.name || projector.id,
+      detail: projector.target_name ? `HDMI -> ${projector.target_name}` : 'HDMI',
+    }));
+  const dlnaTargets = devices.map((device) => ({
+    type: 'dlna',
+    id: String(device.id || device.device_id || device.name),
+    name: device.friendly_name || device.name || device.id || device.device_id,
+    detail: device.hostname || device.location || 'DLNA',
+  }));
+  return [...hdmiTargets, ...dlnaTargets].map((target) => ({
+    ...target,
+    key: projectionTargetKey(target),
+  }));
+}
+
 function SceneControl() {
   const [scenes, setScenes] = useState([]);
   const [sceneRanks, setSceneRanks] = useState([]);
@@ -246,6 +281,13 @@ function SceneControl() {
   const [selectedPresetId, setSelectedPresetId] = useState('');
   const [pendingPresetPayload, setPendingPresetPayload] = useState(null);
   const [initialPresetHydrated, setInitialPresetHydrated] = useState(false);
+  const [projectionTargets, setProjectionTargets] = useState([]);
+  const [selectedProjectionTargetKey, setSelectedProjectionTargetKey] = useState('');
+  const [selectedProjectionSceneId, setSelectedProjectionSceneId] = useState('');
+  const [projectionStatus, setProjectionStatus] = useState(null);
+  const [projectionLoading, setProjectionLoading] = useState(false);
+  const [brightness, setBrightness] = useState(100);
+  const [brightnessLoading, setBrightnessLoading] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -299,6 +341,35 @@ function SceneControl() {
 
   useEffect(() => {
     let active = true;
+    Promise.allSettled([
+      rendererApi.listProjectors(),
+      discoveryV2Api.getDevices({ casting_method: 'dlna' }),
+      api.get('/overlay/brightness'),
+    ]).then(([projectorResult, discoveryResult, brightnessResult]) => {
+      if (!active) {
+        return;
+      }
+      const nextTargets = createProjectionTargets(
+        projectorResult.status === 'fulfilled' ? normalizeRendererProjectors(projectorResult.value) : [],
+        discoveryResult.status === 'fulfilled' ? normalizeDiscoveryDevices(discoveryResult.value) : [],
+      );
+      setProjectionTargets(nextTargets);
+      setSelectedProjectionTargetKey((current) => (
+        current && nextTargets.some((target) => target.key === current)
+          ? current
+          : nextTargets[0]?.key || ''
+      ));
+      if (brightnessResult.status === 'fulfilled' && typeof brightnessResult.value?.data?.brightness === 'number') {
+        setBrightness(brightnessResult.value.data.brightness);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
     if (!selectedSceneIds.length) {
       setSelectedScenes([]);
       setRowEdits({});
@@ -343,6 +414,15 @@ function SceneControl() {
     return () => {
       active = false;
     };
+  }, [pendingPresetPayload, selectedSceneIds]);
+
+  useEffect(() => {
+    setSelectedProjectionSceneId((current) => {
+      if (current && selectedSceneIds.some((sceneId) => String(sceneId) === String(current))) {
+        return current;
+      }
+      return selectedSceneIds[0] ? String(selectedSceneIds[0]) : '';
+    });
   }, [selectedSceneIds]);
 
   const selectedRank = useMemo(() => {
@@ -375,6 +455,47 @@ function SceneControl() {
     sceneControlPresets.find((preset) => String(preset.id) === String(selectedPresetId)) || null
   ), [sceneControlPresets, selectedPresetId]);
 
+  const selectedProjectionTarget = useMemo(() => (
+    projectionTargets.find((target) => target.key === selectedProjectionTargetKey) || null
+  ), [projectionTargets, selectedProjectionTargetKey]);
+
+  const applyPreset = useCallback(async (presetId) => {
+    if (!presetId) {
+      setSelectedPresetId('');
+      setPresetName('');
+      window.localStorage.removeItem(SCENE_CONTROL_PRESET_KEY);
+      return;
+    }
+    try {
+      setPresetLoading(true);
+      setError('');
+      setMessage('');
+      const response = await mappingsApi.getSceneControlPreset(presetId);
+      const preset = response.data;
+      setSelectedPresetId(String(preset.id));
+      setPresetName(preset.name || '');
+      setPendingPresetPayload({
+        scene_ids: (preset.scene_ids || []).map(Number),
+        group_assignments: preset.group_assignments || {},
+        row_edits: preset.row_edits || {},
+      });
+      setSelectedSceneIds((preset.scene_ids || []).map(Number));
+      const linkedRank = preset.rank_id
+        ? sceneRanks.find((rank) => Number(rank.id) === Number(preset.rank_id))
+        : null;
+      if (linkedRank) {
+        setRankName(linkedRank.name || '');
+        setRankGapPx(linkedRank.gap_px || 0);
+      }
+      setMessage(`Loaded preset "${preset.name}".`);
+    } catch (err) {
+      console.error(err);
+      setError('Failed to load scene control preset.');
+    } finally {
+      setPresetLoading(false);
+    }
+  }, [sceneRanks]);
+
   useEffect(() => {
     if (selectedPreset) {
       setPresetName(selectedPreset.name || '');
@@ -397,7 +518,7 @@ function SceneControl() {
     }
     setInitialPresetHydrated(true);
     applyPreset(selectedPresetId);
-  }, [initialPresetHydrated, selectedPresetId, sceneControlPresets.length]);
+  }, [applyPreset, initialPresetHydrated, selectedPresetId, sceneControlPresets.length]);
 
   const alignedRows = useMemo(() => {
     const rowCount = Math.max(0, ...Object.values(groupAssignments).map((assignments) => assignments?.length || 0));
@@ -489,43 +610,6 @@ function SceneControl() {
       setError('Failed to save scene rank.');
     } finally {
       setRankSaving(false);
-    }
-  };
-
-  const applyPreset = async (presetId) => {
-    if (!presetId) {
-      setSelectedPresetId('');
-      setPresetName('');
-      window.localStorage.removeItem(SCENE_CONTROL_PRESET_KEY);
-      return;
-    }
-    try {
-      setPresetLoading(true);
-      setError('');
-      setMessage('');
-      const response = await mappingsApi.getSceneControlPreset(presetId);
-      const preset = response.data;
-      setSelectedPresetId(String(preset.id));
-      setPresetName(preset.name || '');
-      setPendingPresetPayload({
-        scene_ids: (preset.scene_ids || []).map(Number),
-        group_assignments: preset.group_assignments || {},
-        row_edits: preset.row_edits || {},
-      });
-      setSelectedSceneIds((preset.scene_ids || []).map(Number));
-      const linkedRank = preset.rank_id
-        ? sceneRanks.find((rank) => Number(rank.id) === Number(preset.rank_id))
-        : null;
-      if (linkedRank) {
-        setRankName(linkedRank.name || '');
-        setRankGapPx(linkedRank.gap_px || 0);
-      }
-      setMessage(`Loaded preset "${preset.name}".`);
-    } catch (err) {
-      console.error(err);
-      setError('Failed to load scene control preset.');
-    } finally {
-      setPresetLoading(false);
     }
   };
 
@@ -710,22 +794,96 @@ function SceneControl() {
     setMessage('Auto-assigned groups by name first, then by size similarity.');
   };
 
+  const launchProjection = async () => {
+    if (!selectedProjectionSceneId || !selectedProjectionTarget) {
+      setError('Select a scene and projection target first.');
+      return;
+    }
+    try {
+      setProjectionLoading(true);
+      setError('');
+      setMessage('');
+      const response = await mappingsApi.projectScene(Number(selectedProjectionSceneId), {
+        target_type: selectedProjectionTarget.type,
+        target_id: selectedProjectionTarget.id,
+        overlay_base_url: `${window.location.protocol}//${window.location.host}`,
+        controls_hidden: true,
+      });
+      setProjectionStatus(response.data);
+      setMessage(`Launched scene on ${selectedProjectionTarget.name}.`);
+    } catch (err) {
+      console.error(err);
+      setError('Failed to launch scene projection.');
+    } finally {
+      setProjectionLoading(false);
+    }
+  };
+
+  const stopProjection = async () => {
+    const activeTransport = projectionStatus?.transport || selectedProjectionTarget?.type;
+    const activeTargetId = activeTransport === 'dlna'
+      ? projectionStatus?.cast_session?.session_id
+      : selectedProjectionTarget?.id;
+    if (!activeTransport || !activeTargetId) {
+      setError('No active projection target to stop.');
+      return;
+    }
+    try {
+      setProjectionLoading(true);
+      setError('');
+      setMessage('');
+      await mappingsApi.stopSceneProjection({
+        target_type: activeTransport,
+        target_id: activeTargetId,
+      });
+      setProjectionStatus(null);
+      setMessage('Stopped scene projection.');
+    } catch (err) {
+      console.error(err);
+      setError('Failed to stop scene projection.');
+    } finally {
+      setProjectionLoading(false);
+    }
+  };
+
+  const updateBrightness = async (value) => {
+    const nextBrightness = Math.max(0, Math.min(100, Number(value) || 0));
+    setBrightness(nextBrightness);
+    try {
+      setBrightnessLoading(true);
+      setError('');
+      await api.post(`/overlay/brightness?brightness=${nextBrightness}`);
+    } catch (err) {
+      console.error(err);
+      setError('Failed to update projection brightness.');
+    } finally {
+      setBrightnessLoading(false);
+    }
+  };
+
   if (loading) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '50vh' }}>
-        <CircularProgress />
-      </Box>
+      <StatusPanel
+        title="Loading Scene Control"
+        message="Loading scenes, saved ranks, media bindings, and projection presets."
+        loading
+      />
     );
   }
 
   return (
     <Stack spacing={3}>
-      <Box>
-        <Typography variant="h4">Scene Control</Typography>
-        <Typography variant="body2" color="text.secondary">
-          Batch-edit existing groups across multiple scenes. Same-name groups auto-align first, then remaining groups are assigned by coverage-size similarity. Drag a group within its scene column to move it to a different rank or combine multiple groups into one row.
-        </Typography>
-      </Box>
+      <PageHeader
+        title="Scene Control"
+        subtitle="Batch-edit existing groups across multiple scenes, align ranks, and bind media without leaving the operations view."
+        meta={(
+          <>
+            <Chip label={`${selectedSceneIds.length} selected`} color={selectedSceneIds.length ? 'primary' : 'default'} />
+            <Chip label={`${scenes.length} scenes`} variant="outlined" />
+            <Chip label={`${sceneRanks.length} ranks`} variant="outlined" />
+          </>
+        )}
+      />
 
       {error ? <Alert severity="error">{error}</Alert> : null}
       {message ? <Alert severity="success">{message}</Alert> : null}
@@ -738,6 +896,89 @@ function SceneControl() {
               Select the mapping scenes you want to align and batch-edit.
             </Typography>
             <Stack spacing={1.25} sx={{ mb: 2 }}>
+              <Typography variant="subtitle2">Project Scene</Typography>
+              <FormControl fullWidth size="small">
+                <InputLabel>Projection Scene</InputLabel>
+                <Select
+                  value={selectedProjectionSceneId}
+                  label="Projection Scene"
+                  onChange={(event) => setSelectedProjectionSceneId(event.target.value)}
+                >
+                  <MenuItem value="">None</MenuItem>
+                  {selectedSceneIds.map((sceneId) => {
+                    const scene = scenes.find((item) => item.id === sceneId);
+                    if (!scene) {
+                      return null;
+                    }
+                    return (
+                      <MenuItem key={scene.id} value={String(scene.id)}>
+                        {scene.name}
+                      </MenuItem>
+                    );
+                  })}
+                </Select>
+              </FormControl>
+              <FormControl fullWidth size="small">
+                <InputLabel>Target</InputLabel>
+                <Select
+                  value={selectedProjectionTargetKey}
+                  label="Target"
+                  onChange={(event) => setSelectedProjectionTargetKey(event.target.value)}
+                >
+                  <MenuItem value="">No target</MenuItem>
+                  {projectionTargets.map((target) => (
+                    <MenuItem key={target.key} value={target.key}>
+                      {target.name} ({target.type.toUpperCase()}) - {target.detail}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <Stack direction="row" spacing={1}>
+                <Button
+                  variant="contained"
+                  onClick={launchProjection}
+                  disabled={projectionLoading || !selectedProjectionSceneId || !selectedProjectionTarget}
+                >
+                  {projectionLoading ? 'Working...' : 'Launch'}
+                </Button>
+                <Button
+                  variant="outlined"
+                  color="error"
+                  onClick={stopProjection}
+                  disabled={projectionLoading || (!projectionStatus && selectedProjectionTarget?.type === 'dlna')}
+                >
+                  Stop
+                </Button>
+              </Stack>
+              {projectionStatus ? (
+                <Stack direction="row" spacing={0.75} sx={{ flexWrap: 'wrap' }}>
+                  <Chip label={projectionStatus.transport?.toUpperCase()} size="small" />
+                  <Chip label={projectionStatus.status} size="small" variant="outlined" />
+                </Stack>
+              ) : null}
+              <TextField
+                label="Brightness"
+                size="small"
+                type="number"
+                value={brightness}
+                inputProps={{ min: 0, max: 100 }}
+                onChange={(event) => setBrightness(event.target.value)}
+                onBlur={(event) => updateBrightness(event.target.value)}
+                disabled={brightnessLoading}
+              />
+              <Stack direction="row" spacing={0.75} sx={{ flexWrap: 'wrap' }}>
+                {[0, 25, 75, 100].map((value) => (
+                  <Button
+                    key={value}
+                    size="small"
+                    variant={Number(brightness) === value ? 'contained' : 'outlined'}
+                    onClick={() => updateBrightness(value)}
+                    disabled={brightnessLoading}
+                  >
+                    {value}%
+                  </Button>
+                ))}
+              </Stack>
               <Typography variant="subtitle2">Workspace Preset</Typography>
               <FormControl fullWidth size="small">
                 <InputLabel>Saved Preset</InputLabel>

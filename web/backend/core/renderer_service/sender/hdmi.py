@@ -19,6 +19,8 @@ from typing import Dict, List, Optional
 
 from .base import Sender
 
+CHROMIUM_GPU_FLAGS = ["--enable-gpu", "--ignore-gpu-blocklist"]
+
 
 @dataclass
 class DisplayInfo:
@@ -438,6 +440,7 @@ class HDMISender(Sender):
 
         if "chrome" in lower_cmd or "chromium" in lower_cmd or "msedge" in lower_cmd:
             args = [browser_cmd, "--new-window", "--no-first-run", "--disable-infobars"]
+            args.extend(CHROMIUM_GPU_FLAGS)
             if self.kiosk_mode:
                 args.append("--kiosk")
             else:

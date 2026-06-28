@@ -26,6 +26,7 @@ import {
   ContentCopy as CopyIcon,
   Refresh as RefreshIcon,
 } from '@mui/icons-material';
+import PageHeader from '../components/PageHeader';
 import { projectionApi } from '../services/api';
 
 const PREVIEW_BUNDLE_VERSION = '20260403-anim-4';
@@ -155,17 +156,17 @@ function ProjectionAnimation() {
   return (
     <Grid container spacing={3}>
       <Grid item xs={12}>
-        <Paper sx={{ p: 3 }}>
-          <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={2}>
-            <Box>
-              <Typography variant="h4" gutterBottom>
-                Projection Animation
-              </Typography>
-              <Typography variant="body1" color="text.secondary">
-                Projection animations are reusable visual sources. Use the library here for preview and selection, then bind
-                them as media sources inside Mapping or Scene Control.
-              </Typography>
-            </Box>
+        <PageHeader
+          title="Projection Animation"
+          subtitle="Preview reusable animation sources and organize lists for mapping or scene-control bindings."
+          meta={(
+            <>
+              <Chip label={`${animations.length} animations`} color={animations.length ? 'success' : 'default'} />
+              <Chip label={`${animationLists.length} lists`} variant="outlined" />
+              <Chip label={loading ? 'loading' : 'ready'} variant="outlined" />
+            </>
+          )}
+          actions={(
             <Button
               variant="outlined"
               startIcon={<RefreshIcon />}
@@ -179,8 +180,8 @@ function ProjectionAnimation() {
             >
               Refresh Library
             </Button>
-          </Stack>
-        </Paper>
+          )}
+        />
       </Grid>
 
       <Grid item xs={12}>

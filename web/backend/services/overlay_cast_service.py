@@ -18,13 +18,13 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Dict, Optional
-from urllib.parse import urlencode
 
 import aiohttp
 
 from discovery.base import CastingSession
 from discovery.discovery_manager import DiscoveryManager
 from discovery.network import get_local_ipv4_addresses
+from web.backend.core.overlay_window_url import build_overlay_window_url
 from web.backend.services.overlay_cast_pipeline import OverlayCastPipelineModule
 
 logger = logging.getLogger(__name__)
@@ -814,15 +814,13 @@ class OverlayCastService:
         hide_widgets: bool = False,
         capture_mode: Optional[str] = None,
     ) -> str:
-        base = overlay_base_url.rstrip("/")
-        params = {"config_id": config_id}
-        if controls_hidden:
-            params["controls"] = "hidden"
-        if hide_widgets:
-            params["widgets"] = "hidden"
-        if capture_mode:
-            params["capture"] = capture_mode
-        return f"{base}/backend-static/overlay_window.html?{urlencode(params)}"
+        return build_overlay_window_url(
+            overlay_base_url,
+            config_id=config_id,
+            controls_hidden=controls_hidden,
+            hide_widgets=hide_widgets,
+            capture_mode=capture_mode,
+        )
 
     def _get_local_ip(self, device_id: Optional[str] = None) -> str:
         for env_name in ("STREAMING_SERVE_IP", "NANODLNA_DISCOVERY_INTERFACE_IP", "SERVE_IP"):

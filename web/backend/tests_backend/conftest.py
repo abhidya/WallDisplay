@@ -72,9 +72,10 @@ def test_db():
     Create a test database and provide a single shared session for both
     the test function and the FastAPI app's dependency override.
     """
-    temp_db_file = tempfile.NamedTemporaryFile(suffix=".db")
+    temp_db_fd, temp_db_path = tempfile.mkstemp(suffix=".db")
+    os.close(temp_db_fd)
     engine = create_engine(
-        f"sqlite:///{temp_db_file.name}",
+        f"sqlite:///{temp_db_path}",
         connect_args={"check_same_thread": False} # Necessary for SQLite
     )
     TestingSessionShared = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -91,11 +92,11 @@ def test_db():
     from sqlalchemy import inspect
     inspector = inspect(engine)
     actual_tables = inspector.get_table_names()
-    print(f"DEBUG: Actual tables found in database '{temp_db_file.name}' after create_all: {actual_tables}")
+    print(f"DEBUG: Actual tables found in database '{temp_db_path}' after create_all: {actual_tables}")
     if not ('devices' in actual_tables and 'videos' in actual_tables):
         metadata_keys = list(Base.metadata.tables.keys())
         error_message = (
-            f"Test DB setup failed: Expected tables 'devices' and 'videos' were NOT created in {temp_db_file.name}.\n"
+            f"Test DB setup failed: Expected tables 'devices' and 'videos' were NOT created in {temp_db_path}.\n"
             f"Registered tables in Base.metadata before create_all: {metadata_keys}\n"
             f"Actual tables found in database after create_all: {actual_tables}"
         )
@@ -129,7 +130,11 @@ def test_db():
         
         shared_session.close()
         Base.metadata.drop_all(bind=engine)
-        temp_db_file.close()
+        engine.dispose()
+        try:
+            os.remove(temp_db_path)
+        except FileNotFoundError:
+            pass
 
 
 @pytest.fixture(scope="function")

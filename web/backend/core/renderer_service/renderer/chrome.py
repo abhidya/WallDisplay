@@ -17,6 +17,17 @@ import shutil
 
 from .base import Renderer
 
+GPU_DISABLE_FLAGS = {"--disable-gpu", "--disable-gpu-compositing"}
+GPU_ENABLE_FLAGS = ["--enable-gpu", "--ignore-gpu-blocklist"]
+
+
+def _prefer_hardware_acceleration(args: List[str]) -> List[str]:
+    chrome_args = [arg for arg in args if arg not in GPU_DISABLE_FLAGS]
+    for flag in GPU_ENABLE_FLAGS:
+        if flag not in chrome_args:
+            chrome_args.append(flag)
+    return chrome_args
+
 
 class ChromeRenderer(Renderer):
     """
@@ -43,10 +54,14 @@ class ChromeRenderer(Renderer):
         
         # Set Chrome arguments based on headless mode
         if self.headless:
-            self.chrome_args = config.get('args', ['--headless', '--disable-gpu', '--no-sandbox'])
+            self.chrome_args = _prefer_hardware_acceleration(
+                config.get('args', ['--headless', '--no-sandbox'])
+            )
         else:
             # Non-headless mode for testing and AirPlay
-            self.chrome_args = config.get('args', ['--disable-gpu', '--no-sandbox', '--start-fullscreen'])
+            self.chrome_args = _prefer_hardware_acceleration(
+                config.get('args', ['--no-sandbox', '--start-fullscreen'])
+            )
             
         self.timeout = config.get('timeout', 30)
         self.process = None
@@ -379,7 +394,7 @@ class ChromeRenderer(Renderer):
             
             # Update specific attributes based on the new configuration
             self.chrome_path = self.config.get('path', self.chrome_path)
-            self.chrome_args = self.config.get('args', self.chrome_args)
+            self.chrome_args = _prefer_hardware_acceleration(self.config.get('args', self.chrome_args))
             self.timeout = self.config.get('timeout', self.timeout)
             self.port_range = self.config.get('port_range', self.port_range)
             self.host = self.config.get('host', self.host)

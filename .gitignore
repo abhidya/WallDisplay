@@ -220,6 +220,7 @@ auto_play_venv/
 .coverage
 htmlcov/
 .pytest_cache/
+.pytest_tmp/
 coverage.xml
 backend_coverage_report.txt
 
@@ -303,5 +304,7 @@ web/backend/uploads/structured_lighting/*/
 !.codex/skills/
 !.codex/skills/**
 .codex/skills/.system/**
+.codex/skills/**/__pycache__/
+.codex/skills/**/*.py[cod]
 !.codex/prompts/
 !.codex/prompts/**

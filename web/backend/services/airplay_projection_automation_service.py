@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import os
 import shutil
@@ -21,6 +23,16 @@ except ImportError:
 from web.backend.core.renderer_service.sender.airplay import AirPlaySender
 
 logger = logging.getLogger(__name__)
+GPU_DISABLE_FLAGS = {"--disable-gpu", "--disable-gpu-compositing"}
+GPU_ENABLE_FLAGS = ["--enable-gpu", "--ignore-gpu-blocklist"]
+
+
+def _prefer_hardware_acceleration(args: list[str]) -> list[str]:
+    chrome_args = [arg for arg in args if arg not in GPU_DISABLE_FLAGS]
+    for flag in GPU_ENABLE_FLAGS:
+        if flag not in chrome_args:
+            chrome_args.append(flag)
+    return chrome_args
 
 
 def _coerce_bool(value: Any, default: bool) -> bool:
@@ -115,7 +127,7 @@ def load_airplay_projection_automation_config(
         or "hccast"
     ).strip()
 
-    chrome_args = list(chrome_config.get("args") or [])
+    chrome_args = _prefer_hardware_acceleration(list(chrome_config.get("args") or []))
     if "--new-window" not in chrome_args:
         chrome_args.append("--new-window")
     if "--no-first-run" not in chrome_args:

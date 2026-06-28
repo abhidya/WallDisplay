@@ -1,11 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Box,
   Button,
   CircularProgress,
   Chip,
-  Divider,
   Grid,
   LinearProgress,
   Paper,
@@ -28,6 +27,8 @@ import {
   Link as LinkIcon,
   Movie as MovieIcon
 } from '@mui/icons-material';
+import PageHeader from '../components/PageHeader';
+import StatusPanel from '../components/StatusPanel';
 import { deviceApi } from '../services/api';
 
 function formatDurationSeconds(value) {
@@ -172,13 +173,31 @@ function DeviceDetail() {
     severity: 'success'
   });
   const [, forceUpdate] = useState(0);
+  const initialLoadRef = useRef(true);
+
+  const fetchDevice = useCallback(async () => {
+    try {
+      if (initialLoadRef.current) {
+        setLoading(true);
+      }
+      const response = await deviceApi.getDevice(id);
+      setDevice(response.data);
+      setLoading(false);
+      initialLoadRef.current = false;
+    } catch (err) {
+      console.error('Error fetching device:', err);
+      setError('Failed to load device. Please try again later.');
+      setLoading(false);
+      initialLoadRef.current = false;
+    }
+  }, [id]);
 
   useEffect(() => {
     fetchDevice();
     // Poll for device updates at a moderate interval to reduce backend churn.
     const interval = setInterval(fetchDevice, 15000);
     return () => clearInterval(interval);
-  }, [id]);
+  }, [fetchDevice]);
 
   // Timer to update display every second
   useEffect(() => {
@@ -200,22 +219,6 @@ function DeviceDetail() {
       }
     };
   }, [device]);
-
-  const fetchDevice = async () => {
-    try {
-      // Only show loading on initial load
-      if (!device) {
-        setLoading(true);
-      }
-      const response = await deviceApi.getDevice(id);
-      setDevice(response.data);
-      setLoading(false);
-    } catch (err) {
-      console.error('Error fetching device:', err);
-      setError('Failed to load device. Please try again later.');
-      setLoading(false);
-    }
-  };
 
   const handleDeviceAction = async (action) => {
     try {
@@ -347,12 +350,16 @@ function DeviceDetail() {
 
   if (!device) {
     return (
-      <Box sx={{ p: 3 }}>
-        <Typography variant="h6">Device not found</Typography>
-        <Button variant="contained" onClick={() => navigate('/devices')}>
-          Back to Devices
-        </Button>
-      </Box>
+      <StatusPanel
+        severity="error"
+        title="Device Not Found"
+        description="This device is not currently available in the WallDisplay registry."
+        action={(
+          <Button variant="contained" onClick={() => navigate('/devices')}>
+            Back to Devices
+          </Button>
+        )}
+      />
     );
   }
 
@@ -360,20 +367,27 @@ function DeviceDetail() {
 
   return (
     <Grid container spacing={3}>
-      {/* Header */}
       <Grid item xs={12}>
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-          <Button
-            variant="outlined"
-            startIcon={<ArrowBackIcon />}
-            onClick={() => navigate('/devices')}
-            sx={{ mr: 2 }}
-          >
-            Back
-          </Button>
-          <Typography variant="h4">{device.friendly_name || device.name}</Typography>
-        </Box>
-        <Divider sx={{ mb: 2 }} />
+        <PageHeader
+          title={device.friendly_name || device.name}
+          subtitle={`${device.type || 'Device'} at ${device.hostname || 'unknown host'}`}
+          meta={(
+            <>
+              <Chip label={getAvailabilityLabel(device)} color={getAvailabilityColor(getAvailabilityLabel(device))} />
+              <Chip label={device.is_playing ? 'playing' : 'idle'} variant="outlined" />
+              <Chip label={hdmi ? 'HDMI' : 'overlay'} variant="outlined" />
+            </>
+          )}
+          actions={(
+            <Button
+              variant="outlined"
+              startIcon={<ArrowBackIcon />}
+              onClick={() => navigate('/devices')}
+            >
+              Back
+            </Button>
+          )}
+        />
       </Grid>
 
       {/* Device Info */}
@@ -531,10 +545,10 @@ function DeviceDetail() {
                   <ListItem>
                     <Box sx={{ width: '100%' }}>
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                        <Typography variant="caption" color="textSecondary">
+                        <Typography variant="caption" color="text.secondary">
                           {calculateCurrentPosition(device)}
                         </Typography>
-                        <Typography variant="caption" color="textSecondary">
+                        <Typography variant="caption" color="text.secondary">
                           {device.playback_duration || "00:00:00"}
                         </Typography>
                       </Box>

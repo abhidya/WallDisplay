@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   Grid,
   Paper,
@@ -10,7 +10,6 @@ import {
   CardMedia,
   Box,
   CircularProgress,
-  Divider,
   Alert,
   Snackbar,
   TextField,
@@ -29,6 +28,7 @@ import {
   Refresh as RefreshIcon,
   Visibility as VisibilityIcon
 } from '@mui/icons-material';
+import PageHeader from '../components/PageHeader';
 import { depthApi } from '../services/api';
 
 function DepthProcessing() {
@@ -207,13 +207,27 @@ function DepthProcessing() {
 
   return (
     <Grid container spacing={3}>
-      {/* Header */}
       <Grid item xs={12}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Typography variant="h4">Depth Processing</Typography>
-        </Box>
-        <Divider sx={{ mb: 2 }} />
+        <PageHeader
+          title="Depth Processing"
+          subtitle="Upload depth maps, segment surfaces, and prepare masks for projection workflows."
+          meta={(
+            <>
+              <Chip label={uploadedDepthMap ? 'depth map loaded' : 'awaiting upload'} color={uploadedDepthMap ? 'success' : 'default'} />
+              <Chip label={segmentationResult ? `${segmentationResult.segment_count} segments` : 'no segments'} variant="outlined" />
+              <Chip label={`${selectedSegments.length} selected`} variant="outlined" />
+            </>
+          )}
+        />
       </Grid>
+
+      {error && (
+        <Grid item xs={12}>
+          <Alert severity="error" onClose={() => setError(null)}>
+            {error}
+          </Alert>
+        </Grid>
+      )}
 
       {/* Upload Section */}
       <Grid item xs={12}>
@@ -428,7 +442,7 @@ function DepthProcessing() {
         <Grid item xs={12}>
           <Paper sx={{ p: 2, mb: 3 }}>
             <Typography variant="h6" gutterBottom>Projection Mapping</Typography>
-            <Typography variant="body2" color="textSecondary">
+            <Typography variant="body2" color="text.secondary">
               Create projection mapping configurations using the segmented depth map.
               This feature allows you to map videos to specific surfaces detected in the depth map.
             </Typography>

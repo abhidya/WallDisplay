@@ -6,6 +6,7 @@ import {
   Card,
   CardContent,
   CardMedia,
+  Chip,
   Dialog,
   DialogActions,
   DialogContent,
@@ -24,6 +25,7 @@ import {
 import { Add as AddIcon, Delete as DeleteIcon, Refresh as RefreshIcon, Upload as UploadIcon } from '@mui/icons-material';
 
 import { photoApi, photoListApi } from '../services/api';
+import PageHeader from '../components/PageHeader';
 
 function Photos() {
   const [photos, setPhotos] = useState([]);
@@ -180,10 +182,19 @@ function Photos() {
   };
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
-        <Typography variant="h4">Photos</Typography>
-        <Stack direction="row" spacing={1}>
+    <Box sx={{ display: 'grid', gap: 3 }}>
+      <PageHeader
+        title="Photos"
+        subtitle="Curate still-image assets and photo lists for background, pattern, and projection workflows."
+        meta={(
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+            <Chip label={`${photos.length} photos`} color="primary" />
+            <Chip label={`${photoLists.length} lists`} color="secondary" variant="outlined" />
+            {selectedPhoto ? <Chip label={`Selected: ${selectedPhoto.name}`} variant="outlined" /> : null}
+          </Stack>
+        )}
+        actions={(
+          <>
           <Button variant="outlined" startIcon={<RefreshIcon />} onClick={fetchPhotos}>Refresh</Button>
           <Button variant="outlined" startIcon={<AddIcon />} onClick={() => setOpenAddDialog(true)}>Add Photo</Button>
           <Button variant="outlined" startIcon={<UploadIcon />} component="label">
@@ -209,14 +220,33 @@ function Photos() {
           >
             Create Photo List
           </Button>
-        </Stack>
-      </Stack>
+          </>
+        )}
+      />
 
-      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>{error}</Alert>}
-      {message && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setMessage('')}>{message}</Alert>}
+      {error && <Alert severity="error" onClose={() => setError('')}>{error}</Alert>}
+      {message && <Alert severity="success" onClose={() => setMessage('')}>{message}</Alert>}
 
-      <Typography variant="h6" sx={{ mb: 2 }}>Library</Typography>
-      <Grid container spacing={2} sx={{ mb: 4 }}>
+      <Box>
+        <Typography variant="h6" sx={{ mb: 2 }}>Library</Typography>
+        {photos.length === 0 ? (
+          <Box
+            sx={{
+              bgcolor: 'background.paper',
+              border: '1px solid',
+              borderColor: 'divider',
+              borderRadius: 2,
+              p: 3,
+            }}
+          >
+            <Typography variant="subtitle1" fontWeight={700}>No photos found</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+              Add, upload, or scan a directory to create photo assets.
+            </Typography>
+          </Box>
+        ) : null}
+      </Box>
+      <Grid container spacing={2}>
         {photos.map((photo) => (
           <Grid item xs={12} sm={6} md={4} lg={3} key={photo.id}>
             <Card variant={selectedPhoto?.id === photo.id ? 'elevation' : 'outlined'}>
@@ -237,10 +267,23 @@ function Photos() {
         ))}
       </Grid>
 
-      <Typography variant="h6" sx={{ mb: 2 }}>Photo Lists</Typography>
+      <Typography variant="h6">Photo Lists</Typography>
       <Stack spacing={1}>
         {photoLists.map((list) => (
-          <Stack key={list.id} direction="row" justifyContent="space-between" alignItems="center" sx={{ p: 2, border: '1px solid #ddd', borderRadius: 1 }}>
+          <Stack
+            key={list.id}
+            direction={{ xs: 'column', sm: 'row' }}
+            spacing={1.5}
+            justifyContent="space-between"
+            alignItems={{ xs: 'flex-start', sm: 'center' }}
+            sx={{
+              bgcolor: 'background.paper',
+              border: '1px solid',
+              borderColor: 'divider',
+              borderRadius: 2,
+              p: 2,
+            }}
+          >
             <Box>
               <Typography variant="subtitle1">{list.name}</Typography>
               <Typography variant="body2" color="text.secondary">

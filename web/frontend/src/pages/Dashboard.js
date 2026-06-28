@@ -13,17 +13,21 @@ import {
   ListItemAvatar,
   Avatar,
   Divider,
-  CircularProgress,
-  Box
+  Box,
+  Chip,
+  Stack
 } from '@mui/material';
 import { 
   Devices as DevicesIcon, 
   VideoLibrary as VideoLibraryIcon,
   Pause as PauseIcon,
-  Stop as StopIcon
+  Stop as StopIcon,
+  NetworkCheck as NetworkCheckIcon
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { deviceApi, videoApi } from '../services/api';
+import PageHeader from '../components/PageHeader';
+import StatusPanel from '../components/StatusPanel';
 
 function getCastingMethod(device) {
   return device?.casting_method || device?.config?.casting_method || device?.type || '';
@@ -85,46 +89,51 @@ function Dashboard() {
 
   if (loading) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-        <CircularProgress />
-      </Box>
+      <StatusPanel
+        loading
+        title="Loading dashboard"
+        message="Gathering device and media status from the control plane."
+      />
     );
   }
 
   if (error) {
     return (
-      <Box sx={{ p: 3 }}>
-        <Typography color="error" variant="h6">{error}</Typography>
-        <Button variant="contained" onClick={() => window.location.reload()}>
-          Retry
-        </Button>
-      </Box>
+      <StatusPanel
+        severity="error"
+        title={error}
+        message="Check that the backend is running, then retry the dashboard summary."
+        actionLabel="Retry"
+        onAction={() => window.location.reload()}
+      />
     );
   }
 
   return (
-    <Grid container spacing={3}>
-      {/* Header */}
+    <Grid container spacing={3} alignItems="stretch">
       <Grid item xs={12}>
-        <Typography variant="h4" gutterBottom>
-          Dashboard
-        </Typography>
-        <Typography variant="body1" color="textSecondary" paragraph>
-          Welcome to the WallDisplay dashboard. Manage HDMI, DLNA, and Transcreen projectors from here.
-        </Typography>
+        <PageHeader
+          title="WallDisplay Ops"
+          subtitle="Manage HDMI, DLNA, AirPlay, and projection workflows from one local control plane."
+          actions={(
+            <>
+              <Chip icon={<NetworkCheckIcon />} label={`${devices.length} devices`} color="primary" />
+              <Chip icon={<VideoLibraryIcon />} label={`${videos.length} videos`} color="secondary" variant="outlined" />
+            </>
+          )}
+        />
       </Grid>
 
-      {/* Active Devices */}
       <Grid item xs={12} md={6}>
-        <Paper sx={{ p: 2 }}>
-          <Typography variant="h6" gutterBottom>
-            <DevicesIcon sx={{ verticalAlign: 'middle', mr: 1 }} />
-            Active Devices
-          </Typography>
+        <Paper variant="outlined" sx={{ p: 2, height: '100%' }}>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <DevicesIcon color="primary" />
+            <Typography variant="h6">Active Devices</Typography>
+          </Stack>
           <Divider sx={{ my: 1 }} />
           
           {devices.length === 0 ? (
-            <Typography variant="body2" color="textSecondary" sx={{ py: 2 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
               No active devices found.
             </Typography>
           ) : (
@@ -164,9 +173,10 @@ function Dashboard() {
                           </Button>
                         </>
                       ) : (
-                        <Button 
-                          size="small" 
+                        <Button
+                          size="small"
                           color="primary"
+                          variant="outlined"
                           onClick={() => navigate(`/devices/${device.id}`)}
                         >
                           Details
@@ -192,17 +202,16 @@ function Dashboard() {
         </Paper>
       </Grid>
 
-      {/* Recent Videos */}
       <Grid item xs={12} md={6}>
-        <Paper sx={{ p: 2 }}>
-          <Typography variant="h6" gutterBottom>
-            <VideoLibraryIcon sx={{ verticalAlign: 'middle', mr: 1 }} />
-            Recent Videos
-          </Typography>
+        <Paper variant="outlined" sx={{ p: 2, height: '100%' }}>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <VideoLibraryIcon color="secondary" />
+            <Typography variant="h6">Recent Videos</Typography>
+          </Stack>
           <Divider sx={{ my: 1 }} />
           
           {videos.length === 0 ? (
-            <Typography variant="body2" color="textSecondary" sx={{ py: 2 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
               No videos found.
             </Typography>
           ) : (
@@ -220,9 +229,10 @@ function Dashboard() {
                       secondary={`Duration: ${video.duration ? Math.floor(video.duration / 60) + 'm ' + Math.floor(video.duration % 60) + 's' : 'Unknown'}`} 
                     />
                     <CardActions>
-                      <Button 
-                        size="small" 
+                      <Button
+                        size="small"
                         color="primary"
+                        variant="outlined"
                         onClick={() => navigate(`/videos/${video.id}`)}
                       >
                         Details
@@ -247,19 +257,18 @@ function Dashboard() {
         </Paper>
       </Grid>
 
-      {/* Quick Actions */}
       <Grid item xs={12}>
-        <Paper sx={{ p: 2 }}>
+        <Box>
           <Typography variant="h6" gutterBottom>
             Quick Actions
           </Typography>
           <Divider sx={{ my: 1 }} />
           <Grid container spacing={2}>
             <Grid item xs={12} sm={6} md={3}>
-              <Card>
+              <Card sx={{ height: '100%' }}>
                 <CardContent>
                   <Typography variant="h6">Discover Devices</Typography>
-                  <Typography variant="body2" color="textSecondary">
+                  <Typography variant="body2" color="text.secondary">
                     Scan your network for DLNA devices
                   </Typography>
                 </CardContent>
@@ -275,10 +284,10 @@ function Dashboard() {
               </Card>
             </Grid>
             <Grid item xs={12} sm={6} md={3}>
-              <Card>
+              <Card sx={{ height: '100%' }}>
                 <CardContent>
                   <Typography variant="h6">Add Video</Typography>
-                  <Typography variant="body2" color="textSecondary">
+                  <Typography variant="body2" color="text.secondary">
                     Add a new video to your library
                   </Typography>
                 </CardContent>
@@ -294,10 +303,10 @@ function Dashboard() {
               </Card>
             </Grid>
             <Grid item xs={12} sm={6} md={3}>
-              <Card>
+              <Card sx={{ height: '100%' }}>
                 <CardContent>
                   <Typography variant="h6">Scan Directory</Typography>
-                  <Typography variant="body2" color="textSecondary">
+                  <Typography variant="body2" color="text.secondary">
                     Scan a directory for videos
                   </Typography>
                 </CardContent>
@@ -313,10 +322,10 @@ function Dashboard() {
               </Card>
             </Grid>
             <Grid item xs={12} sm={6} md={3}>
-              <Card>
+              <Card sx={{ height: '100%' }}>
                 <CardContent>
                   <Typography variant="h6">Load Config</Typography>
-                  <Typography variant="body2" color="textSecondary">
+                  <Typography variant="body2" color="text.secondary">
                     Load devices from a config file
                   </Typography>
                 </CardContent>
@@ -332,7 +341,7 @@ function Dashboard() {
               </Card>
             </Grid>
           </Grid>
-        </Paper>
+        </Box>
       </Grid>
     </Grid>
   );

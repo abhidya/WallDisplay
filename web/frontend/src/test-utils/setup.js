@@ -28,24 +28,35 @@ global.IntersectionObserver = class IntersectionObserver {
   unobserve() {}
 };
 
-// Suppress console errors during tests (optional)
+function isKnownTestWarning(value) {
+  return (
+    typeof value === 'string' &&
+    (value.includes('ReactDOMTestUtils.act') ||
+     value.includes('React Router Future Flag Warning'))
+  );
+}
+
+// Suppress known framework warnings during tests.
 const originalError = console.error;
+const originalWarn = console.warn;
 beforeAll(() => {
   console.error = (...args) => {
-    // Filter out known React warnings that are not relevant to tests
-    if (
-      typeof args[0] === 'string' &&
-      (args[0].includes('ReactDOMTestUtils.act') ||
-       args[0].includes('React Router Future Flag Warning'))
-    ) {
+    if (isKnownTestWarning(args[0])) {
       return;
     }
     originalError.call(console, ...args);
+  };
+  console.warn = (...args) => {
+    if (isKnownTestWarning(args[0])) {
+      return;
+    }
+    originalWarn.call(console, ...args);
   };
 });
 
 afterAll(() => {
   console.error = originalError;
+  console.warn = originalWarn;
 });
 
 // Clean up after each test

@@ -55,11 +55,9 @@ function ConfigurationManager({ open, onClose }) {
   const [deviceConfigs, setDeviceConfigs] = useState({});
   const [globalConfig, setGlobalConfig] = useState({});
   const [backends, setBackends] = useState({});
-  const [selectedDevice, setSelectedDevice] = useState(null);
   const [editingDevice, setEditingDevice] = useState(null);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
-  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -68,7 +66,6 @@ function ConfigurationManager({ open, onClose }) {
   }, [open]);
 
   const fetchConfigurations = async () => {
-    setLoading(true);
     try {
       const [deviceConfigsRes, globalConfigRes, backendsRes] = await Promise.all([
         discoveryV2Api.getDeviceConfigs(),
@@ -82,8 +79,6 @@ function ConfigurationManager({ open, onClose }) {
     } catch (err) {
       setError('Failed to fetch configurations');
       console.error(err);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -194,7 +189,7 @@ function ConfigurationManager({ open, onClose }) {
                   primary={name}
                   secondary={
                     <Box>
-                      <Typography variant="body2" color="textSecondary">
+                      <Typography variant="body2" color="text.secondary">
                         Type: {config.type} | Host: {config.hostname}
                         {config.port && ` | Port: ${config.port}`}
                       </Typography>
@@ -414,11 +409,11 @@ function ConfigurationManager({ open, onClose }) {
                   primary={name}
                   secondary={
                     <Box>
-                      <Typography variant="body2" color="textSecondary">
+                      <Typography variant="body2" color="text.secondary">
                         Status: {info.status} | Devices: {info.device_count}
                       </Typography>
                       {info.last_discovery && (
-                        <Typography variant="caption" color="textSecondary">
+                        <Typography variant="caption" color="text.secondary">
                           Last discovery: {new Date(info.last_discovery).toLocaleString()}
                         </Typography>
                       )}

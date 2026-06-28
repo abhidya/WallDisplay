@@ -1,6 +1,6 @@
 import { Pressable, StyleSheet, Text } from 'react-native';
 
-import { colors } from '../theme';
+import { colors, radii, spacing } from '../theme';
 
 interface ActionButtonProps {
   label: string;
@@ -18,8 +18,10 @@ export function ActionButton({
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={label}
       accessibilityState={{ disabled }}
       disabled={disabled}
+      hitSlop={6}
       onPress={onPress}
       style={({ pressed }) => [
         styles.button,
@@ -37,8 +39,10 @@ export function ActionButton({
 
 const styles = StyleSheet.create({
   button: {
-    borderRadius: 12,
-    paddingHorizontal: 14,
+    minHeight: 44,
+    justifyContent: 'center',
+    borderRadius: radii.sm,
+    paddingHorizontal: spacing.md,
     paddingVertical: 12,
     borderWidth: 1,
     borderColor: colors.border,
@@ -51,7 +55,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.elevatedPanel,
   },
   pressed: {
-    opacity: 0.85,
+    opacity: 0.82,
   },
   disabled: {
     opacity: 0.6,
@@ -63,6 +67,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   primaryLabel: {
-    color: '#07111a',
+    color: colors.onAccent,
   },
 });

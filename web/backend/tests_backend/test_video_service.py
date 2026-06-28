@@ -22,9 +22,25 @@ class _FakeStreamingService:
         return {"file_video": f"http://{serve_ip}:{port}/file_video"}, object()
 
 
+class _FakeSocket:
+    def connect(self, _address):
+        return None
+
+    def getsockname(self):
+        return ("10.0.0.63", 54321)
+
+    def close(self):
+        return None
+
+
+def _pin_local_network_ip(monkeypatch):
+    monkeypatch.setattr("web.backend.services.video_service.socket.socket", lambda *_args, **_kwargs: _FakeSocket())
+
+
 def test_stream_video_uses_twisted_start_server_port_kw(monkeypatch, tmp_path):
     video_path = tmp_path / "sample.mp4"
     video_path.write_bytes(b"fake mp4")
+    _pin_local_network_ip(monkeypatch)
 
     streaming_service = _FakeStreamingService()
     service = VideoService(db=None, streaming_service=streaming_service)
@@ -57,6 +73,7 @@ def test_stream_video_ignores_missing_subtitle_file(monkeypatch, tmp_path):
     video_path = tmp_path / "sample.mp4"
     video_path.write_bytes(b"fake mp4")
     missing_subtitle = tmp_path / "missing.srt"
+    _pin_local_network_ip(monkeypatch)
 
     streaming_service = _FakeStreamingService()
     service = VideoService(db=None, streaming_service=streaming_service)

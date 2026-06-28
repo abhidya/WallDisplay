@@ -1,11 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
-  Box,
   Button,
+  Chip,
   Checkbox,
   CircularProgress,
-  Divider,
   FormControlLabel,
   Grid,
   Paper,
@@ -26,6 +25,8 @@ import {
   PlayArrow as PlayIcon,
   Movie as MovieIcon
 } from '@mui/icons-material';
+import PageHeader from '../components/PageHeader';
+import StatusPanel from '../components/StatusPanel';
 import { deviceApi, videoApi } from '../services/api';
 
 function PlayVideo() {
@@ -45,11 +46,7 @@ function PlayVideo() {
     severity: 'success'
   });
 
-  useEffect(() => {
-    fetchData();
-  }, [id]);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       // Fetch device and videos in parallel
@@ -72,7 +69,11 @@ function PlayVideo() {
       setError('Failed to load data. Please try again later.');
       setLoading(false);
     }
-  };
+  }, [id]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
   const handlePlayVideo = async () => {
     try {
@@ -109,50 +110,67 @@ function PlayVideo() {
 
   if (loading) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-        <CircularProgress />
-      </Box>
+      <StatusPanel
+        icon={<CircularProgress size={24} />}
+        title="Loading Playback Target"
+        description="Loading the selected device and video library."
+      />
     );
   }
 
   if (error) {
     return (
-      <Box sx={{ p: 3 }}>
-        <Typography color="error" variant="h6">{error}</Typography>
-        <Button variant="contained" onClick={fetchData}>
-          Retry
-        </Button>
-      </Box>
+      <StatusPanel
+        severity="error"
+        title="Playback Target Unavailable"
+        description={error}
+        action={(
+          <Button variant="contained" onClick={fetchData}>
+            Retry
+          </Button>
+        )}
+      />
     );
   }
 
   if (!device) {
     return (
-      <Box sx={{ p: 3 }}>
-        <Typography variant="h6">Device not found</Typography>
-        <Button variant="contained" onClick={() => navigate('/devices')}>
-          Back to Devices
-        </Button>
-      </Box>
+      <StatusPanel
+        severity="error"
+        title="Device Not Found"
+        description="This playback target is not available."
+        action={(
+          <Button variant="contained" onClick={() => navigate('/devices')}>
+            Back to Devices
+          </Button>
+        )}
+      />
     );
   }
 
   return (
     <Grid container spacing={3}>
-      {/* Header */}
       <Grid item xs={12}>
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-          <Button
-            variant="outlined"
-            startIcon={<ArrowBackIcon />}
-            onClick={() => navigate(`/devices/${id}`)}
-            sx={{ mr: 2 }}
-          >
-            Back
-          </Button>
-          <Typography variant="h4">Play Video on {device.friendly_name || device.name}</Typography>
-        </Box>
-        <Divider sx={{ mb: 2 }} />
+        <PageHeader
+          title={`Play Video on ${device.friendly_name || device.name}`}
+          subtitle="Choose a media file and playback behavior for this display target."
+          meta={(
+            <>
+              <Chip label={device.status || 'unknown'} color={device.status === 'online' ? 'success' : 'default'} />
+              <Chip label={`${videos.length} videos`} variant="outlined" />
+              <Chip label={syncOverlays ? 'overlay sync on' : 'overlay sync off'} variant="outlined" />
+            </>
+          )}
+          actions={(
+            <Button
+              variant="outlined"
+              startIcon={<ArrowBackIcon />}
+              onClick={() => navigate(`/devices/${id}`)}
+            >
+              Back
+            </Button>
+          )}
+        />
       </Grid>
 
       {/* Play Video Form */}

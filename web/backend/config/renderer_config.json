@@ -29,13 +29,13 @@
   "renderers": {
     "chrome": {
       "path": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-      "args": ["--kiosk", "--disable-infobars", "--no-first-run"],
+      "args": ["--kiosk", "--disable-infobars", "--no-first-run", "--enable-gpu", "--ignore-gpu-blocklist"],
       "timeout": 30,
       "headless": true
     },
     "chrome-visible": {
       "path": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-      "args": ["--kiosk", "--disable-infobars", "--no-first-run", "--start-fullscreen"],
+      "args": ["--kiosk", "--disable-infobars", "--no-first-run", "--start-fullscreen", "--enable-gpu", "--ignore-gpu-blocklist"],
       "timeout": 30,
       "headless": false
     }

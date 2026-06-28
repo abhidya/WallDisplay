@@ -26,6 +26,7 @@ import {
   Devices as DevicesIcon,
   Movie as MovieIcon
 } from '@mui/icons-material';
+import PageHeader from '../components/PageHeader';
 import { deviceApi, videoApi } from '../services/api';
 
 export function isPlayableDeviceStatus(device) {
@@ -175,20 +176,27 @@ function PlayVideoOnDevice() {
 
   return (
     <Grid container spacing={3}>
-      {/* Header */}
       <Grid item xs={12}>
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-          <Button
-            variant="outlined"
-            startIcon={<ArrowBackIcon />}
-            onClick={() => navigate('/videos')}
-            sx={{ mr: 2 }}
-          >
-            Back
-          </Button>
-          <Typography variant="h4">Play "{video.name}"</Typography>
-        </Box>
-        <Divider sx={{ mb: 2 }} />
+        <PageHeader
+          title={`Play "${video.name}"`}
+          subtitle="Select an online display target and playback options for this video."
+          meta={(
+            <>
+              <Chip label={`${devices.length} playable devices`} color={devices.length ? 'success' : 'default'} />
+              <Chip label={selectedDevice ? 'target selected' : 'no target'} variant="outlined" />
+              <Chip label={syncOverlays ? 'overlay sync on' : 'overlay sync off'} variant="outlined" />
+            </>
+          )}
+          actions={(
+            <Button
+              variant="outlined"
+              startIcon={<ArrowBackIcon />}
+              onClick={() => navigate('/videos')}
+            >
+              Back
+            </Button>
+          )}
+        />
       </Grid>
 
       {/* Video Info */}
@@ -257,10 +265,10 @@ function PlayVideoOnDevice() {
                           {device.friendly_name}
                         </Typography>
                       </Box>
-                      <Typography variant="body2" color="textSecondary">
+                      <Typography variant="body2" color="text.secondary">
                         Type: {device.type}
                       </Typography>
-                      <Typography variant="body2" color="textSecondary">
+                      <Typography variant="body2" color="text.secondary">
                         {device.hostname}
                       </Typography>
                       {device.is_playing && (
