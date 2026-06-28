@@ -25,6 +25,7 @@ import Mappings from './pages/Mappings';
 import StreamingDiagnostics from './pages/StreamingDiagnostics';
 import StructuredLighting from './pages/StructuredLighting';
 import SceneControl from './pages/SceneControl';
+import MediaSources from './pages/MediaSources';
 
 const UI_PREFS_KEY = 'nanoDlnaUiPrefs';
 
@@ -231,6 +232,7 @@ function App() {
           <Route path="/videos/:id/play" element={<PlayVideoOnDevice />} />
           <Route path="/videos/add" element={<Videos />} />
           <Route path="/videos/scan" element={<Videos />} />
+          <Route path="/media-sources" element={<MediaSources />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/settings/load-config" element={<Settings />} />
           <Route path="/renderer" element={<Renderer />} />

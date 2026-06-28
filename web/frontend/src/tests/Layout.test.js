@@ -30,3 +30,17 @@ test('labels hidden experimental direct routes from the full route map', () => {
   expect(screen.getByText('Renderer')).toBeInTheDocument();
   expect(screen.queryByText('Not Found')).not.toBeInTheDocument();
 });
+
+
+test('labels media source route from navigation map', () => {
+  render(
+    <MemoryRouter initialEntries={['/media-sources']}>
+      <Layout>
+        <div>Media sources page</div>
+      </Layout>
+    </MemoryRouter>
+  );
+
+  expect(screen.getAllByText('Media Sources').length).toBeGreaterThan(0);
+  expect(screen.queryByText('Not Found')).not.toBeInTheDocument();
+});

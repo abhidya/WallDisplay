@@ -1,6 +1,10 @@
 import os
 from sqlalchemy import create_engine, MetaData, inspect
-from sqlalchemy.orm import sessionmaker, declarative_base
+try:
+    from sqlalchemy.orm import sessionmaker, declarative_base
+except ImportError:  # SQLAlchemy < 1.4
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.ext.declarative import declarative_base
 import logging
 
 logger = logging.getLogger(__name__)
@@ -236,6 +240,61 @@ def ensure_sqlite_schema_compatibility():
             )
             """
         )
+        connection.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS media_sources (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                provider VARCHAR NOT NULL UNIQUE,
+                display_name VARCHAR NOT NULL,
+                enabled BOOLEAN NOT NULL DEFAULT 1,
+                status VARCHAR NOT NULL DEFAULT 'idle',
+                item_count INTEGER NOT NULL DEFAULT 0,
+                last_refresh_at DATETIME,
+                last_success_at DATETIME,
+                last_error TEXT,
+                backoff_until DATETIME,
+                etag VARCHAR,
+                last_modified VARCHAR,
+                config JSON NOT NULL DEFAULT '{}',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME
+            )
+            """
+        )
+        connection.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS media_source_entries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                provider VARCHAR NOT NULL,
+                canonical_url VARCHAR NOT NULL,
+                title VARCHAR NOT NULL,
+                page_url VARCHAR NOT NULL,
+                thumbnail_url VARCHAR,
+                media_url VARCHAR,
+                category VARCHAR,
+                tags JSON NOT NULL DEFAULT '[]',
+                cache_key VARCHAR NOT NULL,
+                cache_status VARCHAR NOT NULL DEFAULT 'fresh',
+                import_status VARCHAR NOT NULL DEFAULT 'not_imported',
+                imported_video_id INTEGER,
+                http_etag VARCHAR,
+                http_last_modified VARCHAR,
+                failure_reason TEXT,
+                failed_at DATETIME,
+                next_retry_at DATETIME,
+                discovered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME,
+                last_checked_at DATETIME,
+                CONSTRAINT uq_media_source_provider_canonical_url UNIQUE (provider, canonical_url)
+            )
+            """
+        )
+        connection.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS idx_media_source_entries_provider ON media_source_entries(provider)"
+        )
+        connection.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS idx_media_source_entries_cache_key ON media_source_entries(cache_key)"
+        )
 
 def get_db():
     """
@@ -268,6 +327,7 @@ def init_db():
     from web.backend.models.media_channel import MediaChannel
     from web.backend.models.photo import PhotoModel
     from web.backend.models.photo_list import PhotoList
+    from web.backend.models.media_source import MediaSource, MediaSourceEntry
     
     # When running under pytest, skip the actual Base.metadata.create_all(bind=engine) call.
     # The test fixtures will handle creating tables on the temporary test database.

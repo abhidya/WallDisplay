@@ -53,6 +53,8 @@ try:
     from web.backend.models.media_channel import MediaChannel as _MediaChannel
     from web.backend.models.photo import PhotoModel as _PhotoModel
     from web.backend.models.photo_list import PhotoList as _PhotoList
+    from web.backend.models.media_source import MediaSource as _MediaSource
+    from web.backend.models.media_source import MediaSourceEntry as _MediaSourceEntry
     
     print(f"INFO: web/backend/tests_backend/conftest.py: Models re-registered successfully")
 except Exception as e:

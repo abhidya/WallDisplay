@@ -36,6 +36,7 @@ The runtime is transitional: the legacy `DeviceManager` loop is still active by 
 | `/videos/:id/play` | Play on selected device |
 | `/videos/add` | Add videos |
 | `/videos/scan` | Scan directories |
+| `/media-sources` | Cached public media sources |
 | `/photos` | Photo library |
 | `/settings` | Config and settings |
 | `/settings/load-config` | Load device config |
@@ -334,6 +335,7 @@ Loaded by `scripts/common_env.sh`, defaults shown:
 | projection_router | `/api/projection` | Mapping configs, zones, animations |
 | mapping_router | `/api/mappings` | Mapping scenes, ranks, presets, masks |
 | media_library_router | `/api/media-library` | Directories, lists, channels |
+| media_source_router | `/api/media-sources` | Cached DesktopHut source browse, refresh, import |
 | structured_lighting_router | `/api/structured-lighting` | Calibration sessions, capture, decode, review |
 | depth_router | `/api/depth` | Depth maps, segmentation, masks |
 | diagnostics_router | `/api/diagnostics` | Service health, incidents |
@@ -394,7 +396,58 @@ tail -f logs/frontend.stderr.log
 
 SQLite via SQLAlchemy ORM. Default location: `web/backend/nanodlna.db`.
 
-Key tables: `devices`, `videos`, `photos`, `overlay_configs`, `mapping_scenes`, `scene_control_presets`, `scene_rank`, `media_directories`, `media_lists`, `media_channels`, `photo_lists`, `projection_configs`.
+Key tables: `devices`, `videos`, `photos`, `overlay_configs`, `mapping_scenes`, `scene_control_presets`, `scene_rank`, `media_directories`, `media_lists`, `media_channels`, `photo_lists`, `media_sources`, `media_source_entries`, `projection_configs`.
+
+## DesktopHut Media Source
+
+The dashboard includes a cached DesktopHut source at `/media-sources`. It discovers public DesktopHut page URLs from `https://www.desktophut.com/sitemap.xml`, respects `robots.txt`, stores metadata in SQLite, and lets an operator explicitly import selected entries into the existing video library.
+
+No new environment variables are required. Source defaults live in the `media_sources.config` row: sitemap URL, robots URL, request delay, and descriptive User-Agent. Use the dashboard refresh button to populate or update the cache.
+
+Cached data:
+
+- provider, canonical URL, page URL, title, thumbnail URL, optional public media URL
+- category/tags when visible in the public page metadata
+- discovered, updated, last-checked, failure, and retry timestamps
+- HTTP cache metadata: ETag and Last-Modified where returned
+- import status plus imported `videos.id` when imported
+
+Refresh behavior:
+
+- fetches the sitemap with conditional requests after first success
+- deduplicates URLs before fetching pages
+- reuses cached fresh page metadata unless forced
+- backs off after HTTP 403, 429, and 5xx responses
+- caches failed page fetches temporarily so broken URLs are not retried immediately
+- never brute-forces URLs or bypasses authentication, paywalls, anti-bot controls, or hidden APIs
+
+Import behavior:
+
+- imports only after the user selects an entry
+- requires a public media URL found in public page metadata
+- stores the selected media under `web/backend/uploads/desktophut/`
+- creates the library row through the existing `VideoService`
+- avoids duplicate imports by tracking the imported video id and checking existing paths
+
+Legal and robots note: robots allowance controls crawl politeness only. It is not a copyright license. Do not redistribute DesktopHut content through WallDisplay unless you have rights to do so.
+
+Troubleshooting:
+
+- Empty cache: open `/media-sources` and click refresh; check `last_error` if DesktopHut is unavailable.
+- Import disabled: the public page did not expose a usable media URL.
+- Backoff shown: wait until the displayed backoff time before refreshing again.
+- Duplicate import: already-imported entries show `Imported` and keep their linked video id.
+
+Focused test commands:
+
+```bash
+cd web/backend
+python -m pytest tests_backend/test_mcp_desktophut.py
+
+cd web/frontend
+npm test -- --watchAll=false src/tests/Layout.test.js
+npm run build
+```
 
 ## Logs
 

@@ -259,6 +259,14 @@ const mediaLibraryApi = {
   deleteMediaChannel: (id) => api.delete(`/media-library/channels/${id}`),
 };
 
+const mediaSourceApi = {
+  listSources: () => api.get('/media-sources'),
+  getDesktopHutStatus: () => api.get('/media-sources/desktophut/status'),
+  refreshDesktopHut: (params = {}) => api.post('/media-sources/desktophut/refresh', null, { params }),
+  browseDesktopHut: (params = {}) => api.get('/media-sources/desktophut/entries', { params }),
+  importDesktopHutEntry: (entryId) => api.post(`/media-sources/desktophut/entries/${entryId}/import`),
+};
+
 const photoListApi = {
   listPhotoLists: () => api.get('/photo-lists/'),
   createPhotoList: (data) => api.post('/photo-lists/', data),
@@ -301,6 +309,8 @@ const rendererApi = {
     api.post(`/renderer/projectors/${projectorId}/target`, { target_name: targetName }),
   startProjectorMode: (projectorId, mode, options = {}) =>
     api.post(`/renderer/projectors/${projectorId}/mode`, { mode, options }),
+  startProjectorUrl: (projectorId, payload) =>
+    api.post(`/renderer/projectors/${projectorId}/url`, payload),
   identifyProjector: (projectorId) =>
     api.post(`/renderer/projectors/${projectorId}/identify`),
   setProjectorPowerState: (projectorId, powerState) =>
@@ -388,6 +398,7 @@ export {
   depthApi, 
   streamingApi, 
   diagnosticsApi,
+  mediaSourceApi,
   settingsApi,
   discoveryV2Api,
   overlayApi,

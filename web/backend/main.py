@@ -27,6 +27,7 @@ from web.backend.routers.projection_router import router as projection_router
 from web.backend.routers.log_router import router as log_router
 from web.backend.routers.mapping_router import router as mapping_router
 from web.backend.routers.media_library_router import router as media_library_router
+from web.backend.routers.media_source_router import router as media_source_router
 from web.backend.routers.structured_lighting_router import router as structured_lighting_router
 from web.backend.routers.widget_router import router as widget_router
 from web.backend.routers.diagnostics_router import router as diagnostics_router
@@ -298,6 +299,7 @@ app.include_router(overlay_router)  # Overlay router already has /api prefix
 app.include_router(projection_router)  # Projection router already has /api prefix
 app.include_router(mapping_router)
 app.include_router(media_library_router)
+app.include_router(media_source_router)
 app.include_router(widget_router)
 app.include_router(structured_lighting_router)
 app.include_router(log_router)  # Log streaming router
